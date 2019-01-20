@@ -21,8 +21,25 @@ No h units anywhere
 
 TODO: copy member functions like Duffy concentration to independent
 barebones functions in separate script/library
+TODO: nmz = dN/dM/dV
+so check \int nmz dm dV
+where \int dV = \int dz 4pi fsky chi^2 / H(z)
 
 FIXME: profiles are in physical coordinates, need to convert k to comoving
+FIXME: FFT dr size needed depends strongly on 
+mass of clusters (as decided based on whether uk->1 on large scales, 
+needs to be adaptive)
+This is the hard part about a halo model code. The calculation spans
+a very large dynamic range in masses and physical scales. So profiles
+need to be sampled adequately but over a large range of scales. This
+means one cannot vectorize the FFT over profiles. One has to loop
+over each m,z combination which maps to a specific rvir. Then one
+has to sample the profile over (0,ntimes*rvir) adequately, FFT it,
+then interpolate the result onto the desired k range.
+
+Known issues:
+1. The 1-halo term will add some power at the largest scales. No damping has been
+implemented.
 
 """
 
@@ -61,16 +78,17 @@ class HaloCosmology(object):
     def __init__(self,zs,ks,params={},ms=None,mass_function="sheth-torman"):
         self.p = params
         self.mode = mass_function
+        self.nzm = None
         for param in default_params.keys():
             if param not in self.p.keys(): self.p[param] = default_params[param]
+        self.zs = zs
+        self.ks = ks
         self._init_cosmology(self.p)
         self.fineks = np.geomspace(1e-4,20.,1000) # ks for sigma2 integral FIXME: hard coded
         self.sPzk = self._get_linear_matter_power(zs,self.fineks) # power for sigma2 integral
         self.Pzk = self._get_linear_matter_power(zs,ks)
-        self.zs = zs
-        self.ks = ks
-        self.rhom0 = self._rho_matter_z0()
-        print(self.rhom0/1e10)
+        self.rhom0 = self.rho_matter_z(z=0)
+        self.uk_profiles = {}
         if ms is not None: self.initialize_mass_function(ms)
     
     def _init_cosmology(self,params):
@@ -94,6 +112,10 @@ class HaloCosmology(object):
         self.results = camb.get_background(self.pars)
         self.params = params
         self.h = self.params['H0']/100.
+        omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
+        self.om0 = omh2 / (self.params['H0']/100.)**2.
+        self.chis = self.results.comoving_radial_distance(self.zs)
+        self.Hzs = self.results.hubble_parameter(self.zs)
 
         
     def _get_linear_matter_power(self,zs,ks):
@@ -102,14 +124,19 @@ class HaloCosmology(object):
                                                      zmax=zs.max()+1.) # FIXME: neutrinos
         return PK.P(zs, ks, grid=True)
 
-    def _rho_matter_z0(self):
-        omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
-        om = omh2 / (self.params['H0']/100.)**2.
-        H0 = self.params['H0'] * 3.241e-20 # SI # FIXME: constants need checking
+        
+    def rho_critical_z(self,z):
+        Hz = self.results.hubble_parameter(z) * 3.241e-20 # SI # FIXME: constants need checking
         G = 6.67259e-11 # SI
-        rho_critical_z0 = 3.*(H0**2.)/8./np.pi/G # SI
-        return rho_critical_z0 * om * 1.477543e37 # in msolar / megaparsec3 
+        rho = 3.*(Hz**2.)/8./np.pi/G # SI
+        return rho * 1.477543e37 # in msolar / megaparsec3
     
+    def rho_matter_z(self,z): return self.rho_critical_z(0.) * self.om0 * (1+z)**3. # in msolar / megaparsec3
+    def omz(self,z): return self.rho_matter_z(z)/self.rho_critical_z(z)
+    def deltav(self,z): return 178. * self.omz(z)**(0.45)
+    def rvir(self,m,z):
+        # FIXME: This is different from Moritz/Matt halomodel.py who have rhoc(0)(1+z)^3 in the denominator
+        return ((3.*m/4./np.pi)/self.deltav(z)/self.rho_critical_z(z))**(1./3.)
     def R_of_m(self,ms): return (3.*ms/4./np.pi/self.rhom0)**(1./3.)
     
     def get_sigma2(self,ms):
@@ -164,16 +191,52 @@ class HaloCosmology(object):
         fsigmaz = self.get_fsigmaz(ms,sigma2)
         dln_sigma_dlnm = np.gradient(ln_sigma_inv,np.log(ms),axis=-1)  # FIXME: this is probably wrong
         ms = ms[None,:]
+        self.ms = ms
         return self.rhom0 * fsigmaz * dln_sigma_dlnm / ms**2.
 
-    def add_nfw_profile(self,name): pass
-    
-    def add_profile(self,name,rs,rhos):
-        iks,iuk = fft_integral(rs,rhos)
-        ks = self.ks
-        uk = interp1d(iks,iuk,bounds_error=False,fill_value=(iuk[0],0.))(self.ks)
-
-        #TODO: Add compulsory debug plot here
+    def add_nfw_profile(self,name,ms,nxs=40000, xmax=100):
+        """
+        xmax should be thought of in "concentration units", i.e.,
+        for a cluster with concentration 3., xmax of 100 is probably overkill
+        since the integrals are zero for x>3. However, since we are doing
+        a single FFT over all profiles, we need to choose a single xmax.
+        xmax of 100 is very safe for m~1e9 msolar, but xmax of 200-300
+        will be needed down to m~1e2 msolar.
+        nxs is the number of samples from 0 to xmax of rho_nfw(x). Might need
+        to be increased from default if xmax is increased and/or going down
+        to lower halo masses.
+        xmax decides accuracy on large scales
+        nxs decides accuracy on small scales
+        
+        """
+        cs = self.concentration(ms)
+        rvirs = self.rvir(ms[None,:],self.zs[:,None])
+        rss = (rvirs/cs)[...,None]
+        xs = np.linspace(0.,xmax,nxs+1)[1:]
+        rhoscale = 1
+        rhos = rho_nfw_x(xs,rhoscale)[None,None] + cs[...,None]*0.
+        theta = np.ones(rhos.shape)
+        theta[np.abs(xs)>cs[...,None]] = 0 # CHECK
+        # m
+        integrand = theta * rhos * xs**2.
+        m = np.trapz(integrand,xs)
+        # u(kt)
+        integrand = rhos*theta
+        kts,ukts = fft_integral(xs,integrand)
+        uk = ukts/kts[None,None,:]/m[...,None]
+        ks = kts/rss/(1.+self.zs[...,None,None]) # divide by (1+z) here for comoving FIXME: check this!
+        ukouts = np.zeros((uk.shape[0],uk.shape[1],self.ks.size))
+        # sadly at this point we must loop to interpolate :(
+        for i in range(uk.shape[0]):
+            for j in range(uk.shape[1]):
+                pks = ks[i,j]
+                puks = uk[i,j]
+                puks = puks[pks>0]
+                pks = pks[pks>0]
+                ukouts[i,j] = np.interp(self.ks,pks,puks,left=puks[0],right=0)
+                #TODO: Add compulsory debug plot here
+        self.uk_profiles[name] = ukouts.copy()
+        return self.ks,ukouts
         
 
     def get_power_1halo_cross_galaxies(self,name="matter"):
@@ -182,10 +245,17 @@ class HaloCosmology(object):
         pass
 
     def get_power_1halo_auto(self,name="matter"):
-        pass
+        ms = self.ms[...,None]
+        integrand = self.nzm[...,None] * ms**2. * self.uk_profiles[name]**2. /self.rho_matter_z(0.)**2.
+        return np.trapz(integrand,ms,axis=-2)
+    
     def get_power_2halo_auto(self,name="matter"):
-        pass
-
+        ms = self.ms[...,None]
+        integrand = self.nzm[...,None] * ms * self.uk_profiles[name] /self.rho_matter_z(0.) * self.bh[...,None]
+        integral = np.trapz(integrand,ms,axis=-2)
+        return self.Pzk * integral**2.
+        
+    
     def get_power_1halo_galaxy_auto(self):
         pass
     def get_power_2halo_galaxy_auto(self):
@@ -249,10 +319,12 @@ def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None):
 Profiles
 """
 
+def rho_nfw_x(x,rhoscale):
+    return rhoscale/x/(1.+x)**2.
 
-def rho_nfw(r,rhos,rs):
+def rho_nfw(r,rhoscale,rs):
     rrs = r/rs
-    return rhos/rrs/(1.+rrs)**2. 
+    return rho_nfw_x(rrs,rhoscale)
 
 
 """
@@ -260,15 +332,16 @@ FFT routines
 """
 
 def uk_fft(rhofunc,rvir,dr=0.001,rmax=100):
+    rvir = np.asarray(rvir)
     rps = np.arange(dr,rmax,dr)
     rs = rps
-    theta = np.ones(rs.shape)
-    theta[np.abs(rs)>rvir] = 0
     rhos = rhofunc(np.abs(rs))
+    theta = np.ones(rhos.shape)
+    theta[np.abs(rs)>rvir[...,None]] = 0 # CHECK
     integrand = rhos * theta
-    m = np.trapz(integrand*rs**2.,rs)*4.*np.pi
+    m = np.trapz(integrand*rs**2.,rs,axis=-1)*4.*np.pi
     ks,ukt = fft_integral(rs,integrand)
-    uk = 4.*np.pi*ukt/ks/m
+    uk = 4.*np.pi*ukt/ks/m[...,None]
     return ks,uk
     
 
@@ -294,6 +367,7 @@ def fft_integral(x,y,axis=-1):
     sqrt(pi/2) exp(-k**2/2) k
     which this function can be checked against.
     """
+    assert x.ndim==1
     extent = x[-1]-x[0]
     N = x.size
     step = extent/N
