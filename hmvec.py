@@ -19,6 +19,10 @@ All rho densities are in Msolar/Mpc^3
 All masses m are in Msolar
 No h units anywhere
 
+TODO: copy member functions like Duffy concentration to independent
+barebones functions in separate script/library
+
+FIXME: profiles are in physical coordinates, need to convert k to comoving
 
 """
 
@@ -27,6 +31,10 @@ default_params = {
     'st_a': 0.75,
     'st_p': 0.3,
     'st_deltac': 1.686,
+    'duffy_A':7.85,
+    'duffy_alpha':-0.081,
+    'duffy_beta':-0.71,
+    
     
     'omch2': 0.1198,
     'ombh2': 0.02225,
@@ -47,6 +55,7 @@ def Wkr(k,R):
     kR = k*R
     return 3.*(np.sin(kR)-kR*np.cos(kR))/(kR**3.)
 
+def duffy_concentration(m,z,A,alpha,beta,h): return A*((h*m/2e12)**alpha)*(1+z)**beta
     
 class HaloCosmology(object):
     def __init__(self,zs,ks,params={},ms=None,mass_function="sheth-torman"):
@@ -84,6 +93,7 @@ class HaloCosmology(object):
         self.pars.NonLinear = model.NonLinear_none # always use linear matter
         self.results = camb.get_background(self.pars)
         self.params = params
+        self.h = self.params['H0']/100.
 
         
     def _get_linear_matter_power(self,zs,ks):
@@ -139,6 +149,15 @@ class HaloCosmology(object):
         else:
             raise NotImplementedError
 
+    def concentration(self,ms,mode='duffy'):
+        if mode=='duffy':
+            A = self.p['duffy_A']
+            alpha = self.p['duffy_alpha']
+            beta = self.p['duffy_beta']
+            return duffy_concentration(ms[None,:],self.zs[:,None],A,alpha,beta,self.h)
+        else:
+            raise NotImplementedError
+
     def get_nzm(self,ms,sigma2=None):
         if sigma2 is None: sigma2 = self.get_sigma2(ms)
         ln_sigma_inv = -0.5*np.log(sigma2)
@@ -147,6 +166,8 @@ class HaloCosmology(object):
         ms = ms[None,:]
         return self.rhom0 * fsigmaz * dln_sigma_dlnm / ms**2.
 
+    def add_nfw_profile(self,name): pass
+    
     def add_profile(self,name,rs,rhos):
         iks,iuk = fft_integral(rs,rhos)
         ks = self.ks
