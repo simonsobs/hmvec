@@ -68,6 +68,14 @@ default_params = {
     }
 
 
+tunable_params = {
+    'sigma2_kmin':1e-4,
+    'sigma2_kmax':20.,
+    'sigma2_numks':1000,
+    }
+    
+
+
 def Wkr(k,R):
     kR = k*R
     return 3.*(np.sin(kR)-kR*np.cos(kR))/(kR**3.)
@@ -84,8 +92,11 @@ class HaloCosmology(object):
         self.zs = zs
         self.ks = ks
         self._init_cosmology(self.p)
-        self.fineks = np.geomspace(1e-4,20.,1000) # ks for sigma2 integral FIXME: hard coded
-        self.sPzk = self._get_linear_matter_power(zs,self.fineks) # power for sigma2 integral
+        kmin = tunable_params['sigma2_kmin']
+        kmax = tunable_params['sigma2_kmax']
+        numks = tunable_params['sigma2_numks']
+        self.ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
+        self.sPzk = self._get_linear_matter_power(zs,self.ks_sigma2) # power for sigma2 integral
         self.Pzk = self._get_linear_matter_power(zs,ks)
         self.rhom0 = self.rho_matter_z(z=0)
         self.uk_profiles = {}
@@ -140,7 +151,7 @@ class HaloCosmology(object):
     def R_of_m(self,ms): return (3.*ms/4./np.pi/self.rhom0)**(1./3.)
     
     def get_sigma2(self,ms):
-        ks = self.fineks[None,:]
+        ks = self.ks_sigma2[None,:]
         R = self.R_of_m(ms)[:,None]
         W2 = Wkr(ks,R)**2.
         Ps = self.sPzk[:,None,:]
@@ -260,7 +271,20 @@ class HaloCosmology(object):
         pass
     def get_power_2halo_galaxy_auto(self):
         pass
-    
+
+
+"""
+Mass function
+"""
+
+# def sigma2(ms,ks,R,Ps):
+#     ks = self.ks_sigma2[None,:]
+#     R = self.R_of_m(ms)[:,None]
+#     W2 = Wkr(ks,R)**2.
+#     Ps = self.sPzk[:,None,:]
+#     integrand = Ps*W2*ks**2./2./np.pi**2.
+#     return np.trapz(integrand,ks,axis=-1)
+
 
 """
 HOD
