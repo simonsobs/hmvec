@@ -127,20 +127,45 @@ def test_fft_transform():
 
 def test_pmm():
 
-    zs = np.linspace(0.1,3.,4)
-    ms = np.geomspace(2e2,1e17,400)
+    # import halomodel as mmhm
+    # from orphics import cosmology
+    # cc = cosmology.Cosmology(hm.default_params,skipCls=True,low_acc=True)
+    # mmhmod = mmhm.HaloModel(cc)
+    
+    
+    zs = np.linspace(0.01,3.,2)
+    ms = np.geomspace(1e8,1e16,400)
     ks = np.geomspace(1e-4,100,1001)
+
+
+    # mmP2h = mmhmod.P_mm_2h(ks,zs)#,logmlow=log10mlow,logmhigh=log10mhigh)[z_id,:]
+    # print(mmhmod.halobias[:,0])
+    
+    #print(mmP2h.shape)
+    
+    
     hcos = hm.HaloCosmology(zs,ks,ms=ms)
+
+
+    # pl = io.Plotter(xyscale='loglog')
+    # pl.add(10**mmhmod.logm,mmhmod.halobias[:,1])
+    # pl.add(ms,hcos.bh[1,:])
+    # pl.done()
+    
+    
     with bench.show("nfw"):
         _,ouks = hcos.add_nfw_profile("matter",ms)
     pmm_1h = hcos.get_power_1halo_auto(name="matter")
     pmm_2h = hcos.get_power_2halo_auto(name="matter")
+    # sys.exit()
     print(pmm_1h.shape)
     pl = io.Plotter(xyscale='loglog')
     for i in range(zs.size):
         # pl.add(ks,pmm_1h[i],label="z=%.1f" % zs[i])
         pl.add(ks,pmm_2h[i],label="z=%.1f" % zs[i],ls="--",color="C%d" % i)
-        pl.add(ks,pmm_2h[i]+pmm_1h[i],ls="-",color="C%d" % i)
+        #pl.add(ks,pmm_2h[i]+pmm_1h[i],ls="-",color="C%d" % i)
+        pl.add(ks,hcos.Pzk[i],ls="-.",color="k")
+        # pl.add(ks,mmP2h[i],ls="-",color="C%d" % i)
     pl.done()
     
 #test_fft_transform()    

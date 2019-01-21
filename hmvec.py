@@ -9,6 +9,8 @@ import numpy as np
 
 General vectorized FFT-based halo model implementation
 Author(s): Mathew Madhavacheril
+Credits: Some of the HOD functions are copied from Matt Johnson and Moritz
+Munchmeyer's implementation.
 
 Array indexing is as follows:
 [z,M,k/r]
@@ -21,21 +23,9 @@ No h units anywhere
 
 TODO: copy member functions like Duffy concentration to independent
 barebones functions in separate script/library
-TODO: nmz = dN/dM/dV
-so check \int nmz dm dV
-where \int dV = \int dz 4pi fsky chi^2 / H(z)
 
-FIXME: profiles are in physical coordinates, need to convert k to comoving
-FIXME: FFT dr size needed depends strongly on 
-mass of clusters (as decided based on whether uk->1 on large scales, 
-needs to be adaptive)
-This is the hard part about a halo model code. The calculation spans
-a very large dynamic range in masses and physical scales. So profiles
-need to be sampled adequately but over a large range of scales. This
-means one cannot vectorize the FFT over profiles. One has to loop
-over each m,z combination which maps to a specific rvir. Then one
-has to sample the profile over (0,ntimes*rvir) adequately, FFT it,
-then interpolate the result onto the desired k range.
+FIXME: the profile integrals have ranges and sampling that depend on 
+how low in mass one goes.
 
 Known issues:
 1. The 1-halo term will add some power at the largest scales. No damping has been
@@ -45,7 +35,7 @@ implemented.
 
 default_params = {
     'st_A': 0.3222,
-    'st_a': 0.75,
+    'st_a': 0.707,
     'st_p': 0.3,
     'st_deltac': 1.686,
     'duffy_A':7.85,
@@ -69,10 +59,11 @@ default_params = {
 
 
 tunable_params = {
-    'sigma2_kmin':1e-4,
-    'sigma2_kmax':20.,
-    'sigma2_numks':1000,
-    }
+    'sigma2_kmin':1e-5,
+    'sigma2_kmax':40.,
+    'sigma2_numks':10000,
+    'nfw_integral_default_numxs':40000,
+    'nfw_integral_default_xmax':100,    }
     
 
 
@@ -147,6 +138,7 @@ class HaloCosmology(object):
     def deltav(self,z): return 178. * self.omz(z)**(0.45)
     def rvir(self,m,z):
         # FIXME: This is different from Moritz/Matt halomodel.py who have rhoc(0)(1+z)^3 in the denominator
+        # FIXME: According to Matt's original notebook, it should not be rhoc(z), but rhom(z)
         return ((3.*m/4./np.pi)/self.deltav(z)/self.rho_critical_z(z))**(1./3.)
     def R_of_m(self,ms): return (3.*ms/4./np.pi/self.rhom0)**(1./3.)
     
@@ -205,7 +197,9 @@ class HaloCosmology(object):
         self.ms = ms
         return self.rhom0 * fsigmaz * dln_sigma_dlnm / ms**2.
 
-    def add_nfw_profile(self,name,ms,nxs=40000, xmax=100):
+    def add_nfw_profile(self,name,ms,
+                        nxs=tunable_params['nfw_integral_default_numxs'],
+                        xmax=tunable_params['nfw_integral_default_xmax']):
         """
         xmax should be thought of in "concentration units", i.e.,
         for a cluster with concentration 3., xmax of 100 is probably overkill
@@ -224,17 +218,17 @@ class HaloCosmology(object):
         rvirs = self.rvir(ms[None,:],self.zs[:,None])
         rss = (rvirs/cs)[...,None]
         xs = np.linspace(0.,xmax,nxs+1)[1:]
-        rhoscale = 1
+        rhoscale = 1 # makes rho off by norm, see below
         rhos = rho_nfw_x(xs,rhoscale)[None,None] + cs[...,None]*0.
         theta = np.ones(rhos.shape)
         theta[np.abs(xs)>cs[...,None]] = 0 # CHECK
         # m
         integrand = theta * rhos * xs**2.
-        m = np.trapz(integrand,xs)
+        mnorm = np.trapz(integrand,xs) # mass but off by norm same as rho is off by
         # u(kt)
         integrand = rhos*theta
         kts,ukts = fft_integral(xs,integrand)
-        uk = ukts/kts[None,None,:]/m[...,None]
+        uk = ukts/kts[None,None,:]/mnorm[...,None]
         ks = kts/rss/(1.+self.zs[...,None,None]) # divide by (1+z) here for comoving FIXME: check this!
         ukouts = np.zeros((uk.shape[0],uk.shape[1],self.ks.size))
         # sadly at this point we must loop to interpolate :(
@@ -264,6 +258,12 @@ class HaloCosmology(object):
         ms = self.ms[...,None]
         integrand = self.nzm[...,None] * ms * self.uk_profiles[name] /self.rho_matter_z(0.) * self.bh[...,None]
         integral = np.trapz(integrand,ms,axis=-2)
+
+        # consistency relation : According to Matt's notebook, this has to be divided out
+        integrand2 = self.nzm[...,None] * ms /self.rho_matter_z(0.) * self.bh[...,None]
+        integral2 = np.trapz(integrand2,ms,axis=-2)
+        print(integral2)
+        
         return self.Pzk * integral**2.
         
     
@@ -350,6 +350,7 @@ def rho_nfw(r,rhoscale,rs):
     rrs = r/rs
     return rho_nfw_x(rrs,rhoscale)
 
+# def rho_gas(r,R200,M200,z,omega_b,omega_m,rho_critical_z,)
 
 """
 FFT routines
