@@ -129,7 +129,7 @@ def test_fft_transform():
 
 def test_pmm():
 
-    matt = True
+    matt = False # set to False if you don't have Matt and Moritz's halomodel.py for comparison
 
     if matt:
         import halomodel as mmhm

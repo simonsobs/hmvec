@@ -219,9 +219,6 @@ class HaloCosmology(object):
             A = self.p['duffy_A_mean']
             alpha = self.p['duffy_alpha_mean']
             beta = self.p['duffy_beta_mean']
-            # A = self.p['duffy_A_vir']
-            # alpha = self.p['duffy_alpha_vir']
-            # beta = self.p['duffy_beta_vir']
             return duffy_concentration(ms[None,:],self.zs[:,None],A,alpha,beta,self.h)
         else:
             raise NotImplementedError
@@ -312,13 +309,6 @@ class HaloCosmology(object):
 Mass function
 """
 
-# def sigma2(ms,ks,R,Ps):
-#     ks = self.ks_sigma2[None,:]
-#     R = self.R_of_m(ms)[:,None]
-#     W2 = Wkr(ks,R)**2.
-#     Ps = self.sPzk[:,None,:]
-#     integrand = Ps*W2*ks**2./2./np.pi**2.
-#     return np.trapz(integrand,ks,axis=-1)
 
 
 """
@@ -438,14 +428,3 @@ def fft_integral(x,y,axis=-1):
     
 def analytic_fft_integral(ks): return np.sqrt(np.pi/2.)*np.exp(-ks**2./2.)*ks
 
-# from orphics import io
-# ks = np.geomspace(1e-4,1000,1000)
-# hc = HaloCosmology(np.array([0.]),ks)
-# P = hc.Pzk[0,:]
-# Rs = [0.1,1e-2,1e-3,1e-4,1e-6]
-# pl = io.Plotter(xyscale='loglog')
-# for R in Rs:
-#     W = P*ks**2.*Wkr(ks,R)**2.
-#     pl.add(ks,W,label=str(R))
-# pl.done()
-# sys.exit()
