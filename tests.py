@@ -129,18 +129,19 @@ def test_fft_transform():
 
 def test_pmm():
 
-    matt = False # set to False if you don't have Matt and Moritz's halomodel.py for comparison
+    matt = True # set to False if you don't have Matt and Moritz's halomodel.py for comparison
 
     if matt:
         import halomodel as mmhm
         from orphics import cosmology
-        cc = cosmology.Cosmology(hm.default_params,skipCls=True,low_acc=True)
+        cc = cosmology.Cosmology(hm.default_params,skipCls=True,low_acc=False)
         mmhmod = mmhm.HaloModel(cc)
     
     
-    zs = np.array([0.,2.,3.])
-    ms = np.geomspace(1e4,1e17,2000)
-    ks = np.geomspace(1e-4,100,1001)
+    zs = np.array([0.,1.,2.,3.])
+    ms = np.geomspace(1e2,1e18,3000)
+    #ks = np.geomspace(1e-4,100,1001)
+    ks = np.geomspace(1e-5,100,10000)
 
 
     if matt: mmP = mmhmod.P_mm_2h(ks,zs) + mmhmod.P_mm_1h(ks,zs)#,logmlow=log10mlow,logmhigh=log10mhigh)[z_id,:]
@@ -149,8 +150,32 @@ def test_pmm():
     #print(mmP2h.shape)
     
     
-    hcos = hm.HaloCosmology(zs,ks,ms=ms,mass_function="sheth-torman")
+    hcos = hm.HaloCosmology(zs,ks,ms=ms,mass_function="sheth-torman",halofit='takahashi')
 
+    mmhb = mmhmod.halobias #np.load("mm_halobias.npy",)
+    mmnfn = mmhmod.nfn #np.load("mm_nfn.npy")
+
+    # pl = io.Plotter(xyscale='loglin')
+    # for i in range(zs.size):
+    #     pl.add(ks,(hcos.nPzk[i]-mmhmod.pknl[i])/hcos.nPzk[i])
+    #     pl.add(ks,(hcos.Pzk[i]-mmhmod.pk[i])/hcos.Pzk[i])
+    # pl.hline(y=0)
+    # pl.done()
+    
+    
+
+    # pl = io.Plotter(xyscale='loglog')
+    # for i in range(3):
+    #     pl.add(ms,hcos.nzm[i,:],color="C%d" % i)
+    #     pl.add(ms,mmnfn[:,i],ls='--',color="C%d" % i)
+    # pl.done()
+    # pl = io.Plotter(xyscale='loglog')
+    # for i in range(3):
+    #     pl.add(ms,hcos.bh[i,:],color="C%d" % i)
+    #     pl.add(ms,mmhb[:,i],ls='--',color="C%d" % i)
+    # pl.done()
+        
+    
 
     # pl = io.Plotter(xyscale='loglog')
     # pl.add(10**mmhmod.logm,mmhmod.halobias[:,1])
@@ -163,15 +188,26 @@ def test_pmm():
     pmm_2h = hcos.get_power_2halo_auto(name="matter")
     # sys.exit()
     print(pmm_1h.shape)
-    pl = io.Plotter(xyscale='loglog')
     for i in range(zs.size):
+        pl = io.Plotter(xyscale='loglog',xlabel='$k$',ylabel='$P$')
         pl.add(ks,pmm_1h[i],label="z=%.1f" % zs[i],color="C%d" % i,ls="--",alpha=0.2)
         # pl.add(ks,pmm_2h[i],label="z=%.1f" % zs[i],ls="--",color="C%d" % i)
         pl.add(ks,pmm_2h[i]+pmm_1h[i],ls="--",color="C%d" % i)
-        pl.add(ks,hcos.nPzk[i],ls="-",color="C%d" % i)
+        pl.add(ks,hcos.nPzk[i],ls="-",color="k",alpha=0.7)
         if matt: pl.add(ks,mmP[i],ls="-.",color="C%d" % i)
-    pl._ax.set_ylim(1e-1,1e5)
-    pl.done()
+        pl._ax.set_ylim(1e-1,1e5)
+        pl.done("nonlincomp_z_%d.png" % i)
+
+    for i in range(zs.size):
+        pl = io.Plotter(xyscale='loglin',xlabel='$k$',ylabel='$P/P_{\\mathrm{NL}}$')
+        pl.add(ks,(pmm_2h[i]+pmm_1h[i])/hcos.nPzk[i],ls="-",color="C%d" % i)
+        if matt: pl.add(ks,mmP[i]/hcos.nPzk[i],ls="--",color="C%d" % i)
+        pl.hline(y=1)
+        pl.hline(y=0.9)
+        pl.hline(y=1.1)
+        pl._ax.set_ylim(0.5,1.5)
+        pl.done("nonlindiff_z_%d.png" % i)
+    
     
 #test_massfn()
 #test_fft_transform()    

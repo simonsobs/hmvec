@@ -2,9 +2,10 @@ import numpy as np
 from scipy.special import erf
 from scipy.interpolate import interp1d
 import camb
-from camb import model
+from camb import model,nonlinear
 import numpy as np
 import tinker
+import scipy
 
 """
 
@@ -29,15 +30,14 @@ FIXME: the profile integrals have ranges and sampling that depend on
 how low in mass one goes.
 
 Known issues:
-1. The 1-halo term will add some power at the largest scales. No damping has been
-implemented.
+1. The 1-halo term will add some power at the largest scales. A softening term
+has been added that effectively zeros the 1-halo term below k<0.01.
 2. sigma2 becomes very innacurate for low masses, because lower masses require higher
 k in the linear matter power. For this reason, low-mass halos
 are never accounted for correctly, and thus consistency relations do not hold.
-Currently the consistency relation is divided out like Matt does. 
-3. The mass function does not integrate to give a reasonable number of clusters
-of high mass.
-4. Higher redshifts have less than expected 1-halo power. Matt's implementation
+Currently the consistency relation is divided out (like Matt does) to get the 2-halo
+power to agree with Plin at large scales.
+3. Higher redshifts have less than expected 1-halo power. Matt's implementation
 has power comparable to non-linear halofit.
 5. Accuracy of sigma2 is very important for small scale 1-halo at high redshifts
 
@@ -59,6 +59,7 @@ default_params = {
     'duffy_A_mean':10.14, # for M200rhomeanz
     'duffy_alpha_mean':-0.081,
     'duffy_beta_mean':-1.01,
+    # 'kstar_damping':0.00001,
     'kstar_damping':0.01,
     
     
@@ -79,10 +80,12 @@ default_params = {
 
 tunable_params = {
     'sigma2_kmin':1e-4,
-    'sigma2_kmax':1000.,
-    'sigma2_numks':20000,
-    'nfw_integral_default_numxs':20000,
-    'nfw_integral_default_xmax':100,
+    'sigma2_kmax':100.,
+    'sigma2_numks':30000,
+    'nfw_integral_default_numxs':30000,
+    'nfw_integral_default_xmax':200,
+    'Wkr_taylor_switch':0.01,
+    #'Wkr_taylor_switch':0.1,
 }
     
 
@@ -90,7 +93,7 @@ def Wkr_taylor(kR):
     xx = kR*kR
     return 1 - .1*xx + .00357142857143*xx*xx
 
-def Wkr(k,R,taylor_switch=0.1):
+def Wkr(k,R,taylor_switch=tunable_params['Wkr_taylor_switch']):
     kR = k*R
     ans = 3.*(np.sin(kR)-kR*np.cos(kR))/(kR**3.)
     ans[kR<taylor_switch] = Wkr_taylor(kR[kR<taylor_switch]) 
@@ -99,7 +102,7 @@ def Wkr(k,R,taylor_switch=0.1):
 def duffy_concentration(m,z,A,alpha,beta,h): return A*((h*m/2.e12)**alpha)*(1+z)**beta
     
 class HaloCosmology(object):
-    def __init__(self,zs,ks,params={},ms=None,mass_function="tinker"):
+    def __init__(self,zs,ks,params={},ms=None,mass_function="tinker",halofit="original"):
         self.p = params
         self.mode = mass_function
         self.nzm = None
@@ -107,20 +110,21 @@ class HaloCosmology(object):
             if param not in self.p.keys(): self.p[param] = default_params[param]
         self.zs = np.asarray(zs)
         self.ks = ks
-        self._init_cosmology(self.p)
-        kmin = tunable_params['sigma2_kmin']
-        kmax = tunable_params['sigma2_kmax']
-        numks = tunable_params['sigma2_numks']
-        self.ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
-        from enlib import bench
-        with bench.show("spzk"):
-            self.sPzk = self._get_matter_power(self.zs,self.ks_sigma2,nonlinear=False) # power for sigma2 integral
+        self._init_cosmology(self.p,halofit)
         self.Pzk = self._get_matter_power(self.zs,ks,nonlinear=False)
         self.nPzk = self._get_matter_power(self.zs,ks,nonlinear=True)
         self.uk_profiles = {}
-        if ms is not None: self.initialize_mass_function(ms)
+        if ms is not None:
+            kmin = tunable_params['sigma2_kmin']
+            kmax = tunable_params['sigma2_kmax']
+            numks = tunable_params['sigma2_numks']
+            self.ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
+            from enlib import bench
+            with bench.show("spzk"):
+                self.sPzk = self._get_matter_power(self.zs,self.ks_sigma2,nonlinear=False) # power for sigma2 integral
+            self.initialize_mass_function(ms)
     
-    def _init_cosmology(self,params):
+    def _init_cosmology(self,params,halofit):
         try:
             theta = params['theta100']/100.
             H0 = None
@@ -130,6 +134,7 @@ class HaloCosmology(object):
             theta = None
         
         self.pars = camb.CAMBparams()
+        self.pars.InitPower.set_params(ns=params['ns'],As=params['As'])
         self.pars.set_cosmology(H0=H0, cosmomc_theta=theta,ombh2=params['ombh2'], omch2=params['omch2'], mnu=params['mnu'], tau=params['tau'],nnu=params['nnu'],num_massive_neutrinos=params['num_massive_neutrinos'])
         try:
             self.pars.set_dark_energy(w=params['w0'],wa=params['wa'],dark_energy_model='ppf')
@@ -137,7 +142,9 @@ class HaloCosmology(object):
             assert np.abs(params['wa'])<1e-3, "Non-zero wa requires PPF, which requires devel version of pycamb to be installed."
             print("WARNING: Could not use PPF dark energy model with pycamb. Falling back to non-PPF. Please install the devel branch of pycamb.")
             self.pars.set_dark_energy(w=params['w0'])
-        self.pars.NonLinear = model.NonLinear_none # always use linear matter
+        self.pars.NonLinear = model.NonLinear_both
+        self.pars.NonLinearModel.set_params(halofit_version=halofit)
+        self.pars.set_accuracy(AccuracyBoost=4.0, lSampleBoost=4.0, lAccuracyBoost=4.0)
         self.results = camb.get_background(self.pars)
         self.params = params
         self.h = self.params['H0']/100.
@@ -149,8 +156,8 @@ class HaloCosmology(object):
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
         PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
-                                                     hubble_units=False, k_hunit=False, kmax=ks.max()+1.,
-                                                     zmax=zs.max()+1.) # FIXME: neutrinos
+                                                     hubble_units=False, k_hunit=False, kmax=ks.max(),#+1., # !!!!
+                                                     zmax=zs.max()) #+1.) # FIXME: neutrinos !!!
         return PK.P(zs, ks, grid=True)
 
         
@@ -165,8 +172,8 @@ class HaloCosmology(object):
     def deltav(self,z): return 178. * self.omz(z)**(0.45)
     def rvir(self,m,z):
         # rvir has now been changed to R200rhomean(z)
-        # return ((3.*m/4./np.pi)/self.deltav(z)/self.rho_critical_z(z))**(1./3.)
-        return ((3.*m/4./np.pi)/200./self.rho_matter_z(z))**(1./3.)
+        #return ((3.*m/4./np.pi)/200./self.rho_matter_z(z))**(1./3.)
+        return ((3.*m/4./np.pi)/self.deltav(z)/self.rho_critical_z(z))**(1./3.)
     
     def R_of_m(self,ms): return (3.*ms/4./np.pi/self.rho_matter_z(0))**(1./3.) # note rhom0
     
@@ -216,9 +223,12 @@ class HaloCosmology(object):
 
     def concentration(self,ms,mode='duffy'):
         if mode=='duffy':
-            A = self.p['duffy_A_mean']
-            alpha = self.p['duffy_alpha_mean']
-            beta = self.p['duffy_beta_mean']
+            # A = self.p['duffy_A_mean']
+            # alpha = self.p['duffy_alpha_mean']
+            # beta = self.p['duffy_beta_mean']
+            A = self.p['duffy_A_vir']
+            alpha = self.p['duffy_alpha_vir']
+            beta = self.p['duffy_beta_vir']
             return duffy_concentration(ms[None,:],self.zs[:,None],A,alpha,beta,self.h)
         else:
             raise NotImplementedError
@@ -252,30 +262,39 @@ class HaloCosmology(object):
         cs = self.concentration(ms)
         rvirs = self.rvir(ms[None,:],self.zs[:,None])
         rss = (rvirs/cs)[...,None]
-        xs = np.linspace(0.,xmax,nxs+1)[1:]
-        rhoscale = 1 # makes rho off by norm, see below
-        rhos = rho_nfw_x(xs,rhoscale)[None,None] + cs[...,None]*0.
-        theta = np.ones(rhos.shape)
-        theta[np.abs(xs)>cs[...,None]] = 0 # CHECK
-        # m
-        integrand = theta * rhos * xs**2.
-        mnorm = np.trapz(integrand,xs) # mass but off by norm same as rho is off by
-        # u(kt)
-        integrand = rhos*theta
-        kts,ukts = fft_integral(xs,integrand)
-        uk = ukts/kts[None,None,:]/mnorm[...,None]
-        ks = kts/rss/(1+self.zs[:,None,None]) # divide k by (1+z) here for comoving FIXME: check this!
-        ukouts = np.zeros((uk.shape[0],uk.shape[1],self.ks.size))
-        # sadly at this point we must loop to interpolate :(
-        for i in range(uk.shape[0]):
-            for j in range(uk.shape[1]):
-                pks = ks[i,j]
-                puks = uk[i,j]
-                puks = puks[pks>0]
-                pks = pks[pks>0]
-                ukouts[i,j] = np.interp(self.ks,pks,puks,left=puks[0],right=0)
-                #TODO: Add compulsory debug plot here
+        # xs = np.linspace(0.,xmax,nxs+1)[1:]
+        # rhoscale = 1 # makes rho off by norm, see below
+        # rhos = rho_nfw_x(xs,rhoscale)[None,None] + cs[...,None]*0.
+        # theta = np.ones(rhos.shape)
+        # theta[np.abs(xs)>cs[...,None]] = 0 # CHECK
+        # # m
+        # integrand = theta * rhos * xs**2.
+        # mnorm = np.trapz(integrand,xs) # mass but off by norm same as rho is off by
+        # # u(kt)
+        # integrand = rhos*theta
+        # kts,ukts = fft_integral(xs,integrand)
+        # uk = ukts/kts[None,None,:]/mnorm[...,None]
+        # ks = kts/rss/(1+self.zs[:,None,None]) # divide k by (1+z) here for comoving FIXME: check this!
+        # ukouts = np.zeros((uk.shape[0],uk.shape[1],self.ks.size))
+        # # sadly at this point we must loop to interpolate :(
+        # for i in range(uk.shape[0]):
+        #     for j in range(uk.shape[1]):
+        #         pks = ks[i,j]
+        #         puks = uk[i,j]
+        #         puks = puks[pks>0]
+        #         pks = pks[pks>0]
+        #         ukouts[i,j] = np.interp(self.ks,pks,puks,left=puks[0],right=0)
+        #         #TODO: Add compulsory debug plot here
+        # self.uk_profiles[name] = ukouts.copy()
+
+        cs = cs[...,None]
+        mc = np.log(1+cs)-cs/(1.+cs)
+        x = self.ks[None,None]*rss*(1+self.zs[:,None,None])
+        Si, Ci = scipy.special.sici(x)
+        Sic, Cic = scipy.special.sici((1.+cs)*x)
+        ukouts = (np.sin(x)*(Sic-Si) - np.sin(cs*x)/((1+cs)*x) + np.cos(x)*(Cic-Ci))/mc
         self.uk_profiles[name] = ukouts.copy()
+        
         return self.ks,ukouts
         
 
@@ -296,6 +315,7 @@ class HaloCosmology(object):
         # consistency relation : Divide out part that's missing from low-mass halos to get P(k->0) = Plinear
         consistency_integrand = self.nzm[...,None] * ms /self.rho_matter_z(0) * self.bh[...,None]
         consistency = np.trapz(consistency_integrand,ms,axis=-2)
+        print("Two-halo consistency: " , consistency)
         return self.Pzk * integral**2. / consistency**2.
         
     
