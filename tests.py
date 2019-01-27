@@ -138,8 +138,9 @@ def test_pmm():
         mmhmod = mmhm.HaloModel(cc)
     
     
-    zs = np.array([0.,1.,2.,3.])
-    ms = np.geomspace(1e2,1e18,3000)
+    zs = np.array([0.,1.,2.])#,1.,2.,3.])
+    #zs = np.array([0.,2.,4.,6.])
+    ms = np.geomspace(1e0,1e18,4000)
     #ks = np.geomspace(1e-4,100,1001)
     ks = np.geomspace(1e-5,100,10000)
 
@@ -150,7 +151,7 @@ def test_pmm():
     #print(mmP2h.shape)
     
     
-    hcos = hm.HaloCosmology(zs,ks,ms=ms,mass_function="sheth-torman",halofit='takahashi')
+    hcos = hm.HaloCosmology(zs,ks,ms=ms,mass_function="sheth-torman",halofit='original')
 
     mmhb = mmhmod.halobias #np.load("mm_halobias.npy",)
     mmnfn = mmhmod.nfn #np.load("mm_nfn.npy")
@@ -208,6 +209,15 @@ def test_pmm():
         pl._ax.set_ylim(0.5,1.5)
         pl.done("nonlindiff_z_%d.png" % i)
     
+    for i in range(zs.size):
+        pl = io.Plotter(xyscale='loglin',xlabel='$k$',ylabel='$P/P_{\\mathrm{L}}$')
+        pl.add(ks,(pmm_2h[i]+pmm_1h[i])/hcos.Pzk[i],ls="-",color="C%d" % i)
+        if matt: pl.add(ks,mmP[i]/hcos.Pzk[i],ls="--",color="C%d" % i)
+        pl.hline(y=1)
+        # pl.hline(y=0.9)
+        # pl.hline(y=1.1)
+        # pl._ax.set_ylim(0.5,1.5)
+        pl.done("lindiff_z_%d.png" % i)
     
 #test_massfn()
 #test_fft_transform()    
