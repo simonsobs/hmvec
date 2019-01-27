@@ -46,6 +46,7 @@ has power comparable to non-linear halofit.
 2. not a c(M,z) issue (tried Bhatt vs Duffy)
 3. not a sigma2 accuracy issue? Using high k Eisenstein
 4. ahhh this might be because the correction to the 2-halo term is additive not multiplicative!!!
+5. mass functions all disagree
 
 Limitations:
 1. Only 200 * rho_mean(z) is supported except for gas profiles defined with rho_crit(z)
@@ -127,6 +128,7 @@ class HaloCosmology(object):
             self.ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
             self.sPzk = self.P_lin(self.ks_sigma2,self.zs)
             self.initialize_mass_function(ms)
+            
     
     def _init_cosmology(self,params,halofit):
         try:
@@ -137,7 +139,7 @@ class HaloCosmology(object):
             H0 = params['H0']
             theta = None
         
-        self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0, cosmomc_theta=theta,ombh2=params['ombh2'], omch2=params['omch2'], mnu=params['mnu'], tau=params['tau'],nnu=params['nnu'],num_massive_neutrinos=params['num_massive_neutrinos'],w=params['w0'],wa=params['wa'],dark_energy_model='ppf',halofit_version=halofit,AccuracyBoost=2) # !!
+        self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0, cosmomc_theta=theta,ombh2=params['ombh2'], omch2=params['omch2'], mnu=params['mnu'], tau=params['tau'],nnu=params['nnu'],num_massive_neutrinos=params['num_massive_neutrinos'],w=params['w0'],wa=params['wa'],dark_energy_model='ppf',halofit_version=halofit,AccuracyBoost=2,kmax=1) # !!
         self.results = camb.get_background(self.pars)
         self.params = params
         self.h = self.params['H0']/100.
@@ -145,7 +147,6 @@ class HaloCosmology(object):
         self.om0 = omh2 / (self.params['H0']/100.)**2.
         self.chis = self.results.comoving_radial_distance(self.zs)
         self.Hzs = self.results.hubble_parameter(self.zs)
-        self.results.calc_transfers(self.pars)
 
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
@@ -186,8 +187,8 @@ class HaloCosmology(object):
         # for i in range(self.zs.size): pl.add(ks[0,-1],integrand[i,-1],label=str(self.zs[i]))
         # pl.done()
         from scipy.integrate import simps
-        #return np.trapz(integrand,ks,axis=-1)
-        return simps(integrand,ks,axis=-1)
+        sigma2 = simps(integrand,ks,axis=-1)
+        return sigma2
         
 
     def initialize_mass_function(self,ms):
@@ -245,7 +246,7 @@ class HaloCosmology(object):
         dln_sigma_dlnm = np.gradient(ln_sigma_inv,np.log(ms),axis=-1)
         ms = ms[None,:]
         self.ms = ms
-        return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2.
+        return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2. 
 
     def a2z(self,a):
         return (1.0/a)-1.0
@@ -345,11 +346,11 @@ class HaloCosmology(object):
         ms = self.ms[...,None]
         integrand = self.nzm[...,None] * ms * self.uk_profiles[name] /self.rho_matter_z(0) * self.bh[...,None]
         integral = np.trapz(integrand,ms,axis=-2)
-        # consistency relation : Divide out part that's missing from low-mass halos to get P(k->0) = Plinear
+        # consistency relation : Correct for part that's missing from low-mass halos to get P(k->0) = Plinear
         consistency_integrand = self.nzm[...,None] * ms /self.rho_matter_z(0) * self.bh[...,None]
         consistency = np.trapz(consistency_integrand,ms,axis=-2)
         print("Two-halo consistency: " , consistency)
-        return self.Pzk * integral**2. / consistency**2.
+        return self.Pzk * (integral+1-consistency)**2. 
         
     
     def get_power_1halo_galaxy_auto(self):
@@ -413,7 +414,7 @@ class HaloCosmology(object):
         self._k_silk = 1.6 * pow(w_b, 0.52) * pow(w_m, 0.73) * \
             (1.0 + pow(10.4*w_m, -0.95)) / self.h
 
-        Omega_m = (self.params['omch2']+self.params['ombh2']) / self.h**2.
+        Omega_m = self.om0
         fb = self.params['ombh2'] / (self.params['omch2']+self.params['ombh2']) # self.Omega_b / self.Omega_m
         fc = self.params['omch2'] / (self.params['omch2']+self.params['ombh2']) # self.params['ombh2'] #(self.Omega_m - self.Omega_b) / self.Omega_m
         alpha_gamma = 1.-0.328*np.log(431.*w_m)*w_b/w_m + \

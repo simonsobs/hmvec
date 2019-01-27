@@ -71,8 +71,13 @@ def test_cosmology():
 
 def test_massfn():
 
-    zs = np.linspace(0.1,2.,40)
-    ms = np.geomspace(2e14,1e16,100)
+    from szar import counts
+    
+    import hmf
+    from cluster_toolkit import massfunction
+
+    zs = np.linspace(0.,3.,20)
+    ms = np.geomspace(1e14,1e17,200)
 
     ks = np.geomspace(1e-3,10,101)
 
@@ -80,24 +85,48 @@ def test_massfn():
     with bench.show("init"):
         hcos = hm.HaloCosmology(zs,ks,ms=ms,mass_function="tinker")
 
+    dndM_ct2 = np.zeros((zs.size,ms.size))
+    for i,z in enumerate(zs):
+        h = hmf.MassFunction(z=z,Mmin=np.log10(ms.min()*hcos.h),Mmax=np.log10(ms.max()*hcos.h))
+        if i==0: dndM_ct = np.zeros((zs.size,h.dndm.size))
+        dndM_ct[i,:] = h.dndm.copy()
+        dndM_ct2[i,:] = massfunction.dndM_at_M(ms*hcos.h, hcos.ks_sigma2/hcos.h, hcos.sPzk[i]*hcos.h**3, hcos.om0)
+        
+
+    fsky = 0.4
+
+    hmf = counts.Halo_MF(counts.ClusterCosmology(hcos.params,skipCls=True),np.log10(ms),zs)
+    nz_szar = hmf.N_of_z()*fsky
+    print(nz_szar,nz_szar.shape)
+    # sys.exit()
+        
     print(hcos.nzm.shape,hcos.bh.shape)
     bh = hcos.bh
     nzm = hcos.nzm
 
-    ims,ins = np.loadtxt("data/tinker2008Fig5.txt",unpack=True,delimiter=',')
-    pl = io.Plotter(xyscale='linlin')
-    pl.add(ims,ins,ls="--")
-    pl.add(np.log10(ms*hcos.h),np.log10(nzm[0,:]*ms**2./hcos.rho_matter_z(0.)))
-    pl.done()
+    # ims,ins = np.loadtxt("data/tinker2008Fig5.txt",unpack=True,delimiter=',')
+    # pl = io.Plotter(xyscale='linlin')
+    # pl.add(ims,ins,ls="--")
+    # pl.add(np.log10(ms*hcos.h),np.log10(nzm[0,:]*ms**2./hcos.rho_matter_z(0.)))
+    # pl.done()
 
-    fsky = 0.4
-    cSpeedKmPerSec = 299792.458
-    nz = np.trapz(nzm,ms,axis=-1)*4.*np.pi*hcos.chis**2./hcos.Hzs*fsky * cSpeedKmPerSec 
-    print(nz.shape)
+    chis = hcos.results.angular_diameter_distance(hcos.zs) * (1+hcos.zs)
+    nz = np.trapz(nzm,ms,axis=-1)*4.*np.pi*chis**2./hcos.results.h_of_z(hcos.zs)*fsky 
+    nz_ct = np.trapz(dndM_ct,h.m,axis=-1)*4.*np.pi*chis**2./hcos.results.h_of_z(hcos.zs)*fsky  * hcos.h**3.
+    nz_ct2 = np.trapz(dndM_ct2,ms,axis=-1)*4.*np.pi*chis**2./hcos.results.h_of_z(hcos.zs)*fsky * hcos.h**3.
     pl = io.Plotter()
-    pl.add(zs,nz)
+    pl.add(zs,nz,label='hmvec')
+    pl.add(hmf.zarr,nz_szar,ls='--',label='szar')
+    pl.add(zs,nz_ct,ls='-.',label='hmf')
+    pl.add(zs,nz_ct2,ls='-.',label='ct')
     pl.done()
     n = np.trapz(nz,zs)
+    print(n)
+    n = np.trapz(nz_szar,hmf.zarr)
+    print(n)
+    n = np.trapz(nz_ct,zs)
+    print(n)
+    n = np.trapz(nz_ct2,zs)
     print(n)
 
 def test_fft_transform():
@@ -140,7 +169,7 @@ def test_pmm():
     
     zs = np.array([0.,1.,2.])#,1.,2.,3.])
     #zs = np.array([0.,2.,4.,6.])
-    ms = np.geomspace(1e0,1e18,4000)
+    ms = np.geomspace(1e7,1e17,2000)
     #ks = np.geomspace(1e-4,100,1001)
     ks = np.geomspace(1e-5,100,10000)
 
@@ -219,8 +248,8 @@ def test_pmm():
         # pl._ax.set_ylim(0.5,1.5)
         pl.done("lindiff_z_%d.png" % i)
     
-#test_massfn()
+test_massfn()
 #test_fft_transform()    
-test_pmm()    
+#test_pmm()    
 # test_fft_integral()
 #test_cosmology()
