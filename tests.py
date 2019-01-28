@@ -275,21 +275,25 @@ def test_battaglia():
 
 def test_mcon():
 
-    zs = np.linspace(0.,1.,10)
+    zs = np.linspace(0.,1.,30)
     ks = np.geomspace(1e-4,1,10)
     hcos = hmvec.HaloCosmology(zs,ks,params = {'sigma2_numks':100}, skip_nfw=True)
 
-    ms = np.geomspace(1e13,1e15,100)
+    ms = np.geomspace(1e13,1e15,1000)
     cs = hmvec.duffy_concentration(ms[None,:],zs[:,None])
 
     rho1s = hcos.rho_matter_z(zs)
     rho2s = hcos.rho_critical_z(zs)
 
-    mcritzs = hmvec.mdelta_from_mdelta(ms,cs,rho1s,200.,rho2s,200.)
+    with bench.show("vectorized"):
+        mcritzs0 = hmvec.mdelta_from_mdelta(ms,cs,rho1s,200.,rho2s,200.,vectorized=True)
+    with bench.show("unvectorized"):
+        mcritzs1 = hmvec.mdelta_from_mdelta(ms,cs,rho1s,200.,rho2s,200.,vectorized=False)
 
     from orphics import io
     io.plot_img(np.log10(ms[None]+cs*0.),flip=False)
-    io.plot_img(np.log10(mcritzs),flip=False)
+    io.plot_img(np.log10(mcritzs0),flip=False)
+    io.plot_img((mcritzs0-mcritzs1)/mcritzs0,flip=False)
 
     
 test_mcon()

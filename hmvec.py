@@ -615,16 +615,19 @@ def rho_nfw_x(x,rhoscale): return rhoscale/x/(1.+x)**2.
 
 def rho_nfw(r,rhoscale,rs): return rho_nfw_x(r/rs,rhoscale)
 
-def mdelta_from_mdelta(M1,C1,rho1s,delta1,rho2s,delta2,vectorized=False):
+def mdelta_from_mdelta(M1,C1,rho1s,delta1,rho2s,delta2,vectorized=True):
     """
-    Converts M1(m) to M2(m).
-    Needs concentrations C1(z,m).
-    Cosmic densities rho1s(z).
-    Cosmic densities rho2s(z).
-    Overdensity delta1 and delta2.
+    Fast/vectorized mass definition conversion
+
+    Converts M1(m) to M2(z,m).
+    Needs concentrations C1(z,m),
+    cosmic densities rho1s(z),
+    cosmic densities rho2s(z),
+    overdensities delta1 and delta2.
+
+    The vectorized version is several orders of magnitude faster.
     """
     if vectorized:
-        M1in = M1.copy()
         M1 = M1[None,:]+C1*0.
         M2outs =  mdelta_from_mdelta_unvectorized(M1.copy(),C1,rho1s[:,None],delta1,rho2s[:,None],delta2)
     else:
@@ -636,16 +639,34 @@ def mdelta_from_mdelta(M1,C1,rho1s,delta1,rho2s,delta2,vectorized=False):
 
     
 def mdelta_from_mdelta_unvectorized(M1,C1,rho1s,delta1,rho2s,delta2):
-    C2 = lambda M2: C1*((M2/M1)*(delta1/delta2)*(rho1s/rho2s))**(1./3.)
-    F2 = lambda M2: 1./Fcon(C2(M2))
+    """
+    Implements mdelta_from_mdelta.
+    The logMass is necessary for numerical stability.
+    I thought I calculated the right derivative, but using it leads to wrong
+    answers, so the secant method is used instead of Newton's method.
+    In principle, both the first and second derivatives can be calculated
+    analytically.
+
+    The conversion is done by assuming NFW and solving the equation
+    M1 F1 - M2 F2 = 0
+    where F(conc) = 1 / (log(1+c) - c/(1+c))
+    This equation is obtained when rhoscale is equated between the two mass
+    definitions, where rhoscale = F(c) * m /(4pi rs**3) is the amplitude
+    of the NFW profile. The scale radii are also the same. Equating
+    the scale radii also provides
+    C2 = ((M2/M1) * (delta1/delta2) * (rho1/rho2)) ** (1/3) C1
+    which reduces the system to one unknown M2.
+    """
+    C2 = lambda logM2: C1*((np.exp(logM2-np.log(M1)))*(delta1/delta2)*(rho1s/rho2s))**(1./3.)
+    F2 = lambda logM2: 1./Fcon(C2(logM2))
     F1 = 1./Fcon(C1)
     # the function whose roots to find
-    func = lambda M2: M1*F1 - M2*F2(M2)
+    func = lambda logM2: M1*F1 - np.exp(logM2)*F2(logM2)
+    from scipy.optimize import newton
     # its analytical derivative
-    #jaco = lambda M2: -F2(M2) + (C2(M2)/(1.+C2(M2)))**2. * C2(M2)/3. * F2(M2)**2.
-    from scipy.optimize import fsolve as newton
-    M2outs = newton(func,M1)#,fprime=jaco) # FIXME: jacobian doesn't work
-    return M2outs
+    #jaco = lambda logM2: -F2(logM2) + (C2(logM2)/(1.+C2(logM2)))**2. * C2(logM2)/3. * F2(logM2)**2.
+    M2outs = newton(func,np.log(M1))#,fprime=jaco) # FIXME: jacobian doesn't work
+    return np.exp(M2outs)
 
 def battaglia_gas_fit(m200critz,z,A0x,alphamx,alphazx):
     # Any factors of h in M?
