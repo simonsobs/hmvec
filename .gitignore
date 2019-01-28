@@ -1,0 +1,9 @@
+*.png
+*.npz
+*.npy
+halomodel.py
+*.txt
+kszBispectrum.py
+kszSignal.py
+specs.ini
+commented.py
