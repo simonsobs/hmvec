@@ -6,6 +6,7 @@ from camb import model,nonlinear
 import numpy as np
 import tinker
 import scipy
+from scipy.integrate import simps
 
 """
 
@@ -56,20 +57,51 @@ where the necessary conversion is done
 """
 
 default_params = {
+    
+    # Mass function
     'st_A': 0.3222,
     'st_a': 0.707,
     'st_p': 0.3,
     'st_deltac': 1.686,
+    'sigma2_kmin':1e-4,
+    'sigma2_kmax':2000,
+    'sigma2_numks':6000,
+    'Wkr_taylor_switch':0.01,
+
+    # Profiles
     'duffy_A_vir':7.85, # for Mvir
     'duffy_alpha_vir':-0.081,
     'duffy_beta_vir':-0.71,
     'duffy_A_mean':10.14, # for M200rhomeanz
     'duffy_alpha_mean':-0.081,
     'duffy_beta_mean':-1.01,
-    # 'kstar_damping':0.00001,
+    'nfw_integral_numxs':30000,
+    'nfw_integral_xmax':200,
+    'battaglia_gas_gamma':-0.2,
+    'battaglia_gas_AGN_rho0_A0':4000.,
+    'battaglia_gas_AGN_rho0_alpham':0.29,
+    'battaglia_gas_AGN_rho0_alphaz':-0.66,
+    'battaglia_gas_AGN_alpha_A0':0.88,
+    'battaglia_gas_AGN_alpha_alpham':-0.03,
+    'battaglia_gas_AGN_alpha_alphaz':0.19,
+    'battaglia_gas_AGN_beta_A0':3.83,
+    'battaglia_gas_AGN_beta_alpham':0.04,
+    'battaglia_gas_AGN_beta_alphaz':-0.025,
+    'battaglia_gas_SH_rho0_A0':19000.,
+    'battaglia_gas_SH_rho0_alpham':0.09,
+    'battaglia_gas_SH_rho0_alphaz':-0.95,
+    'battaglia_gas_SH_alpha_A0':0.70,
+    'battaglia_gas_SH_alpha_alpham':-0.017,
+    'battaglia_gas_SH_alpha_alphaz':0.27,
+    'battaglia_gas_SH_beta_A0':4.43,
+    'battaglia_gas_SH_beta_alpham':0.005,
+    'battaglia_gas_SH_beta_alphaz':0.037,
+
+    # Power spectra
     'kstar_damping':0.01,
+    'default_halofit':'takahashi',
     
-    
+    # Cosmology
     'omch2': 0.1198,
     'ombh2': 0.02225,
     'H0': 67.3,
@@ -81,18 +113,7 @@ default_params = {
     'nnu':3.046,
     'wa': 0.,
     'num_massive_neutrinos':3,
-                        
-    }
 
-
-tunable_params = {
-    'sigma2_kmin':1e-4,
-    'sigma2_kmax':1000,
-    'sigma2_numks':4000,
-    'nfw_integral_default_numxs':30000,
-    'nfw_integral_default_xmax':200,
-    'Wkr_taylor_switch':0.01,
-    #'Wkr_taylor_switch':0.1,
 }
     
 
@@ -100,36 +121,58 @@ def Wkr_taylor(kR):
     xx = kR*kR
     return 1 - .1*xx + .00357142857143*xx*xx
 
-def Wkr(k,R,taylor_switch=tunable_params['Wkr_taylor_switch']):
+def Wkr(k,R,taylor_switch=default_params['Wkr_taylor_switch']):
     kR = k*R
     ans = 3.*(np.sin(kR)-kR*np.cos(kR))/(kR**3.)
     ans[kR<taylor_switch] = Wkr_taylor(kR[kR<taylor_switch]) 
     return ans
 
-def duffy_concentration(m,z,A,alpha,beta,h): return A*((h*m/2.e12)**alpha)*(1+z)**beta
+def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
+    A = default_params['duffy_A_mean'] if A is None else A
+    alpha = default_params['duffy_alpha_mean'] if alpha is None else alpha
+    beta = default_params['duffy_beta_mean'] if beta is None else beta
+    h = default_params['H0'] / 100. if h is None else h
+    return A*((h*m/2.e12)**alpha)*(1+z)**beta
     
 class HaloCosmology(object):
-    def __init__(self,zs,ks,params={},ms=None,mass_function="tinker",halofit="original"):
+    def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
+                 halofit=None,mdef='mean',nfw_numeric=False,skip_nfw=False):
+        self.mdef = mdef
         self.p = params
         self.mode = mass_function
-        self.nzm = None
         for param in default_params.keys():
             if param not in self.p.keys(): self.p[param] = default_params[param]
         self.zs = np.asarray(zs)
         self.ks = ks
+        self.ms = ms
+        
+        # Cosmology
         self._init_cosmology(self.p,halofit)
-        self.Pzk = self._get_matter_power(self.zs,ks,nonlinear=False)
-        self.nPzk = self._get_matter_power(self.zs,ks,nonlinear=True)
+
+        # Mass function
+        if ms is not None: self.init_mass_function(ms)
+        
+        # Profiles
         self.uk_profiles = {}
-        if ms is not None:
-            kmin = tunable_params['sigma2_kmin']
-            kmax = tunable_params['sigma2_kmax']
-            numks = tunable_params['sigma2_numks']
-            self.ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
-            self.sPzk = self.P_lin(self.ks_sigma2,self.zs)
-            self.initialize_mass_function(ms)
-            
-    
+        if not(skip_nfw): self.add_nfw_profile("nfw",numeric=nfw_numeric)
+                    
+
+    def update_param(self,param,value,halofit=None):
+        cosmo_params = ['omch2','ombh2','H0','ns','As','mnu','w0','tau','nnu','wa','num_massive_neutrinos']
+        self.p[param] = value
+        if param in cosmo_params:
+            self._init_cosmology(self.p,halofit)
+            self._init_mass_function()
+            # update profiles
+            pass
+        elif param in profile_params:
+            # update profiles
+            pass
+        elif param in mass_function_params:
+            self._init_mass_function()
+        else:
+            raise ValueError
+        
     def _init_cosmology(self,params,halofit):
         try:
             theta = params['theta100']/100.
@@ -139,7 +182,16 @@ class HaloCosmology(object):
             H0 = params['H0']
             theta = None
         
-        self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0, cosmomc_theta=theta,ombh2=params['ombh2'], omch2=params['omch2'], mnu=params['mnu'], tau=params['tau'],nnu=params['nnu'],num_massive_neutrinos=params['num_massive_neutrinos'],w=params['w0'],wa=params['wa'],dark_energy_model='ppf',halofit_version=halofit,AccuracyBoost=2,kmax=1) # !!
+        self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
+                                    cosmomc_theta=theta,ombh2=params['ombh2'],
+                                    omch2=params['omch2'], mnu=params['mnu'],
+                                    tau=params['tau'],nnu=params['nnu'],
+                                    num_massive_neutrinos=
+                                    params['num_massive_neutrinos'],
+                                    w=params['w0'],wa=params['wa'],
+                                    dark_energy_model='ppf',
+                                    halofit_version=self.p['default_halofit'] if halofit is None else halofit,
+                                    AccuracyBoost=2)
         self.results = camb.get_background(self.pars)
         self.params = params
         self.h = self.params['H0']/100.
@@ -147,12 +199,15 @@ class HaloCosmology(object):
         self.om0 = omh2 / (self.params['H0']/100.)**2.
         self.chis = self.results.comoving_radial_distance(self.zs)
         self.Hzs = self.results.hubble_parameter(self.zs)
+        self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
+        if halofit is not None: self.nPzk = self._get_matter_power(self.zs,self.ks,nonlinear=True)
 
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
         PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
-                                                     hubble_units=False, k_hunit=False, kmax=ks.max(),#+1., # !!!!)
-                                                     zmax=zs.max()+1.) # FIXME: neutrinos !!!
+                                                hubble_units=False,
+                                                k_hunit=False, kmax=ks.max(),
+                                                zmax=zs.max()+1.)
         return PK.P(zs, ks, grid=True)
 
         
@@ -162,43 +217,47 @@ class HaloCosmology(object):
         rho = 3.*(Hz**2.)/8./np.pi/G # SI
         return rho * 1.477543e37 # in msolar / megaparsec3
     
-    def rho_matter_z(self,z): return self.rho_critical_z(0.) * self.om0 * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3
+    def rho_matter_z(self,z):
+        return self.rho_critical_z(0.) * self.om0 \
+            * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3
     def omz(self,z): return self.rho_matter_z(z)/self.rho_critical_z(z)
-    #def deltav(self,z): return 178. * self.omz(z)**(0.45) # Eke et al 1998
     def deltav(self,z): # Duffy virial actually uses this from Bryan and Norman 1997
+        # return 178. * self.omz(z)**(0.45) # Eke et al 1998
         x = self.omz(z) - 1.
         d = 18.*np.pi**2. + 82.*x - 39. * x**2.
         return d
     def rvir(self,m,z):
         # rvir has now been changed to R200rhomean(z)
-        #return ((3.*m/4./np.pi)/200./self.rho_matter_z(z))**(1./3.)
-        return ((3.*m/4./np.pi)/self.deltav(z)/self.rho_critical_z(z))**(1./3.)
+        if self.mdef == 'vir':
+            return R_from_M(m,self.rho_critical_z(z),delta=self.deltav(z))
+        elif self.mdef == 'mean':
+            return R_from_M(m,self.rho_matter_z(z),delta=200.)
     
-    def R_of_m(self,ms): return (3.*ms/4./np.pi/self.rho_matter_z(0))**(1./3.) # note rhom0
+    def R_of_m(self,ms):
+        return R_from_M(ms,self.rho_matter_z(0),delta=1.) # note rhom0
     
-    def get_sigma2(self,ms):
+    def get_sigma2(self):
+        ms = self.ms
+        kmin = self.p['sigma2_kmin']
+        kmax = self.p['sigma2_kmax']
+        numks = self.p['sigma2_numks']
+        self.ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
+        self.sPzk = self.P_lin(self.ks_sigma2,self.zs)
         ks = self.ks_sigma2[None,None,:]
         R = self.R_of_m(ms)[None,:,None]
-        W2 = Wkr(ks,R)**2.
+        W2 = Wkr(ks,R,self.p['Wkr_taylor_switch'])**2.
         Ps = self.sPzk[:,None,:]
         integrand = Ps*W2*ks**2./2./np.pi**2.
-        # from orphics import io
-        # pl = io.Plotter(xyscale='loglog')
-        # for i in range(self.zs.size): pl.add(ks[0,-1],integrand[i,-1],label=str(self.zs[i]))
-        # pl.done()
-        from scipy.integrate import simps
         sigma2 = simps(integrand,ks,axis=-1)
         return sigma2
         
+    def init_mass_function(self,ms):
+        self.ms = ms
+        self.sigma2 = self.get_sigma2()
+        self.nzm = self.get_nzm()
+        self.bh = self.get_bh()
 
-    def initialize_mass_function(self,ms):
-        sigma2 = self.get_sigma2(ms)
-        self.sigma2 = sigma2
-        self.nzm = self.get_nzm(ms,sigma2)
-        self.bh = self.get_bh(ms,sigma2)
-
-    def get_fsigmaz(self,ms=None,sigma2=None):
-        if sigma2 is None: sigma2 = self.get_sigma2(ms)
+    def get_fsigmaz(self):
         deltac = self.p['st_deltac']
         if self.mode=="sheth-torman":
             sigma = np.sqrt(sigma2)
@@ -213,8 +272,8 @@ class HaloCosmology(object):
         else:
             raise NotImplementedError
     
-    def get_bh(self,ms=None,sigma2=None):
-        if sigma2 is None: sigma2 = self.get_sigma2(ms)
+    def get_bh(self):
+        sigma2 = self.sigma2
         deltac = self.p['st_deltac']
         if self.mode=="sheth-torman":
             A = self.p['st_A']
@@ -227,48 +286,48 @@ class HaloCosmology(object):
         else:
             raise NotImplementedError
 
-    def concentration(self,ms,mode='duffy'):
+    def concentration(self,mode='duffy'):
+        ms = self.ms
         if mode=='duffy':
-            # A = self.p['duffy_A_mean']
-            # alpha = self.p['duffy_alpha_mean']
-            # beta = self.p['duffy_beta_mean']
-            A = self.p['duffy_A_vir']
-            alpha = self.p['duffy_alpha_vir']
-            beta = self.p['duffy_beta_vir']
+            if self.mdef == 'mean':
+                A = self.p['duffy_A_mean']
+                alpha = self.p['duffy_alpha_mean']
+                beta = self.p['duffy_beta_mean']
+            elif self.mdef == 'vir':
+                A = self.p['duffy_A_vir']
+                alpha = self.p['duffy_alpha_vir']
+                beta = self.p['duffy_beta_vir']
             return duffy_concentration(ms[None,:],self.zs[:,None],A,alpha,beta,self.h)
         else:
             raise NotImplementedError
 
-    def get_nzm(self,ms,sigma2=None):
-        if sigma2 is None: sigma2 = self.get_sigma2(ms)
+    def get_nzm(self):
+        ms = self.ms
         ln_sigma_inv = -0.5*np.log(sigma2)
         fsigmaz = self.get_fsigmaz(ms,sigma2)
         dln_sigma_dlnm = np.gradient(ln_sigma_inv,np.log(ms),axis=-1)
         ms = ms[None,:]
-        self.ms = ms
         return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2. 
 
-    def a2z(self,a):
-        return (1.0/a)-1.0
     
     def D_growth(self, a):
-        self._amin = 0.001    # minimum scale factor
-        self._amax = 1.0      # maximum scale factor
-        self._na = 512        # number of points in interpolation arrays
-        self.atab = np.linspace(self._amin,
-                             self._amax,
-                             self._na)
+        _amin = 0.001    # minimum scale factor
+        _amax = 1.0      # maximum scale factor
+        _na = 512        # number of points in interpolation arrays
+        atab = np.linspace(_amin,
+                           _amax,
+                           _na)
         ks = np.logspace(np.log10(1e-5),np.log10(1.),num=100) 
-        zs = self.a2z(self.atab)
+        zs = a2z(atab)
         deltakz = self.results.get_redshift_evolution(ks, zs, ['delta_cdm']) #index: k,z,0
         D_camb = deltakz[0,:,0]/deltakz[0,0,0]
-        self._da_interp = interp1d(self.atab, D_camb, kind='linear')
-        self._da_interp_type = "camb"
-        return self._da_interp(a)/self._da_interp(1.0)
+        _da_interp = interp1d(atab, D_camb, kind='linear')
+        _da_interp_type = "camb"
+        return _da_interp(a)/_da_interp(1.0)
             
-    def add_nfw_profile(self,name,ms,
-                        nxs=tunable_params['nfw_integral_default_numxs'],
-                        xmax=tunable_params['nfw_integral_default_xmax']):
+    def add_nfw_profile(self,name,numeric=False,
+                        nxs=None,
+                        xmax=None):
         """
         xmax should be thought of in "concentration units", i.e.,
         for a cluster with concentration 3., xmax of 100 is probably overkill
@@ -283,79 +342,76 @@ class HaloCosmology(object):
         nxs decides accuracy on small scales
         
         """
-        cs = self.concentration(ms)
-
-        # sigma = np.sqrt(self.sigma2)
-        # deltac = 1.686
-        # nus = deltac/sigma
-        # a = 1./(1.+self.zs)
-        # growths = self.D_growth(a)/self.D_growth(1)
-        # cs = growths[:,None]**1.15 * 9. * nus**(-0.29)
-
-
-        
+        if nxs is None: nxs = self.p['nfw_integral_numxs']
+        if xmax is None: xmax = self.p['nfw_integral_xmax']
+        cs = self.concentration()
+        ms = self.ms
         rvirs = self.rvir(ms[None,:],self.zs[:,None])
         rss = (rvirs/cs)[...,None]
-        # xs = np.linspace(0.,xmax,nxs+1)[1:]
-        # rhoscale = 1 # makes rho off by norm, see below
-        # rhos = rho_nfw_x(xs,rhoscale)[None,None] + cs[...,None]*0.
-        # theta = np.ones(rhos.shape)
-        # theta[np.abs(xs)>cs[...,None]] = 0 # CHECK
-        # # m
-        # integrand = theta * rhos * xs**2.
-        # mnorm = np.trapz(integrand,xs) # mass but off by norm same as rho is off by
-        # # u(kt)
-        # integrand = rhos*theta
-        # kts,ukts = fft_integral(xs,integrand)
-        # uk = ukts/kts[None,None,:]/mnorm[...,None]
-        # ks = kts/rss/(1+self.zs[:,None,None]) # divide k by (1+z) here for comoving FIXME: check this!
-        # ukouts = np.zeros((uk.shape[0],uk.shape[1],self.ks.size))
-        # # sadly at this point we must loop to interpolate :(
-        # for i in range(uk.shape[0]):
-        #     for j in range(uk.shape[1]):
-        #         pks = ks[i,j]
-        #         puks = uk[i,j]
-        #         puks = puks[pks>0]
-        #         pks = pks[pks>0]
-        #         ukouts[i,j] = np.interp(self.ks,pks,puks,left=puks[0],right=0)
-        #         #TODO: Add compulsory debug plot here
-        # self.uk_profiles[name] = ukouts.copy()
-
-        cs = cs[...,None]
-        mc = np.log(1+cs)-cs/(1.+cs)
-        x = self.ks[None,None]*rss *(1+self.zs[:,None,None])# !!!!
-        Si, Ci = scipy.special.sici(x)
-        Sic, Cic = scipy.special.sici((1.+cs)*x)
-        ukouts = (np.sin(x)*(Sic-Si) - np.sin(cs*x)/((1+cs)*x) + np.cos(x)*(Cic-Ci))/mc
-        self.uk_profiles[name] = ukouts.copy()
+        if numeric:
+            xs = np.linspace(0.,xmax,nxs+1)[1:]
+            rhoscale = 1 # makes rho off by norm, see below
+            rhos = rho_nfw_x(xs,rhoscale)[None,None] + cs[...,None]*0.
+            theta = np.ones(rhos.shape)
+            theta[np.abs(xs)>cs[...,None]] = 0 # CHECK
+            # m
+            integrand = theta * rhos * xs**2.
+            mnorm = np.trapz(integrand,xs) # mass but off by norm same as rho is off by
+            # u(kt)
+            integrand = rhos*theta
+            kts,ukts = fft_integral(xs,integrand)
+            uk = ukts/kts[None,None,:]/mnorm[...,None]
+            ks = kts/rss/(1+self.zs[:,None,None]) # divide k by (1+z) here for comoving FIXME: check this!
+            ukouts = np.zeros((uk.shape[0],uk.shape[1],self.ks.size))
+            # sadly at this point we must loop to interpolate :(
+            for i in range(uk.shape[0]):
+                for j in range(uk.shape[1]):
+                    pks = ks[i,j]
+                    puks = uk[i,j]
+                    puks = puks[pks>0]
+                    pks = pks[pks>0]
+                    ukouts[i,j] = np.interp(self.ks,pks,puks,left=puks[0],right=0)
+                    #TODO: Add compulsory debug plot here
+            self.uk_profiles[name] = ukouts.copy()
+        else:
+            cs = cs[...,None]
+            mc = np.log(1+cs)-cs/(1.+cs)
+            x = self.ks[None,None]*rss *(1+self.zs[:,None,None])# !!!!
+            Si, Ci = scipy.special.sici(x)
+            Sic, Cic = scipy.special.sici((1.+cs)*x)
+            ukouts = (np.sin(x)*(Sic-Si) - np.sin(cs*x)/((1+cs)*x) + np.cos(x)*(Cic-Ci))/mc
+            self.uk_profiles[name] = ukouts.copy()
         
-        return self.ks,ukouts # !!!
+        return self.ks,ukouts
         
 
-    def get_power_1halo_cross_galaxies(self,name="matter"):
+    def get_power_1halo_cross_galaxies(self,name="nfw",name_gal="nfw"):
         pass
-    def get_power_2halo_cross_galaxies(self,name="matter"):
+    def get_power_2halo_cross_galaxies(self,name="nfw",name_gal="nfw"):
         pass
 
-    def get_power_1halo_auto(self,name="matter"):
+    def get_power_1halo_auto(self,name="nfw"):
         ms = self.ms[...,None]
         integrand = self.nzm[...,None] * ms**2. * self.uk_profiles[name]**2. /self.rho_matter_z(0)**2.
-        return np.trapz(integrand,ms,axis=-2)*(1.-np.exp(-(self.ks/default_params['kstar_damping'])**2.))
+        return np.trapz(integrand,ms,axis=-2)*(1.-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
     
-    def get_power_2halo_auto(self,name="matter"):
+    def get_power_2halo_auto(self,name="nfw",verbose=False):
         ms = self.ms[...,None]
         integrand = self.nzm[...,None] * ms * self.uk_profiles[name] /self.rho_matter_z(0) * self.bh[...,None]
         integral = np.trapz(integrand,ms,axis=-2)
         # consistency relation : Correct for part that's missing from low-mass halos to get P(k->0) = Plinear
         consistency_integrand = self.nzm[...,None] * ms /self.rho_matter_z(0) * self.bh[...,None]
         consistency = np.trapz(consistency_integrand,ms,axis=-2)
-        print("Two-halo consistency: " , consistency)
+        if verbose: print("Two-halo consistency: " , consistency)
         return self.Pzk * (integral+1-consistency)**2. 
         
-    
     def get_power_1halo_galaxy_auto(self):
         pass
+    
     def get_power_2halo_galaxy_auto(self):
+        pass
+
+    def gas_profile(self,r,m200meanz):
         pass
 
     def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
@@ -369,23 +425,23 @@ class HaloCosmology(object):
         If this function is only used to model sigma2 -> N(M,z) -> halo model power spectra at small
         scales, and cosmological dependence is obtained through an accurate CAMB based P(k),
         one should be fine.
-
-        norm(z) is calculated as follows:
-        norm(z) = P_linear_CAMB(k_norm,z) / T_CAMB(k_norm)**2
         """
         tk = self.Tk(ks,'eisenhu_osc') 
         assert knorm<kmax
         PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False, 
                                                      hubble_units=False, k_hunit=False, kmax=kmax,
                                                      zmax=zs.max()+1.)
-        pnorm = PK.P(zs, knorm,grid=True) #/ tnorm**2. / knorm**(self.params['ns'])
+        pnorm = PK.P(zs, knorm,grid=True)
         tnorm = self.Tk(knorm,'eisenhu_osc') * knorm**(self.params['ns'])
         plin = (pnorm/tnorm) * tk**2. * ks**(self.params['ns'])
         return plin
         
         
     def Tk(self,ks,type ='eisenhu_osc'):
-
+        """
+        Pulled from cosmicpy
+        """
+        
         k = ks/self.h
         self.tcmb = 2.726
         T_2_7_sqr = (self.tcmb/2.7)**2
@@ -485,8 +541,7 @@ class HaloCosmology(object):
 """
 Mass function
 """
-
-
+def R_from_M(M,rho,delta): return (3.*M/4./np.pi/delta/rho)**(1./3.) 
 
 """
 HOD
@@ -503,7 +558,7 @@ def Mstellar_halo(z,log10mhalo):
 
 
 def Mhalo_stellar(z,log10mstellar):
-    # Function to compute halo mass as a function of the stellar mass.
+    # Function to compute halo mass as a function of the stellar mass. arxiv 1001.0015 Table 2
     # z = list of redshifts
     # log10mhalo = log of the halo mass
     a = 1./(1+z) 
@@ -541,18 +596,100 @@ def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None):
     masses = 10**log10mhalo
     return Nc*((masses/Msat)**alphasat)*np.exp(-Mcut/(masses))    
 
+def avg_NsNsm1(log10mhalo,z,log10mstellar_thresh,corr="max"):
+    if corr=='max':
+        return 
+
 """
 Profiles
 """
 
-def rho_nfw_x(x,rhoscale):
-    return rhoscale/x/(1.+x)**2.
+def Fcon(c): return (np.log(1.+c) - (c/(1.+c)))
 
-def rho_nfw(r,rhoscale,rs):
-    rrs = r/rs
-    return rho_nfw_x(rrs,rhoscale)
+def rhoscale_nfw(mdelta,rdelta,cdelta):
+    rs = rdelta/cdelta
+    V = 4.*np.pi * rs**3.
+    return pref * mdelta / V / Fcon(cdelta)
 
-# def rho_gas(r,R200,M200,z,omega_b,omega_m,rho_critical_z,)
+def rho_nfw_x(x,rhoscale): return rhoscale/x/(1.+x)**2.
+
+def rho_nfw(r,rhoscale,rs): return rho_nfw_x(r/rs,rhoscale)
+
+def mdelta_from_mdelta(M1,C1,rho1s,delta1,rho2s,delta2,vectorized=False):
+    """
+    Converts M1(m) to M2(m).
+    Needs concentrations C1(z,m).
+    Cosmic densities rho1s(z).
+    Cosmic densities rho2s(z).
+    Overdensity delta1 and delta2.
+    """
+    if vectorized:
+        M1in = M1.copy()
+        M1 = M1[None,:]+C1*0.
+        M2outs =  mdelta_from_mdelta_unvectorized(M1.copy(),C1,rho1s[:,None],delta1,rho2s[:,None],delta2)
+    else:
+        M2outs = np.zeros(C1.shape)
+        for i in range(C1.shape[0]):
+            for j in range(C1.shape[1]):
+                M2outs[i,j] = mdelta_from_mdelta_unvectorized(M1[j],C1[i,j],rho1s[i],delta1,rho2s[i],delta2)
+    return M2outs
+
+    
+def mdelta_from_mdelta_unvectorized(M1,C1,rho1s,delta1,rho2s,delta2):
+    C2 = lambda M2: C1*((M2/M1)*(delta1/delta2)*(rho1s/rho2s))**(1./3.)
+    F2 = lambda M2: 1./Fcon(C2(M2))
+    F1 = 1./Fcon(C1)
+    # the function whose roots to find
+    func = lambda M2: M1*F1 - M2*F2(M2)
+    # its analytical derivative
+    #jaco = lambda M2: -F2(M2) + (C2(M2)/(1.+C2(M2)))**2. * C2(M2)/3. * F2(M2)**2.
+    from scipy.optimize import fsolve as newton
+    M2outs = newton(func,M1)#,fprime=jaco) # FIXME: jacobian doesn't work
+    return M2outs
+
+def battaglia_gas_fit(m200critz,z,A0x,alphamx,alphazx):
+    # Any factors of h in M?
+    return A0x * (m200critz/1.e14)**alphamx * (1.+z)**alphazx
+    
+def rho_gas(r,m200critz,z,omb,omm,rhocritz,
+            gamma=default_params['battaglia_gas_gamma'],
+            profile="AGN"):
+    return rho_gas_generic(r,m200critz,z,omb,omm,rhocritz,
+                           gamma=default_params['battaglia_gas_gamma'],
+                           rho0_A0=default_params['battaglia_gas_%s_rho0_A0'%profile],
+                           rho0_alpham=default_params['battaglia_gas_%s_rho0_alpham'%profile],
+                           rho0_alphaz=default_params['battaglia_gas_%s_rho0_alphaz'%profile],
+                           alpha_A0=default_params['battaglia_gas_%s_alpha_A0'%profile],
+                           alpha_alpham=default_params['battaglia_gas_%s_alpha_alpham'%profile],
+                           alpha_alphaz=default_params['battaglia_gas_%s_alpha_alphaz'%profile],
+                           beta_A0=default_params['battaglia_gas_%s_beta_A0'%profile],
+                           beta_alpham=default_params['battaglia_gas_%s_beta_alpham'%profile],
+                           beta_alphaz=default_params['battaglia_gas_%s_beta_alphaz'%profile])
+
+def rho_gas_generic(r,m200critz,z,omb,omm,rhocritz,
+                    gamma=default_params['battaglia_gas_gamma'],
+                    rho0_A0=default_params['battaglia_gas_AGN_rho0_A0'],
+                    rho0_alpham=default_params['battaglia_gas_AGN_rho0_alpham'],
+                    rho0_alphaz=default_params['battaglia_gas_AGN_rho0_alphaz'],
+                    alpha_A0=default_params['battaglia_gas_AGN_alpha_A0'],
+                    alpha_alpham=default_params['battaglia_gas_AGN_alpha_alpham'],
+                    alpha_alphaz=default_params['battaglia_gas_AGN_alpha_alphaz'],
+                    beta_A0=default_params['battaglia_gas_AGN_beta_A0'],
+                    beta_alpham=default_params['battaglia_gas_AGN_beta_alpham'],
+                    beta_alphaz=default_params['battaglia_gas_AGN_beta_alphaz'],
+):
+    """
+    AGN and SH Battaglia 2016 profiles
+    r: physical distance
+    m200critz: M200_critical_z
+
+    """
+    rho0 = battaglia_gas_fit(m200critz,z,rho0_A0,rho0_alpham,rho0_alphaz)
+    alpha = battaglia_gas_fit(m200critz,z,alpha_A0,alpha_alpham,alpha_alphaz)
+    beta = battaglia_gas_fit(m200critz,z,beta_A0,beta_alpham,beta_alphaz)
+    R200 = R_from_M(m200critz,rhocritz,delta=200)
+    rr200 = 2*r/R200
+    return (omb/omm) * rhocritz * rho0 * (rr200)**gamma * (1.+rr200**alpha)**(-(beta+gamma)/alpha)
 
 """
 FFT routines
@@ -606,3 +743,4 @@ def fft_integral(x,y,axis=-1):
 def analytic_fft_integral(ks): return np.sqrt(np.pi/2.)*np.exp(-ks**2./2.)*ks
 
 
+def a2z(a): return (1.0/a)-1.0

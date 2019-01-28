@@ -1,4 +1,4 @@
-import hmvec as hm
+import hmvec
 import numpy as np
 from orphics import io
 from enlib import bench
@@ -167,7 +167,7 @@ def test_pmm():
         mmhmod = mmhm.HaloModel(cc)
     
     
-    zs = np.array([0.,1.,2.])#,1.,2.,3.])
+    zs = np.array([0.,1.,2.,3.])#,1.,2.,3.])
     #zs = np.array([0.,2.,4.,6.])
     ms = np.geomspace(1e7,1e17,2000)
     #ks = np.geomspace(1e-4,100,1001)
@@ -180,7 +180,7 @@ def test_pmm():
     #print(mmP2h.shape)
     
     
-    hcos = hm.HaloCosmology(zs,ks,ms=ms,mass_function="sheth-torman",halofit='original')
+    hcos = hm.HaloCosmology(zs,ks,ms=ms)
 
     mmhb = mmhmod.halobias #np.load("mm_halobias.npy",)
     mmnfn = mmhmod.nfn #np.load("mm_nfn.npy")
@@ -247,8 +247,54 @@ def test_pmm():
         # pl.hline(y=1.1)
         # pl._ax.set_ylim(0.5,1.5)
         pl.done("lindiff_z_%d.png" % i)
+
+def test_battaglia():
+
+    zs = np.array([0.])
+    ks = np.geomspace(1e-4,1,10)
+    hcos = hmvec.HaloCosmology(zs,ks,params = {'sigma2_numks':100}, skip_nfw=True)
+
+    m200critz = 1.e13
+    r = np.geomspace(1e-4,20.,10000)
+    z = 1.
+    omb = hcos.p['ombh2']/hcos.h**2.
+    omm = (hcos.p['ombh2']/hcos.h**2.+hcos.p['omch2']/hcos.h**2.)
+    rhocritz = hcos.rho_critical_z(z)
     
-test_massfn()
+    rhos = hmvec.rho_gas(r,m200critz,z,omb,omm,rhocritz,
+                            profile="AGN")
+
+    r200 = hmvec.R_from_M(m200critz,rhocritz,delta=200)
+    integrand = rhos.copy()*4.*np.pi*r**2.
+    integrand[r>r200] = 0
+    print(np.trapz(integrand,r)/(m200critz*(omb/omm)))
+
+    # pl = io.Plotter(xyscale='loglog')
+    # pl.add(r,rhos)
+    # pl.done()
+
+def test_mcon():
+
+    zs = np.linspace(0.,1.,10)
+    ks = np.geomspace(1e-4,1,10)
+    hcos = hmvec.HaloCosmology(zs,ks,params = {'sigma2_numks':100}, skip_nfw=True)
+
+    ms = np.geomspace(1e13,1e15,100)
+    cs = hmvec.duffy_concentration(ms[None,:],zs[:,None])
+
+    rho1s = hcos.rho_matter_z(zs)
+    rho2s = hcos.rho_critical_z(zs)
+
+    mcritzs = hmvec.mdelta_from_mdelta(ms,cs,rho1s,200.,rho2s,200.)
+
+    from orphics import io
+    io.plot_img(np.log10(ms[None]+cs*0.),flip=False)
+    io.plot_img(np.log10(mcritzs),flip=False)
+
+    
+test_mcon()
+#test_battaglia()
+#test_massfn()
 #test_fft_transform()    
 #test_pmm()    
 # test_fft_integral()
