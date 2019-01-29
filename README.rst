@@ -30,6 +30,7 @@ so that changes you make to the code are immediately reflected.
 
 
 .. code-block:: console
+
    pip install -e . --user
 
 				
