@@ -77,7 +77,7 @@ default_params = {
     'duffy_A_mean':10.14, # for M200rhomeanz
     'duffy_alpha_mean':-0.081,
     'duffy_beta_mean':-1.01,
-    'nfw_integral_numxs':100000,
+    'nfw_integral_numxs':10000,
     'nfw_integral_xmax':300,
     'battaglia_gas_gamma':-0.2,
     'battaglia_gas_AGN_rho0_A0':4000.,
