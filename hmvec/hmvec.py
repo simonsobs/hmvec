@@ -29,32 +29,19 @@ No h units anywhere
 TODO: copy member functions like Duffy concentration to independent
 barebones functions in separate script/library
 
-FIXME: the profile integrals have ranges and sampling that depend on 
-how low in mass one goes.
-
 Known issues:
 1. The 1-halo term will add some power at the largest scales. A softening term
 has been added that effectively zeros the 1-halo term below k<0.01.
 2. sigma2 becomes very innacurate for low masses, because lower masses require higher
 k in the linear matter power. For this reason, low-mass halos
 are never accounted for correctly, and thus consistency relations do not hold.
-Currently the consistency relation is divided out (like Matt does) to get the 2-halo
+Currently the consistency relation is subtracted out to get the 2-halo
 power to agree with Plin at large scales.
-3. Higher redshifts have less than expected 1-halo power. Matt's implementation
-has power comparable to non-linear halofit.
-5. Accuracy of sigma2 is very important for small scale 1-halo at high redshifts
-
-
-1. not an fft issue (using analytical)
-2. not a c(M,z) issue (tried Bhatt vs Duffy)
-3. not a sigma2 accuracy issue? Using high k Eisenstein
-4. ahhh this might be because the correction to the 2-halo term is additive not multiplicative!!!
-5. mass functions all disagree
+3. Higher redshifts have less than expected 1-halo power compared to halofit. 
 
 Limitations:
-1. Only 200 * rho_mean(z) is supported except for gas profiles defined with rho_crit(z)
-where the necessary conversion is done
-2. Only Tinker 2010 is supported
+1. Tinker 2010 option and Sheth-Torman have only been coded up for M200m and mvir
+respectively.
 
 """
 
@@ -315,6 +302,8 @@ class HaloCosmology(object):
 
     
     def D_growth(self, a):
+        # From Moritz Munchmeyer?
+        
         _amin = 0.001    # minimum scale factor
         _amax = 1.0      # maximum scale factor
         _na = 512        # number of points in interpolation arrays
@@ -444,7 +433,7 @@ class HaloCosmology(object):
         
     def Tk(self,ks,type ='eisenhu_osc'):
         """
-        Pulled from cosmicpy
+        Pulled from cosmicpy https://github.com/cosmicpy/cosmicpy/blob/master/LICENSE.rst
         """
         
         k = ks/self.h
@@ -549,7 +538,7 @@ Mass function
 def R_from_M(M,rho,delta): return (3.*M/4./np.pi/delta/rho)**(1./3.) 
 
 """
-HOD
+HOD functions from Matt Johnson and Moritz Munchmeyer (modified)
 """
     
 def Mstellar_halo(z,log10mhalo):
