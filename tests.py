@@ -163,7 +163,7 @@ def test_pmm():
     if matt:
         import halomodel as mmhm
         from orphics import cosmology
-        cc = cosmology.Cosmology(hm.default_params,skipCls=True,low_acc=False)
+        cc = cosmology.Cosmology(hmvec.default_params,skipCls=True,low_acc=False)
         mmhmod = mmhm.HaloModel(cc)
     
     
@@ -180,7 +180,7 @@ def test_pmm():
     #print(mmP2h.shape)
     
     
-    hcos = hm.HaloCosmology(zs,ks,ms=ms)
+    hcos = hmvec.HaloCosmology(zs,ks,ms=ms,halofit='mead',mdef='vir')
 
     mmhb = mmhmod.halobias #np.load("mm_halobias.npy",)
     mmnfn = mmhmod.nfn #np.load("mm_nfn.npy")
@@ -213,9 +213,9 @@ def test_pmm():
     # pl.done()
     
     
-    _,ouks = hcos.add_nfw_profile("matter",ms)
-    pmm_1h = hcos.get_power_1halo_auto(name="matter")
-    pmm_2h = hcos.get_power_2halo_auto(name="matter")
+    pmm_1h = hcos.get_power_1halo_auto(name="nfw")
+    pmm_2h = hcos.get_power_2halo_auto(name="nfw")
+    
     # sys.exit()
     print(pmm_1h.shape)
     for i in range(zs.size):
@@ -225,6 +225,7 @@ def test_pmm():
         pl.add(ks,pmm_2h[i]+pmm_1h[i],ls="--",color="C%d" % i)
         pl.add(ks,hcos.nPzk[i],ls="-",color="k",alpha=0.7)
         if matt: pl.add(ks,mmP[i],ls="-.",color="C%d" % i)
+        pl.vline(x=10.)
         pl._ax.set_ylim(1e-1,1e5)
         pl.done("nonlincomp_z_%d.png" % i)
 
@@ -235,6 +236,7 @@ def test_pmm():
         pl.hline(y=1)
         pl.hline(y=0.9)
         pl.hline(y=1.1)
+        pl.vline(x=10.)
         pl._ax.set_ylim(0.5,1.5)
         pl.done("nonlindiff_z_%d.png" % i)
     
@@ -242,6 +244,7 @@ def test_pmm():
         pl = io.Plotter(xyscale='loglin',xlabel='$k$',ylabel='$P/P_{\\mathrm{L}}$')
         pl.add(ks,(pmm_2h[i]+pmm_1h[i])/hcos.Pzk[i],ls="-",color="C%d" % i)
         if matt: pl.add(ks,mmP[i]/hcos.Pzk[i],ls="--",color="C%d" % i)
+        pl.vline(x=10.)
         pl.hline(y=1)
         # pl.hline(y=0.9)
         # pl.hline(y=1.1)
@@ -286,9 +289,9 @@ def test_mcon():
     rho2s = hcos.rho_critical_z(zs)
 
     with bench.show("vectorized"):
-        mcritzs0 = hmvec.mdelta_from_mdelta(ms,cs,rho1s,200.,rho2s,200.,vectorized=True)
+        mcritzs0 = hmvec.mdelta_from_mdelta(ms,cs,200.*rho1s,200.*rho2s,vectorized=True)
     with bench.show("unvectorized"):
-        mcritzs1 = hmvec.mdelta_from_mdelta(ms,cs,rho1s,200.,rho2s,200.,vectorized=False)
+        mcritzs1 = hmvec.mdelta_from_mdelta(ms,cs,200.*rho1s,200.*rho2s,vectorized=False)
 
     from orphics import io
     io.plot_img(np.log10(ms[None]+cs*0.),flip=False)
@@ -296,10 +299,10 @@ def test_mcon():
     io.plot_img((mcritzs0-mcritzs1)/mcritzs0,flip=False)
 
     
-test_mcon()
+#test_mcon()
 #test_battaglia()
 #test_massfn()
 #test_fft_transform()    
-#test_pmm()    
+test_pmm()    
 # test_fft_integral()
 #test_cosmology()

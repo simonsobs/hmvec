@@ -3,6 +3,9 @@ hmvec
 =======
 
 `hmvec` is a fast pure Python/numpy vectorized general halo model and HOD code.
+Many great halo model codes exist. This one is meant to allow for quick
+exploration and forecasting rather than allow for precision cosmological inference.
+
 It calculates a vectorized FFT for a given profile over all points in mass and
 redshift, but it currently does have one double loop over mass and redshift
 to interpolate the profile Fourier transforms to the target wavenumbers. Every

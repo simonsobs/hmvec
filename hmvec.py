@@ -1,8 +1,9 @@
+import sys,os
 import numpy as np
 from scipy.special import erf
 from scipy.interpolate import interp1d
 import camb
-from camb import model,nonlinear
+from camb import model
 import numpy as np
 import tinker
 import scipy
@@ -13,7 +14,8 @@ from scipy.integrate import simps
 General vectorized FFT-based halo model implementation
 Author(s): Mathew Madhavacheril
 Credits: Follows approach in Matt Johnson and Moritz
-Munchmeyer's implementation. Some of the HOD functions are copied from there.
+Munchmeyer's implementation in the appendix of 1810.13423.
+Some of the HOD functions are copied from there.
 
 Array indexing is as follows:
 [z,M,k/r]
@@ -65,7 +67,7 @@ default_params = {
     'st_deltac': 1.686,
     'sigma2_kmin':1e-4,
     'sigma2_kmax':2000,
-    'sigma2_numks':6000,
+    'sigma2_numks':10000,
     'Wkr_taylor_switch':0.01,
 
     # Profiles
@@ -99,7 +101,7 @@ default_params = {
 
     # Power spectra
     'kstar_damping':0.01,
-    'default_halofit':'takahashi',
+    'default_halofit':'mead',
     
     # Cosmology
     'omch2': 0.1198,
@@ -136,7 +138,7 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     
 class HaloCosmology(object):
     def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
-                 halofit=None,mdef='mean',nfw_numeric=False,skip_nfw=False):
+                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
         self.mdef = mdef
         self.p = params
         self.mode = mass_function
@@ -258,6 +260,7 @@ class HaloCosmology(object):
         self.bh = self.get_bh()
 
     def get_fsigmaz(self):
+        sigma2 = self.sigma2
         deltac = self.p['st_deltac']
         if self.mode=="sheth-torman":
             sigma = np.sqrt(sigma2)
@@ -302,9 +305,10 @@ class HaloCosmology(object):
             raise NotImplementedError
 
     def get_nzm(self):
+        sigma2 = self.sigma2
         ms = self.ms
         ln_sigma_inv = -0.5*np.log(sigma2)
-        fsigmaz = self.get_fsigmaz(ms,sigma2)
+        fsigmaz = self.get_fsigmaz()
         dln_sigma_dlnm = np.gradient(ln_sigma_inv,np.log(ms),axis=-1)
         ms = ms[None,:]
         return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2. 
@@ -328,6 +332,7 @@ class HaloCosmology(object):
     def add_nfw_profile(self,name,numeric=False,
                         nxs=None,
                         xmax=None):
+
         """
         xmax should be thought of in "concentration units", i.e.,
         for a cluster with concentration 3., xmax of 100 is probably overkill
@@ -615,30 +620,29 @@ def rho_nfw_x(x,rhoscale): return rhoscale/x/(1.+x)**2.
 
 def rho_nfw(r,rhoscale,rs): return rho_nfw_x(r/rs,rhoscale)
 
-def mdelta_from_mdelta(M1,C1,rho1s,delta1,rho2s,delta2,vectorized=True):
+def mdelta_from_mdelta(M1,C1,delta_rhos1,delta_rhos2,vectorized=True):
     """
     Fast/vectorized mass definition conversion
 
     Converts M1(m) to M2(z,m).
     Needs concentrations C1(z,m),
-    cosmic densities rho1s(z),
-    cosmic densities rho2s(z),
-    overdensities delta1 and delta2.
+    cosmic densities delta_rhos1(z), e.g. delta_rhos1(z) = Delta_vir(z)*rhoc(z)
+    cosmic densities delta_rhos2(z), e.g. delta_rhos2(z) = 200*rhom(z)
 
     The vectorized version is several orders of magnitude faster.
     """
     if vectorized:
         M1 = M1[None,:]+C1*0.
-        M2outs =  mdelta_from_mdelta_unvectorized(M1.copy(),C1,rho1s[:,None],delta1,rho2s[:,None],delta2)
+        M2outs =  mdelta_from_mdelta_unvectorized(M1.copy(),C1,delta_rhos1[:,None],delta_rhos2[:,None])
     else:
         M2outs = np.zeros(C1.shape)
         for i in range(C1.shape[0]):
             for j in range(C1.shape[1]):
-                M2outs[i,j] = mdelta_from_mdelta_unvectorized(M1[j],C1[i,j],rho1s[i],delta1,rho2s[i],delta2)
+                M2outs[i,j] = mdelta_from_mdelta_unvectorized(M1[j],C1[i,j],delta_rhos1[i],delta_rhos2[i])
     return M2outs
 
     
-def mdelta_from_mdelta_unvectorized(M1,C1,rho1s,delta1,rho2s,delta2):
+def mdelta_from_mdelta_unvectorized(M1,C1,delta_rhos1,delta_rhos2):
     """
     Implements mdelta_from_mdelta.
     The logMass is necessary for numerical stability.
@@ -654,10 +658,10 @@ def mdelta_from_mdelta_unvectorized(M1,C1,rho1s,delta1,rho2s,delta2):
     definitions, where rhoscale = F(c) * m /(4pi rs**3) is the amplitude
     of the NFW profile. The scale radii are also the same. Equating
     the scale radii also provides
-    C2 = ((M2/M1) * (delta1/delta2) * (rho1/rho2)) ** (1/3) C1
+    C2 = ((M2/M1) * (delta_rhos1/delta_rhos2) * (rho1/rho2)) ** (1/3) C1
     which reduces the system to one unknown M2.
     """
-    C2 = lambda logM2: C1*((np.exp(logM2-np.log(M1)))*(delta1/delta2)*(rho1s/rho2s))**(1./3.)
+    C2 = lambda logM2: C1*((np.exp(logM2-np.log(M1)))*(delta_rhos1/delta_rhos2))**(1./3.)
     F2 = lambda logM2: 1./Fcon(C2(logM2))
     F1 = 1./Fcon(C1)
     # the function whose roots to find
