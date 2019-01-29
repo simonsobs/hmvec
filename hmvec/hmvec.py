@@ -5,7 +5,7 @@ from scipy.interpolate import interp1d
 import camb
 from camb import model
 import numpy as np
-import tinker
+from . import tinker
 import scipy
 from scipy.integrate import simps
 
@@ -77,8 +77,8 @@ default_params = {
     'duffy_A_mean':10.14, # for M200rhomeanz
     'duffy_alpha_mean':-0.081,
     'duffy_beta_mean':-1.01,
-    'nfw_integral_numxs':30000,
-    'nfw_integral_xmax':200,
+    'nfw_integral_numxs':100000,
+    'nfw_integral_xmax':300,
     'battaglia_gas_gamma':-0.2,
     'battaglia_gas_AGN_rho0_A0':4000.,
     'battaglia_gas_AGN_rho0_alpham':0.29,

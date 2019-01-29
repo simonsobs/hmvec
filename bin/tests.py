@@ -167,7 +167,7 @@ def test_pmm():
         mmhmod = mmhm.HaloModel(cc)
     
     
-    zs = np.array([0.,1.,2.,3.])#,1.,2.,3.])
+    zs = np.array([0.,2.,3.])#,1.,2.,3.])
     #zs = np.array([0.,2.,4.,6.])
     ms = np.geomspace(1e7,1e17,2000)
     #ks = np.geomspace(1e-4,100,1001)
@@ -180,7 +180,7 @@ def test_pmm():
     #print(mmP2h.shape)
     
     
-    hcos = hmvec.HaloCosmology(zs,ks,ms=ms,halofit='mead',mdef='vir')
+    hcos = hmvec.HaloCosmology(zs,ks,ms=ms,halofit='mead',mdef='vir',nfw_numeric=True)
 
     mmhb = mmhmod.halobias #np.load("mm_halobias.npy",)
     mmnfn = mmhmod.nfn #np.load("mm_nfn.npy")

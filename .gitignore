@@ -2,6 +2,7 @@
 *.npz
 *.npy
 halomodel.py
+halomodel_old.py
 *.txt
 kszBispectrum.py
 kszSignal.py
