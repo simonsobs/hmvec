@@ -28,9 +28,11 @@ Installation
 Clone this repository and install with symbolic links as follows
 so that changes you make to the code are immediately reflected.
 
-.. code-block:: console
-				pip install -e . --user
 
+.. code-block:: console
+   pip install -e . --user
+
+				
 
 Usage
 -----
