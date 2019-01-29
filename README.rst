@@ -19,8 +19,18 @@ Dependencies
 ------------
 
 * Python>=2.7 or Python>=3.4
-* numpy, scipy
-* camb (Python package)
+* numpy, scipy, matplotlib
+* camb (Python package, recommend using `dev` branch)
+
+Installation
+------------
+
+Clone this repository and install with symbolic links as follows
+so that changes you make to the code are immediately reflected.
+
+.. code-block:: console
+				pip install -e . --user
+
 
 Usage
 -----
