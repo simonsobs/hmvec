@@ -44,6 +44,30 @@ Limitations:
 respectively.
 
 """
+battaglia_defaults = {}
+battaglia_defaults['AGN'] = {
+    'rho0_A0':4000.,
+    'rho0_alpham':0.29,
+    'rho0_alphaz':-0.66,
+    'alpha_A0':0.88,
+    'alpha_alpham':-0.03,
+    'alpha_alphaz':0.19,
+    'beta_A0':3.83,
+    'beta_alpham':0.04,
+    'beta_alphaz':-0.025
+}
+battaglia_defaults['SH'] = {
+    'rho0_A0':19000.,
+    'rho0_alpham':0.09,
+    'rho0_alphaz':-0.95,
+    'alpha_A0':0.70,
+    'alpha_alpham':-0.017,
+    'alpha_alphaz':0.27,
+    'beta_A0':4.43,
+    'beta_alpham':0.005,
+    'beta_alphaz':0.037
+}
+    
 
 default_params = {
     
@@ -64,27 +88,10 @@ default_params = {
     'duffy_A_mean':10.14, # for M200rhomeanz
     'duffy_alpha_mean':-0.081,
     'duffy_beta_mean':-1.01,
-    'nfw_integral_numxs':10000,
-    'nfw_integral_xmax':300,
+    'nfw_integral_numxs':10000, # not sufficient
+    'nfw_integral_xmax':200,
     'battaglia_gas_gamma':-0.2,
-    'battaglia_gas_AGN_rho0_A0':4000.,
-    'battaglia_gas_AGN_rho0_alpham':0.29,
-    'battaglia_gas_AGN_rho0_alphaz':-0.66,
-    'battaglia_gas_AGN_alpha_A0':0.88,
-    'battaglia_gas_AGN_alpha_alpham':-0.03,
-    'battaglia_gas_AGN_alpha_alphaz':0.19,
-    'battaglia_gas_AGN_beta_A0':3.83,
-    'battaglia_gas_AGN_beta_alpham':0.04,
-    'battaglia_gas_AGN_beta_alphaz':-0.025,
-    'battaglia_gas_SH_rho0_A0':19000.,
-    'battaglia_gas_SH_rho0_alpham':0.09,
-    'battaglia_gas_SH_rho0_alphaz':-0.95,
-    'battaglia_gas_SH_alpha_A0':0.70,
-    'battaglia_gas_SH_alpha_alpham':-0.017,
-    'battaglia_gas_SH_alpha_alphaz':0.27,
-    'battaglia_gas_SH_beta_A0':4.43,
-    'battaglia_gas_SH_beta_alpham':0.005,
-    'battaglia_gas_SH_beta_alphaz':0.037,
+    'battagila_gas_family': 'AGN',
 
     # Power spectra
     'kstar_damping':0.01,
@@ -317,7 +324,48 @@ class HaloCosmology(object):
         _da_interp = interp1d(atab, D_camb, kind='linear')
         _da_interp_type = "camb"
         return _da_interp(a)/_da_interp(1.0)
-            
+
+    def add_battaglia_profile(self,name,family=None,param_override={}):
+        # Set default parameters
+        if family is None: family = self.p['battagia_gas_family'] # AGN or SH?
+        pparams = {}
+        pparams['battaglia_gas_gamma'] = self.p['battaglia_gas_gamma']
+        pparams.update(battaglia_defaults[family])
+
+        # Update with overrides
+        for key in param_override:
+            if key=='battaglia_gas_gamma':
+                pparams[key] = param_override[key]
+            elif key in battaglia_defaults[family]:
+                pparams[key] = param_override[key]
+            else:
+                raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
+
+        # Convert masses to m200critz
+        if self.mdef=='vir':
+            delta_rhos1 = self.rho_critical_z(self.zs)*self.deltav(self.zs)
+        elif self.mdef=='mean':
+            delta_rhos1 = self.rho_matter_z(self.zs)*200.
+        cs = self.concentration()
+        delta_rhos2 = 200.*self.rho_critical_z(self.zs)
+        m200critz = mdelta_from_mdelta(self.ms,cs,delta_rhos1,delta_rhos2)
+        r200critz = R_from_M(m200critz,self.rho_critical_z(self.zs),delta=200.)
+
+        # Generate profiles
+        
+        rho_gas_generic(r,m200critz,self.zs[:,None],omb,omm,rhocritz,
+                    gamma=pparams['battaglia_gas_gamma'],
+                    rho0_A0=pparams['rho0_A0'],
+                    rho0_alpham=pparams['rho0_alpham'],
+                    rho0_alphaz=pparams['rho0_alphaz'],
+                    alpha_A0=pparams['alpha_A0'],
+                    alpha_alpham=pparams['alpha_alpham'],
+                    alpha_alphaz=pparams['alpha_alphaz'],
+                    beta_A0=pparams['beta_A0'],
+                    beta_alpham=pparams['beta_alpham'],
+                    beta_alphaz=pparams['beta_alphaz'])
+        
+                        
     def add_nfw_profile(self,name,numeric=False,
                         nxs=None,
                         xmax=None):
@@ -343,29 +391,7 @@ class HaloCosmology(object):
         rvirs = self.rvir(ms[None,:],self.zs[:,None])
         rss = (rvirs/cs)[...,None]
         if numeric:
-            xs = np.linspace(0.,xmax,nxs+1)[1:]
-            rhoscale = 1 # makes rho off by norm, see below
-            rhos = rho_nfw_x(xs,rhoscale)[None,None] + cs[...,None]*0.
-            theta = np.ones(rhos.shape)
-            theta[np.abs(xs)>cs[...,None]] = 0 # CHECK
-            # m
-            integrand = theta * rhos * xs**2.
-            mnorm = np.trapz(integrand,xs) # mass but off by norm same as rho is off by
-            # u(kt)
-            integrand = rhos*theta
-            kts,ukts = fft_integral(xs,integrand)
-            uk = ukts/kts[None,None,:]/mnorm[...,None]
-            ks = kts/rss/(1+self.zs[:,None,None]) # divide k by (1+z) here for comoving FIXME: check this!
-            ukouts = np.zeros((uk.shape[0],uk.shape[1],self.ks.size))
-            # sadly at this point we must loop to interpolate :(
-            for i in range(uk.shape[0]):
-                for j in range(uk.shape[1]):
-                    pks = ks[i,j]
-                    puks = uk[i,j]
-                    puks = puks[pks>0]
-                    pks = pks[pks>0]
-                    ukouts[i,j] = np.interp(self.ks,pks,puks,left=puks[0],right=0)
-                    #TODO: Add compulsory debug plot here
+            ks,ukouts = generic_profile_fft(lambda x: rho_nfw_x(x,rhoscale=1),cs,rss,self.zs,self.ks,xmax,nxs)
             self.uk_profiles[name] = ukouts.copy()
         else:
             cs = cs[...,None]
@@ -670,27 +696,27 @@ def rho_gas(r,m200critz,z,omb,omm,rhocritz,
             profile="AGN"):
     return rho_gas_generic(r,m200critz,z,omb,omm,rhocritz,
                            gamma=default_params['battaglia_gas_gamma'],
-                           rho0_A0=default_params['battaglia_gas_%s_rho0_A0'%profile],
-                           rho0_alpham=default_params['battaglia_gas_%s_rho0_alpham'%profile],
-                           rho0_alphaz=default_params['battaglia_gas_%s_rho0_alphaz'%profile],
-                           alpha_A0=default_params['battaglia_gas_%s_alpha_A0'%profile],
-                           alpha_alpham=default_params['battaglia_gas_%s_alpha_alpham'%profile],
-                           alpha_alphaz=default_params['battaglia_gas_%s_alpha_alphaz'%profile],
-                           beta_A0=default_params['battaglia_gas_%s_beta_A0'%profile],
-                           beta_alpham=default_params['battaglia_gas_%s_beta_alpham'%profile],
-                           beta_alphaz=default_params['battaglia_gas_%s_beta_alphaz'%profile])
+                           rho0_A0=battaglia_defaults[profile]['rho0_A0'],
+                           rho0_alpham=battaglia_defaults[profile]['rho0_alpham'],
+                           rho0_alphaz=battaglia_defaults[profile]['rho0_alphaz'],
+                           alpha_A0=battaglia_defaults[profile]['alpha_A0'],
+                           alpha_alpham=battaglia_defaults[profile]['alpha_alpham'],
+                           alpha_alphaz=battaglia_defaults[profile]['alpha_alphaz'],
+                           beta_A0=battaglia_defaults[profile]['beta_A0'],
+                           beta_alpham=battaglia_defaults[profile]['beta_alpham'],
+                           beta_alphaz=battaglia_defaults[profile]['beta_alphaz'])
 
 def rho_gas_generic(r,m200critz,z,omb,omm,rhocritz,
                     gamma=default_params['battaglia_gas_gamma'],
-                    rho0_A0=default_params['battaglia_gas_AGN_rho0_A0'],
-                    rho0_alpham=default_params['battaglia_gas_AGN_rho0_alpham'],
-                    rho0_alphaz=default_params['battaglia_gas_AGN_rho0_alphaz'],
-                    alpha_A0=default_params['battaglia_gas_AGN_alpha_A0'],
-                    alpha_alpham=default_params['battaglia_gas_AGN_alpha_alpham'],
-                    alpha_alphaz=default_params['battaglia_gas_AGN_alpha_alphaz'],
-                    beta_A0=default_params['battaglia_gas_AGN_beta_A0'],
-                    beta_alpham=default_params['battaglia_gas_AGN_beta_alpham'],
-                    beta_alphaz=default_params['battaglia_gas_AGN_beta_alphaz'],
+                    rho0_A0=battaglia_defaults[default_params['battagia_gas_family']]['rho0_A0'],
+                    rho0_alpham=battaglia_defaults[default_params['battagia_gas_family']]['rho0_alpham'],
+                    rho0_alphaz=battaglia_defaults[default_params['battagia_gas_family']]['rho0_alphaz'],
+                    alpha_A0=battaglia_defaults[default_params['battagia_gas_family']]['alpha_A0'],
+                    alpha_alpham=battaglia_defaults[default_params['battagia_gas_family']]['alpha_alpham'],
+                    alpha_alphaz=battaglia_defaults[default_params['battagia_gas_family']]['alpha_alphaz'],
+                    beta_A0=battaglia_defaults[default_params['battagia_gas_family']]['beta_A0'],
+                    beta_alpham=battaglia_defaults[default_params['battagia_gas_family']]['beta_alpham'],
+                    beta_alphaz=battaglia_defaults[default_params['battagia_gas_family']]['beta_alphaz'],
 ):
     """
     AGN and SH Battaglia 2016 profiles
@@ -758,3 +784,44 @@ def analytic_fft_integral(ks): return np.sqrt(np.pi/2.)*np.exp(-ks**2./2.)*ks
 
 
 def a2z(a): return (1.0/a)-1.0
+
+def generic_profile_fft(rhofunc_x,cmaxs,rss,zs,ks,xmax,nxs):
+    """
+    Generic profile FFTing
+    rhofunc_x: function that accepts vector spanning linspace(0,xmax,nxs)
+    xmax:  some O(10-1000) dimensionless number specifying maximum of real space
+    profile
+    nxs: number of samples of the profile.
+    cmaxs: typically an [nz,nm] array of the dimensionless cutoff for the profile integrals. 
+    For NFW, for example, this is concentration(z,mass).
+    For other profiles, you will want to do cmax = Rvir(z,m)/R_scale_radius where
+    R_scale_radius is whatever you have divided the physical distance by in the profile to
+    get the integration variable i.e. x = r / R_scale_radius.
+    rss: R_scale_radius
+    zs: [nz,] array to convert physical wavenumber to comoving wavenumber.
+    ks: target comoving wavenumbers to interpolate the resulting FFT on to.
+    
+    """
+    xs = np.linspace(0.,xmax,nxs+1)[1:]
+    rhos = rhofunc_x(xs)[None,None] + cmaxs[...,None]*0.
+    theta = np.ones(rhos.shape)
+    theta[np.abs(xs)>cmaxs[...,None]] = 0 # CHECK
+    # m
+    integrand = theta * rhos * xs**2.
+    mnorm = np.trapz(integrand,xs) # mass but off by norm same as rho is off by
+    # u(kt)
+    integrand = rhos*theta
+    kts,ukts = fft_integral(xs,integrand)
+    uk = ukts/kts[None,None,:]/mnorm[...,None]
+    kouts = kts/rss/(1+zs[:,None,None]) # divide k by (1+z) here for comoving FIXME: check this!
+    ukouts = np.zeros((uk.shape[0],uk.shape[1],ks.size))
+    # sadly at this point we must loop to interpolate :(
+    for i in range(uk.shape[0]):
+        for j in range(uk.shape[1]):
+            pks = kouts[i,j]
+            puks = uk[i,j]
+            puks = puks[pks>0]
+            pks = pks[pks>0]
+            ukouts[i,j] = np.interp(ks,pks,puks,left=puks[0],right=0)
+            #TODO: Add compulsory debug plot here
+    return ks, ukouts

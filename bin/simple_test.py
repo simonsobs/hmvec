@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 zs = np.linspace(0.1,3.,4)
 ms = np.geomspace(2e10,1e17,200)
 ks = np.geomspace(1e-4,100,1001)
-hcos = hm.HaloCosmology(zs,ks,ms=ms)
+hcos = hm.HaloCosmology(zs,ks,ms=ms,nfw_numeric=True)
 pmm_1h = hcos.get_power_1halo_auto(name="nfw")
 pmm_2h = hcos.get_power_2halo_auto(name="nfw")
 
