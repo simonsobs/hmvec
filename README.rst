@@ -22,6 +22,15 @@ Dependencies
 * numpy, scipy, matplotlib
 * camb (Python package, recommend using `dev` branch)
 
+Credits
+-------
+
+The theory used here follows the approach outlined in the appendix of
+arxiv:1810.13423. This code has greatly benefited from comparisons with the
+implementation written by Moritz
+Munchmeyer and Matt Johnson for that paper. Some of the HOD functions are copied (and
+modified) from there.
+
 Installation
 ------------
 
