@@ -60,3 +60,18 @@ the analytic NFW profile is initialized by default.
 	hcos = hm.HaloCosmology(zs,ks,ms=ms)
 	pmm_1h = hcos.get_power_1halo_auto(name="nfw")
 	pmm_2h = hcos.get_power_2halo_auto(name="nfw")
+
+You can add functions that implement a profile of your choice. An electron
+profile from Battaglia 2016 has also been implemented. It needs to
+be FFTd numerically to get the electron power spectrum, which is done as follows:
+
+
+.. code-block:: python
+
+	hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=10000)
+    pee_1h = hcos.get_power_1halo_auto(name="electron")
+    pee_2h = hcos.get_power_2halo_auto(name="electron")
+	
+
+Galaxy power spectra through HOD and cross-spectra between all of these are
+currently being implemented and tested.
