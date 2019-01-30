@@ -67,10 +67,10 @@ be FFTd numerically to get the electron power spectrum, which is done as follows
 
 
 .. code-block:: python
-
-	hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=10000)
-    pee_1h = hcos.get_power_1halo_auto(name="electron")
-    pee_2h = hcos.get_power_2halo_auto(name="electron")
+				
+   hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=10000)
+   pee_1h = hcos.get_power_1halo_auto(name="electron")
+   pee_2h = hcos.get_power_2halo_auto(name="electron")
 	
 
 Galaxy power spectra through HOD and cross-spectra between all of these are
