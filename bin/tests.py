@@ -298,11 +298,37 @@ def test_mcon():
     io.plot_img(np.log10(mcritzs0),flip=False)
     io.plot_img((mcritzs0-mcritzs1)/mcritzs0,flip=False)
 
+def test_gas_fft():
+
+    zs = np.array([1.])
+    ks = np.geomspace(1e-4,100,100)
+    ms = np.geomspace(1e7,1e17,2000)
+    hcos = hmvec.HaloCosmology(zs,ks,ms,nfw_numeric=False)
     
+    hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=10000)
+
+    pmm_1h = hcos.get_power_1halo_auto(name="nfw")
+    pmm_2h = hcos.get_power_2halo_auto(name="nfw")
+
+    pee_1h = hcos.get_power_1halo_auto(name="electron")
+    pee_2h = hcos.get_power_2halo_auto(name="electron")
+
+    pl = io.Plotter(xyscale='loglog')
+    pl.add(ks,pee_1h[0]/pmm_1h[0])
+    pl._ax.set_xlim(0.1,100)
+    pl.done()
+    
+    pl = io.Plotter(xyscale='loglog')
+    pl.add(ks,pmm_1h[0]+pmm_2h[0])
+    pl.add(ks,pee_1h[0]+pee_2h[0],ls='--')
+    pl.done()
+
+
+test_gas_fft()
 #test_mcon()
 #test_battaglia()
 #test_massfn()
 #test_fft_transform()    
-test_pmm()    
+#test_pmm()    
 # test_fft_integral()
 #test_cosmology()
