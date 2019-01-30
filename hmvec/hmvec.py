@@ -325,7 +325,10 @@ class HaloCosmology(object):
         _da_interp_type = "camb"
         return _da_interp(a)/_da_interp(1.0)
 
-    def add_battaglia_profile(self,name,family=None,param_override={}):
+    def add_battaglia_profile(self,name,family=None,param_override={}
+                              nxs=None,
+                              xmax=None):
+        ):
         # Set default parameters
         if family is None: family = self.p['battagia_gas_family'] # AGN or SH?
         pparams = {}
@@ -342,8 +345,9 @@ class HaloCosmology(object):
                 raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
 
         # Convert masses to m200critz
+        rhocritz = self.rho_critical_z(self.zs)
         if self.mdef=='vir':
-            delta_rhos1 = self.rho_critical_z(self.zs)*self.deltav(self.zs)
+            delta_rhos1 = rhocritz*self.deltav(self.zs)
         elif self.mdef=='mean':
             delta_rhos1 = self.rho_matter_z(self.zs)*200.
         cs = self.concentration()
@@ -352,18 +356,30 @@ class HaloCosmology(object):
         r200critz = R_from_M(m200critz,self.rho_critical_z(self.zs),delta=200.)
 
         # Generate profiles
-        
-        rho_gas_generic(r,m200critz,self.zs[:,None],omb,omm,rhocritz,
-                    gamma=pparams['battaglia_gas_gamma'],
-                    rho0_A0=pparams['rho0_A0'],
-                    rho0_alpham=pparams['rho0_alpham'],
-                    rho0_alphaz=pparams['rho0_alphaz'],
-                    alpha_A0=pparams['alpha_A0'],
-                    alpha_alpham=pparams['alpha_alpham'],
-                    alpha_alphaz=pparams['alpha_alphaz'],
-                    beta_A0=pparams['beta_A0'],
-                    beta_alpham=pparams['beta_alpham'],
-                    beta_alphaz=pparams['beta_alphaz'])
+        """
+        The physical profile is rho(r) = f(2r/R200)
+        We rescale this to f(x), so x = r/(R200/2) = r/rgs
+        So rgs = R200/2 is the equivalent of rss in the NFW profile
+        """
+        omb = self.ombh2 / self.h**2.
+        omm = self.om0
+        rhofunc = lambda x: rho_gas_generic_x(x,m200critz,self.zs[:,None],omb,omm,rhocritz,
+                                    gamma=pparams['battaglia_gas_gamma'],
+                                    rho0_A0=pparams['rho0_A0'],
+                                    rho0_alpham=pparams['rho0_alpham'],
+                                    rho0_alphaz=pparams['rho0_alphaz'],
+                                    alpha_A0=pparams['alpha_A0'],
+                                    alpha_alpham=pparams['alpha_alpham'],
+                                    alpha_alphaz=pparams['alpha_alphaz'],
+                                    beta_A0=pparams['beta_A0'],
+                                    beta_alpham=pparams['beta_alpham'],
+                                    beta_alphaz=pparams['beta_alphaz'])
+
+        rgs = r200critz/2.
+        cgs = rgs*0. + 2. # why can't we similarly fix the cmax for NFW?
+        ks,ukouts = generic_profile_fft(rhofunc,cgs,rgs,self.zs,self.ks,xmax,nxs)
+        self.uk_profiles[name] = ukouts.copy()
+
         
                         
     def add_nfw_profile(self,name,numeric=False,
@@ -695,7 +711,7 @@ def rho_gas(r,m200critz,z,omb,omm,rhocritz,
             gamma=default_params['battaglia_gas_gamma'],
             profile="AGN"):
     return rho_gas_generic(r,m200critz,z,omb,omm,rhocritz,
-                           gamma=default_params['battaglia_gas_gamma'],
+                           gamma=gamma,
                            rho0_A0=battaglia_defaults[profile]['rho0_A0'],
                            rho0_alpham=battaglia_defaults[profile]['rho0_alpham'],
                            rho0_alphaz=battaglia_defaults[profile]['rho0_alphaz'],
@@ -724,12 +740,30 @@ def rho_gas_generic(r,m200critz,z,omb,omm,rhocritz,
     m200critz: M200_critical_z
 
     """
+    R200 = R_from_M(m200critz,rhocritz,delta=200)
+    x = 2*r/R200
+    return rho_gas_generic_x(x,m200critz,z,omb,omm,rhocritz,gamma,
+                             rho0_A0,rho0_alpham,rho0_alphaz,
+                             alpha_A0,alpha_alpham,alpha_alphaz,
+                             beta_A0,beta_alpham,beta_alphaz)
+
+def rho_gas_generic_x(x,m200critz,z,omb,omm,rhocritz,
+                    gamma=default_params['battaglia_gas_gamma'],
+                    rho0_A0=battaglia_defaults[default_params['battagia_gas_family']]['rho0_A0'],
+                    rho0_alpham=battaglia_defaults[default_params['battagia_gas_family']]['rho0_alpham'],
+                    rho0_alphaz=battaglia_defaults[default_params['battagia_gas_family']]['rho0_alphaz'],
+                    alpha_A0=battaglia_defaults[default_params['battagia_gas_family']]['alpha_A0'],
+                    alpha_alpham=battaglia_defaults[default_params['battagia_gas_family']]['alpha_alpham'],
+                    alpha_alphaz=battaglia_defaults[default_params['battagia_gas_family']]['alpha_alphaz'],
+                    beta_A0=battaglia_defaults[default_params['battagia_gas_family']]['beta_A0'],
+                    beta_alpham=battaglia_defaults[default_params['battagia_gas_family']]['beta_alpham'],
+                    beta_alphaz=battaglia_defaults[default_params['battagia_gas_family']]['beta_alphaz'],
+):
     rho0 = battaglia_gas_fit(m200critz,z,rho0_A0,rho0_alpham,rho0_alphaz)
     alpha = battaglia_gas_fit(m200critz,z,alpha_A0,alpha_alpham,alpha_alphaz)
     beta = battaglia_gas_fit(m200critz,z,beta_A0,beta_alpham,beta_alphaz)
-    R200 = R_from_M(m200critz,rhocritz,delta=200)
-    rr200 = 2*r/R200
-    return (omb/omm) * rhocritz * rho0 * (rr200)**gamma * (1.+rr200**alpha)**(-(beta+gamma)/alpha)
+    return (omb/omm) * rhocritz * rho0 * (x)**gamma * (1.+x**alpha)**(-(beta+gamma)/alpha)
+
 
 """
 FFT routines
@@ -797,6 +831,8 @@ def generic_profile_fft(rhofunc_x,cmaxs,rss,zs,ks,xmax,nxs):
     For other profiles, you will want to do cmax = Rvir(z,m)/R_scale_radius where
     R_scale_radius is whatever you have divided the physical distance by in the profile to
     get the integration variable i.e. x = r / R_scale_radius.
+    QUESTION/FIXME: Why can't cmaxs be a fixed number, so that xmax also can be fixed, simply absorbing
+    the scale into rss?
     rss: R_scale_radius
     zs: [nz,] array to convert physical wavenumber to comoving wavenumber.
     ks: target comoving wavenumbers to interpolate the resulting FFT on to.
