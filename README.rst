@@ -58,8 +58,8 @@ the analytic NFW profile is initialized by default.
 	ms = np.geomspace(2e10,1e17,200)
 	ks = np.geomspace(1e-4,100,1001)
 	hcos = hm.HaloCosmology(zs,ks,ms=ms)
-	pmm_1h = hcos.get_power_1halo_auto(name="nfw")
-	pmm_2h = hcos.get_power_2halo_auto(name="nfw")
+	pmm_1h = hcos.get_power_1halo(name="nfw")
+	pmm_2h = hcos.get_power_2halo(name="nfw")
 
 You can add functions that implement a profile of your choice. An electron
 profile from Battaglia 2016 has also been implemented. It needs to
@@ -69,9 +69,15 @@ be FFTd numerically to get the electron power spectrum, which is done as follows
 .. code-block:: python
 				
    hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=10000)
-   pee_1h = hcos.get_power_1halo_auto(name="electron")
-   pee_2h = hcos.get_power_2halo_auto(name="electron")
+   pee_1h = hcos.get_power_1halo(name="electron")
+   pee_2h = hcos.get_power_2halo(name="electron")
 	
+Cross-spectra can also be calculated:
 
-Galaxy power spectra through HOD and cross-spectra between all of these are
+.. code-block:: python
+				
+   pme_1h = hcos.get_power_1halo("nfw","electron")
+   pme_2h = hcos.get_power_2halo("nfw","electron")
+   
+Galaxy power spectra through HOD and associated cross-spectra are
 currently being implemented and tested.

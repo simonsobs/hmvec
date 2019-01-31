@@ -300,28 +300,51 @@ def test_mcon():
 
 def test_gas_fft():
 
-    zs = np.array([1.])
+    zs = np.array([0.6])
     ks = np.geomspace(1e-4,100,100)
     ms = np.geomspace(1e7,1e17,2000)
     hcos = hmvec.HaloCosmology(zs,ks,ms,nfw_numeric=False)
     
-    hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=10000)
-
-    pmm_1h = hcos.get_power_1halo_auto(name="nfw")
-    pmm_2h = hcos.get_power_2halo_auto(name="nfw")
-
-    pee_1h = hcos.get_power_1halo_auto(name="electron")
-    pee_2h = hcos.get_power_2halo_auto(name="electron")
-
-    pl = io.Plotter(xyscale='loglog')
-    pl.add(ks,pee_1h[0]/pmm_1h[0])
-    pl._ax.set_xlim(0.1,100)
-    pl.done()
+    hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=30000)
+    # hcos.add_nfw_profile("electron",numeric=False)
     
-    pl = io.Plotter(xyscale='loglog')
-    pl.add(ks,pmm_1h[0]+pmm_2h[0])
-    pl.add(ks,pee_1h[0]+pee_2h[0],ls='--')
-    pl.done()
+    pmm_1h = hcos.get_power_1halo(name="nfw")
+    pmm_2h = hcos.get_power_2halo(name="nfw")
+
+    pee_1h = hcos.get_power_1halo(name="electron")
+    pee_2h = hcos.get_power_2halo(name="electron")
+
+    pme_1h = hcos.get_power_1halo("nfw","electron")
+    pme_2h = hcos.get_power_2halo("nfw","electron")
+    
+    pem_1h = hcos.get_power_1halo("electron","nfw")
+    pem_2h = hcos.get_power_2halo("electron","nfw")
+    
+    # pl = io.Plotter(xyscale='loglog')
+    # pl.add(ks,pee_1h[0]/pmm_1h[0])
+    # pl._ax.set_xlim(0.1,100)
+    # pl.done()
+    
+    # pl = io.Plotter(xyscale='loglog')
+    # pl.add(ks,pmm_1h[0]+pmm_2h[0])
+    # pl.add(ks,pee_1h[0]+pee_2h[0],ls='--')
+    # pl.add(ks,pme_1h[0]+pme_2h[0],ls='-.')
+    # pl.add(ks,pem_1h[0]+pem_2h[0],ls='-')
+    # pl.done()
+
+    omtoth2 = hcos.p['omch2'] + hcos.p['ombh2']
+    fc = hcos.p['omch2']/omtoth2
+    fb = hcos.p['ombh2']/omtoth2
+
+    Pnn = pmm_1h[0]+pmm_2h[0]
+    Pee = pee_1h[0]+pee_2h[0]
+    Pne = pme_1h[0]+pme_2h[0]
+    Pmm = fc**2.*Pnn + 2.*fc*fb*Pne + fb*fb*Pee
+    pl = io.Plotter(xyscale='loglin',xlabel='$k \\mathrm{Mpc}^{-1}$',ylabel='$P_{mm}^{\\rm{fb}}/P_{mm}^{\\rm{no-fb}}$')
+    pl.add(ks,Pmm/Pnn)
+    pl.hline(y=1)
+    pl.done("feedback.pdf")
+    
 
 
 test_gas_fft()

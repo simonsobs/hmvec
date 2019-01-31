@@ -420,31 +420,39 @@ class HaloCosmology(object):
         return self.ks,ukouts
         
 
-    def get_power_1halo_cross_galaxies(self,name="nfw",name_gal="nfw"):
-        pass
-    def get_power_2halo_cross_galaxies(self,name="nfw",name_gal="nfw"):
-        pass
+    # def get_power_1halo_cross_galaxies(self,name="nfw",name_gal="nfw"):
+    #     pass
+    # def get_power_2halo_cross_galaxies(self,name="nfw",name_gal="nfw"):
+    #     pass
 
-    def get_power_1halo_auto(self,name="nfw"):
+    def get_power_1halo(self,name="nfw",name2=None):
+        name2 = name if name2 is None else name2
         ms = self.ms[...,None]
-        integrand = self.nzm[...,None] * ms**2. * self.uk_profiles[name]**2. /self.rho_matter_z(0)**2.
+        integrand = self.nzm[...,None] * ms**2. * self.uk_profiles[name]*self.uk_profiles[name2] /self.rho_matter_z(0)**2.
         return np.trapz(integrand,ms,axis=-2)*(1.-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
     
-    def get_power_2halo_auto(self,name="nfw",verbose=False):
+    def get_power_2halo(self,name="nfw",name2=None,verbose=False):
+        def _2haloint(profile):
+            integrand = self.nzm[...,None] * ms * profile /self.rho_matter_z(0) * self.bh[...,None]
+            integral = np.trapz(integrand,ms,axis=-2)
+            return integral
+            
         ms = self.ms[...,None]
-        integrand = self.nzm[...,None] * ms * self.uk_profiles[name] /self.rho_matter_z(0) * self.bh[...,None]
-        integral = np.trapz(integrand,ms,axis=-2)
+        integral = _2haloint(self.uk_profiles[name])
+        if (name2 is None) or (name2==name): integral2 = integral.copy()
+        else: integral2 = _2haloint(self.uk_profiles[name2])
+            
         # consistency relation : Correct for part that's missing from low-mass halos to get P(k->0) = Plinear
         consistency_integrand = self.nzm[...,None] * ms /self.rho_matter_z(0) * self.bh[...,None]
         consistency = np.trapz(consistency_integrand,ms,axis=-2)
         if verbose: print("Two-halo consistency: " , consistency)
-        return self.Pzk * (integral+1-consistency)**2. 
+        return self.Pzk * (integral+1-consistency)*(integral2+1-consistency)
         
-    def get_power_1halo_galaxy_auto(self):
-        pass
+    # def get_power_1halo_galaxy_auto(self):
+    #     pass
     
-    def get_power_2halo_galaxy_auto(self):
-        pass
+    # def get_power_2halo_galaxy_auto(self):
+    #     pass
 
     def gas_profile(self,r,m200meanz):
         pass
