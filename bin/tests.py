@@ -373,10 +373,10 @@ def test_hod():
     for i in range(zs.size):
         pl = io.Plotter(xyscale='loglog')
         pl.add(ks,pmm[i]*bg[i]**2.,label='bg^2 Pmm')
-        # pl.add(ks,pmm[i],label='Pmm')
+        pl.add(ks,pmm[i],label='Pmm')
         pl.add(ks,pgg[i],label='Pgg',ls="--")
-        # pl.add(ks,pee[i],label='Pee')
-        # pl.add(ks,pge[i],label='Pge')
+        pl.add(ks,pee[i],label='Pee')
+        pl.add(ks,pge[i],label='Pge')
         pl.done()
 
     

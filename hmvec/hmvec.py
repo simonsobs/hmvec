@@ -468,11 +468,6 @@ class HaloCosmology(object):
         self.hods[name]['NsNsm1'] = NsNsm1
         self.hods[name]['NcNs'] = NcNs
         self.hods[name]['ngal'] = self.get_ngal(Ncs,Nss)
-        print(self.hods[name]['ngal'])
-        print(self.hods[name]['Nc'])
-        print(self.hods[name]['Ns'])
-        print(self.hods[name]['NcNs'])
-        print(self.hods[name]['NsNsm1'])
         self.hods[name]['bg'] = self.get_bg(Ncs,Nss,self.hods[name]['ngal'])
         self.hods[name]['satellite_profile'] = satellite_profile_name
         self.hods[name]['central_profile'] = central_profile_name
@@ -538,26 +533,30 @@ class HaloCosmology(object):
             if iname in self.uk_profiles.keys():
                 rterm1 = self._get_matter(iname)
                 rterm01 = self._get_matter(iname,lowklim=True)
+                b = 1
             elif iname in self.hods.keys():
                 rterm1 = self._get_hod(iname)
                 rterm01 = self._get_hod(iname,lowklim=True)
+                b = self.get_bg(self.hods[iname]['Nc'],self.hods[iname]['Ns'],self.hods[iname]['ngal'])[:,None]
             else: raise ValueError
-            return rterm1,rterm01
+            return rterm1,rterm01,b
             
         ms = self.ms[...,None]
 
 
-        iterm1,iterm01 = _get_term(name)
-        iterm2,iterm02 = _get_term(name2)
+        iterm1,iterm01,b1 = _get_term(name)
+        iterm2,iterm02,b2 = _get_term(name2)
         
         integral = _2haloint(iterm1)
         integral2 = _2haloint(iterm2)
             
-        # consistency relation : Correct for part that's missing from low-mass halos to get P(k->0) = Plinear
+        # consistency relation : Correct for part that's missing from low-mass halos to get P(k->0) = b1*b2*Plinear
         consistency1 = _2haloint(iterm01)
-        consistency2 = _2haloint(iterm01)
-        if verbose: print("Two-halo consistency: " , consistency)
-        return self.Pzk * (integral+1-consistency1)*(integral2+1-consistency2)
+        consistency2 = _2haloint(iterm02)
+        if verbose:
+            print("Two-halo consistency1: " , consistency1)
+            print("Two-halo consistency2: " , consistency2)
+        return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
         
 
     def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
@@ -759,7 +758,6 @@ def Mhalo_stellar(z,log10mstellar):
 
 def avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar=default_params['hod_sig_log_mstellar']):
     """<Nc(m)>"""
-    sig_log_mstellar = 0.2
     log10mstar = Mstellar_halo(z,log10mhalo)
     num = log10mstellar_thresh - log10mstar
     denom = np.sqrt(2.) * sig_log_mstellar
