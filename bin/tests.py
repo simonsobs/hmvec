@@ -353,12 +353,13 @@ def test_hod():
     ms = np.geomspace(1e7,1e17,2000)
     hcos = hmvec.HaloCosmology(zs,ks,ms,nfw_numeric=False)
     hcos.add_hod("g",mthresh=10**10.5+zs*0.,corr="max")
-    # pl = io.Plotter(xyscale='loglog')
-    # for i in range(zs.size):
-    #     pl.add(ms,hcos.hods['g']['Nc'][i])
-    #     pl.add(ms,hcos.hods['g']['Ns'][i],ls='--')
-    # pl._ax.set_ylim(1e-1,2e3)
-    # pl.done()
+    
+    pl = io.Plotter(xyscale='loglog')
+    for i in range(zs.size):
+        pl.add(ms,hcos.hods['g']['Nc'][i])
+        pl.add(ms,hcos.hods['g']['Ns'][i],ls='--')
+    pl._ax.set_ylim(1e-1,2e3)
+    pl.done()
 
     hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=30000)
     
@@ -378,7 +379,15 @@ def test_hod():
         pl.done()
 
     
+def test_hod_bisection():
 
+    zs = np.linspace(0.,3.,3) #np.array([0.])
+    ks = np.geomspace(1e-4,100,100)
+    ms = np.geomspace(1e7,1e17,2000)
+    hcos = hmvec.HaloCosmology(zs,ks,ms,nfw_numeric=False)
+    hcos.add_hod("g",ngal=np.array([1e-3,1e-4,1e-5]),corr="max")
+
+#test_hod_bisection()
 test_hod()
 #test_gas_fft()
 #test_mcon()
