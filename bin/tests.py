@@ -2,6 +2,7 @@ import hmvec
 import numpy as np
 from orphics import io
 from enlib import bench
+import os,sys
 
 def test_fft_integral():
     dx = 0.001
@@ -213,8 +214,8 @@ def test_pmm():
     # pl.done()
     
     
-    pmm_1h = hcos.get_power_1halo_auto(name="nfw")
-    pmm_2h = hcos.get_power_2halo_auto(name="nfw")
+    pmm_1h = hcos.get_power_1halo(name="nfw")
+    pmm_2h = hcos.get_power_2halo(name="nfw")
     
     # sys.exit()
     print(pmm_1h.shape)
@@ -300,11 +301,10 @@ def test_mcon():
 
 def test_gas_fft():
 
-    zs = np.array([0.6])
+    zs = np.array([0.6,1.0])
     ks = np.geomspace(1e-4,100,100)
     ms = np.geomspace(1e7,1e17,2000)
     hcos = hmvec.HaloCosmology(zs,ks,ms,nfw_numeric=False)
-    
     hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=30000)
     # hcos.add_nfw_profile("electron",numeric=False)
     
@@ -336,18 +336,53 @@ def test_gas_fft():
     fc = hcos.p['omch2']/omtoth2
     fb = hcos.p['ombh2']/omtoth2
 
-    Pnn = pmm_1h[0]+pmm_2h[0]
-    Pee = pee_1h[0]+pee_2h[0]
-    Pne = pme_1h[0]+pme_2h[0]
-    Pmm = fc**2.*Pnn + 2.*fc*fb*Pne + fb*fb*Pee
     pl = io.Plotter(xyscale='loglin',xlabel='$k \\mathrm{Mpc}^{-1}$',ylabel='$P_{mm}^{\\rm{fb}}/P_{mm}^{\\rm{no-fb}}$')
-    pl.add(ks,Pmm/Pnn)
+    for i in range(zs.size):
+        Pnn = pmm_1h[i]+pmm_2h[i]
+        Pee = pee_1h[i]+pee_2h[i]
+        Pne = pme_1h[i]+pme_2h[i]
+        Pmm = fc**2.*Pnn + 2.*fc*fb*Pne + fb*fb*Pee
+        pl.add(ks,Pmm/Pnn)
     pl.hline(y=1)
     pl.done("feedback.pdf")
     
+def test_hod():
 
+    zs = np.linspace(0.,3.,3) #np.array([0.])
+    ks = np.geomspace(1e-4,100,100)
+    ms = np.geomspace(1e7,1e17,2000)
+    hcos = hmvec.HaloCosmology(zs,ks,ms,nfw_numeric=False)
+    hcos.add_hod("g",mthresh=10**10.5+zs*0.,corr="max")
+    
+    # pl = io.Plotter(xyscale='loglog')
+    # for i in range(zs.size):
+    #     pl.add(ms,hcos.hods['g']['Nc'][i])
+    #     pl.add(ms,hcos.hods['g']['Ns'][i],ls='--')
+    # pl._ax.set_ylim(1e-1,2e3)
+    # pl.done()
 
-test_gas_fft()
+    hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=30000)
+    
+    pmm = hcos.get_power_1halo(name="nfw") + hcos.get_power_2halo(name="nfw")
+    pee = hcos.get_power_1halo(name="electron") + hcos.get_power_2halo(name="electron")
+    pgg =  hcos.get_power_2halo(name="g") + hcos.get_power_1halo(name="g")
+    print(pgg)
+    pge = hcos.get_power_1halo("g","electron") + hcos.get_power_2halo("g","electron")
+    #sys.exit()
+    bg = hcos.hods['g']['bg']
+    for i in range(zs.size):
+        pl = io.Plotter(xyscale='loglog')
+        pl.add(ks,pmm[i]*bg[i]**2.,label='bg^2 Pmm')
+        # pl.add(ks,pmm[i],label='Pmm')
+        pl.add(ks,pgg[i],label='Pgg',ls="--")
+        # pl.add(ks,pee[i],label='Pee')
+        # pl.add(ks,pge[i],label='Pge')
+        pl.done()
+
+    
+
+test_hod()
+#test_gas_fft()
 #test_mcon()
 #test_battaglia()
 #test_massfn()

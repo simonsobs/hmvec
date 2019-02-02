@@ -110,6 +110,9 @@ default_params = {
     'wa': 0.,
     'num_massive_neutrinos':3,
 
+    # HOD
+    'hod_sig_log_mstellar': 0.2,
+
 }
     
 
@@ -141,6 +144,7 @@ class HaloCosmology(object):
         self.zs = np.asarray(zs)
         self.ks = ks
         self.ms = ms
+        self.hods = {}
         
         # Cosmology
         self._init_cosmology(self.p,halofit)
@@ -154,6 +158,7 @@ class HaloCosmology(object):
                     
 
     def update_param(self,param,value,halofit=None):
+        raise NotImplementedError # work in progress
         cosmo_params = ['omch2','ombh2','H0','ns','As','mnu','w0','tau','nnu','wa','num_massive_neutrinos']
         self.p[param] = value
         if param in cosmo_params:
@@ -327,6 +332,9 @@ class HaloCosmology(object):
     def add_battaglia_profile(self,name,family=None,param_override={},
                               nxs=None,
                               xmax=None):
+        assert name not in self.uk_profiles.keys(), "Profile name already exists."
+        assert name!='nfw', "Name nfw is reserved."
+        
         # Set default parameters
         if family is None: family = self.p['battaglia_gas_family'] # AGN or SH?
         pparams = {}
@@ -352,7 +360,7 @@ class HaloCosmology(object):
         cs = self.concentration()
         delta_rhos2 = 200.*self.rho_critical_z(self.zs)
         m200critz = mdelta_from_mdelta(self.ms,cs,delta_rhos1,delta_rhos2)
-        r200critz = R_from_M(m200critz,self.rho_critical_z(self.zs),delta=200.)
+        r200critz = R_from_M(m200critz,self.rho_critical_z(self.zs)[:,None],delta=200.)
 
         # Generate profiles
         """
@@ -399,6 +407,7 @@ class HaloCosmology(object):
         nxs decides accuracy on small scales
         
         """
+        assert name not in self.uk_profiles.keys(), "Profile name already exists."
         if nxs is None: nxs = self.p['nfw_integral_numxs']
         if xmax is None: xmax = self.p['nfw_integral_xmax']
         cs = self.concentration()
@@ -418,44 +427,138 @@ class HaloCosmology(object):
             self.uk_profiles[name] = ukouts.copy()
         
         return self.ks,ukouts
+
+    def add_hod(self,name,mthresh=None,ngal=None,corr="max",
+                satellite_profile_name='nfw',
+                central_profile_name=None):
+        """
+        Specify an HOD.
+        This requires either a stellar mass threshold mthresh (nz,)
+        or a number density ngal (nz,) from which mthresh is identified iteratively.
+        You can either specify a corr="max" maximally correlated central-satellite 
+        model or a corr="min" minimally correlated model.
+
+        Miscentering could be included through central_profile_name (default uk=1 for default name of None).
+
+        """
+        assert name not in self.uk_profiles.keys(), \
+            "HOD name already used by profile."
+        assert satellite_profile_name in self.uk_profiles.keys(), \
+            "No matter profile by that name exists."
+        if central_profile_name is not None:
+            assert central_profile_name in self.uk_profiles.keys(), \
+                "No matter profile by that name exists."
+        if ngal is not None:
+            assert ngal.size == self.zs.size
+            assert mthresh is None
+            raise NotImplementedError
+        assert mthresh.size == self.zs.size
+        assert name not in self.hods.keys(), "HOD with that name already exists."
+
+        log10mhalo = np.log10(self.ms[None,:])
+        log10mstellar_thresh = np.log10(mthresh[:,None])
+        Ncs = avg_Nc(log10mhalo,self.zs[:,None],log10mstellar_thresh,sig_log_mstellar=self.p['hod_sig_log_mstellar'])
+        Nss = avg_Ns(log10mhalo,self.zs[:,None],log10mstellar_thresh,Nc=Ncs,sig_log_mstellar=self.p['hod_sig_log_mstellar'])
+        NsNsm1 = np.nan_to_num(avg_NsNsm1(Ncs,Nss,corr)) # FIXME: treat division by zero better
+        NcNs = avg_NcNs(Ncs,Nss,corr)
         
+        self.hods[name] = {}
+        self.hods[name]['Nc'] = Ncs
+        self.hods[name]['Ns'] = Nss
+        self.hods[name]['NsNsm1'] = NsNsm1
+        self.hods[name]['NcNs'] = NcNs
+        self.hods[name]['ngal'] = self.get_ngal(Ncs,Nss)
+        print(self.hods[name]['ngal'])
+        print(self.hods[name]['Nc'])
+        print(self.hods[name]['Ns'])
+        print(self.hods[name]['NcNs'])
+        print(self.hods[name]['NsNsm1'])
+        self.hods[name]['bg'] = self.get_bg(Ncs,Nss,self.hods[name]['ngal'])
+        self.hods[name]['satellite_profile'] = satellite_profile_name
+        self.hods[name]['central_profile'] = central_profile_name
+        
+    def get_ngal(self,Nc,Ns):
+        integrand = self.nzm * (Nc+Ns)
+        return np.trapz(integrand,self.ms,axis=-1)        
 
-    # def get_power_1halo_cross_galaxies(self,name="nfw",name_gal="nfw"):
-    #     pass
-    # def get_power_2halo_cross_galaxies(self,name="nfw",name_gal="nfw"):
-    #     pass
+    def get_bg(self,Nc,Ns,ngal):
+        integrand = self.nzm * (Nc+Ns) * self.bh
+        return np.trapz(integrand,self.ms,axis=-1)/ngal
+    
 
+    def _get_hod_common(self,name):
+        hod = self.hods[name]
+        cname = hod['central_profile']
+        sname = hod['satellite_profile']
+        uc = 1 if cname is None else self.uk_profiles[cname]
+        us = self.uk_profiles[sname]
+        return hod,uc,us
+    
+    def _get_hod_square(self,name):
+        hod,uc,us = self._get_hod_common(name)
+        return (2.*uc*us*hod['NcNs'][...,None]+hod['NsNsm1'][...,None]*us**2.)/hod['ngal'][...,None,None]**2.
+
+    def _get_hod(self,name,lowklim=False):
+        hod,uc,us = self._get_hod_common(name)
+        if lowklim:
+            uc = 1
+            us = 1
+        return (uc*hod['Nc'][...,None]+us*hod['Ns'][...,None])/hod['ngal'][...,None,None]
+    
+    def _get_matter(self,name,lowklim=False):
+        ms = self.ms[...,None]
+        uk = self.uk_profiles[name]
+        if lowklim: uk = 1
+        return ms*uk/self.rho_matter_z(0)
+    
     def get_power_1halo(self,name="nfw",name2=None):
         name2 = name if name2 is None else name2
         ms = self.ms[...,None]
-        integrand = self.nzm[...,None] * ms**2. * self.uk_profiles[name]*self.uk_profiles[name2] /self.rho_matter_z(0)**2.
+        mnames = self.uk_profiles.keys()
+        hnames = self.hods.keys()
+        
+        if (name in mnames) and (name2 in mnames): square_term = self._get_matter(name)*self._get_matter(name2)
+        elif (name in hnames) and (name2 in hnames): square_term = self._get_hod_square(name)
+        elif (name in hnames) and (name2 in mnames): square_term = self._get_hod(name)*self._get_matter(name2)
+        elif (name2 in hnames) and (name in mnames): square_term = self._get_hod(name2)*self._get_matter(name)
+        else: raise ValueError
+        
+        integrand = self.nzm[...,None] * square_term
         return np.trapz(integrand,ms,axis=-2)*(1.-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
     
     def get_power_2halo(self,name="nfw",name2=None,verbose=False):
-        def _2haloint(profile):
-            integrand = self.nzm[...,None] * ms * profile /self.rho_matter_z(0) * self.bh[...,None]
+        name2 = name if name2 is None else name2
+        
+        def _2haloint(iterm):
+            integrand = self.nzm[...,None] * iterm * self.bh[...,None]
             integral = np.trapz(integrand,ms,axis=-2)
             return integral
+
+        def _get_term(iname):
+            if iname in self.uk_profiles.keys():
+                rterm1 = self._get_matter(iname)
+                rterm01 = self._get_matter(iname,lowklim=True)
+            elif iname in self.hods.keys():
+                rterm1 = self._get_hod(iname)
+                rterm01 = self._get_hod(iname,lowklim=True)
+            else: raise ValueError
+            return rterm1,rterm01
             
         ms = self.ms[...,None]
-        integral = _2haloint(self.uk_profiles[name])
-        if (name2 is None) or (name2==name): integral2 = integral.copy()
-        else: integral2 = _2haloint(self.uk_profiles[name2])
+
+
+        iterm1,iterm01 = _get_term(name)
+        iterm2,iterm02 = _get_term(name2)
+        
+        integral = _2haloint(iterm1)
+        integral2 = _2haloint(iterm2)
             
         # consistency relation : Correct for part that's missing from low-mass halos to get P(k->0) = Plinear
-        consistency_integrand = self.nzm[...,None] * ms /self.rho_matter_z(0) * self.bh[...,None]
-        consistency = np.trapz(consistency_integrand,ms,axis=-2)
+        consistency1 = _2haloint(iterm01)
+        consistency2 = _2haloint(iterm01)
         if verbose: print("Two-halo consistency: " , consistency)
-        return self.Pzk * (integral+1-consistency)*(integral2+1-consistency)
+        return self.Pzk * (integral+1-consistency1)*(integral2+1-consistency2)
         
-    # def get_power_1halo_galaxy_auto(self):
-    #     pass
-    
-    # def get_power_2halo_galaxy_auto(self):
-    #     pass
-
-    def gas_profile(self,r,m200meanz):
-        pass
 
     def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
         """
@@ -594,20 +697,17 @@ def Mstellar_halo(z,log10mhalo):
     # Function to compute the stellar mass Mstellar from a halo mass mv at redshift z.
     # z = list of redshifts
     # log10mhalo = log of the halo mass
-    log10mstar = np.linspace(-18,18,1000)
+    # FIXME: can the for loop be removed?
+    # FIXME: is the zero indexing safe?
+    
+    log10mstar = np.linspace(-18,18,4000)[None,:]
     mh = Mhalo_stellar(z,log10mstar)
-    mstar = np.interp(log10mhalo,mh,log10mstar)
+    mstar = np.zeros((z.shape[0],log10mhalo.shape[-1]))
+    for i in range(z.size):
+        mstar[i] = np.interp(log10mhalo[0],mh[i],log10mstar[0])
     return mstar
 
-
-def Mhalo_stellar(z,log10mstellar):
-    # Function to compute halo mass as a function of the stellar mass. arxiv 1001.0015 Table 2
-    # z = list of redshifts
-    # log10mhalo = log of the halo mass
-    a = 1./(1+z) 
-    Mstar00=10.72 ; Mstara=0.55 ; M1=12.35 ; M1a=0.28
-    beta0=0.44 ; beta_a=0.18 ; gamma0=1.56 ; gamma_a=2.51
-    delta0=0.57 ; delta_a=0.17
+def Mhalo_stellar_core(log10mstellar,a,Mstar00,Mstara,M1,M1a,beta0,beta_a,gamma0,gamma_a,delta0,delta_a):
     log10M1 = M1 + M1a*(a-1)
     log10Mstar0 = Mstar00 + Mstara*(a-1)
     beta = beta0 + beta_a*(a-1)
@@ -617,8 +717,47 @@ def Mhalo_stellar(z,log10mstellar):
     log10mh = -0.5 + log10M1 + beta*(log10mstar-log10Mstar0) + 10**(delta*(log10mstar-log10Mstar0))/(1.+ 10**(-gamma*(log10mstar-log10Mstar0)))
     return log10mh
 
+def Mhalo_stellar(z,log10mstellar):
+    # Function to compute halo mass as a function of the stellar mass. arxiv 1001.0015 Table 2
+    # z = list of redshifts
+    # log10mhalo = log of the halo mass
+    
+    output = np.zeros((z.size,log10mstellar.shape[-1]))
+    
+    a = 1./(1+z)
+    log10mstellar = log10mstellar + z*0
+    
+    Mstar00=10.72
+    Mstara=0.55
+    M1=12.35
+    M1a=0.28
+    beta0=0.44
+    beta_a=0.18
+    gamma0=1.56
+    gamma_a=2.51
+    delta0=0.57
+    delta_a=0.17
+    
+    sel1 = np.where(z.reshape(-1)<=0.8)
+    output[sel1] = Mhalo_stellar_core(log10mstellar[sel1],a[sel1],Mstar00,Mstara,M1,M1a,beta0,beta_a,gamma0,gamma_a,delta0,delta_a)
+    
+    Mstar00=11.09
+    Mstara=0.56
+    M1=12.27
+    M1a=-0.84
+    beta0=0.65
+    beta_a=0.31
+    gamma0=1.12
+    gamma_a=-0.53
+    delta0=0.56
+    delta_a=-0.12
+    
+    sel1 = np.where(z.reshape(-1)>0.8)
+    output[sel1] = Mhalo_stellar_core(log10mstellar[sel1],a[sel1],Mstar00,Mstara,M1,M1a,beta0,beta_a,gamma0,gamma_a,delta0,delta_a)
+    return output
 
-def avg_Nc(log10mhalo,z,log10mstellar_thresh):
+
+def avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar=default_params['hod_sig_log_mstellar']):
     """<Nc(m)>"""
     sig_log_mstellar = 0.2
     log10mstar = Mstellar_halo(z,log10mhalo)
@@ -626,7 +765,7 @@ def avg_Nc(log10mhalo,z,log10mstellar_thresh):
     denom = np.sqrt(2.) * sig_log_mstellar
     return 0.5*(1. - erf(num/denom))
 
-def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None):
+def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None,sig_log_mstellar=default_params['hod_sig_log_mstellar']):
     Bsat=9.04
     betasat=0.74
     alphasat=1.
@@ -635,13 +774,21 @@ def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None):
     mthresh = Mhalo_stellar(z,log10mstellar_thresh)
     Msat=(10.**(12.))*Bsat*10**((mthresh-12)*betasat)
     Mcut=(10.**(12.))*Bcut*10**((mthresh-12)*betacut)
-    Nc = avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar=0.2) if Nc is None else Nc
+    Nc = avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar=sig_log_mstellar) if Nc is None else Nc
     masses = 10**log10mhalo
     return Nc*((masses/Msat)**alphasat)*np.exp(-Mcut/(masses))    
 
-def avg_NsNsm1(log10mhalo,z,log10mstellar_thresh,corr="max"):
+def avg_NsNsm1(Nc,Ns,corr="max"):
     if corr=='max':
-        return 
+        return Ns**2./Nc
+    elif corr=='min':
+        return Ns**2.
+    
+def avg_NcNs(Nc,Ns,corr="max"):
+    if corr=='max':
+        return Ns
+    elif corr=='min':
+        return Ns*Nc
 
 """
 Profiles

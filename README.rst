@@ -79,5 +79,11 @@ Cross-spectra can also be calculated:
    pme_1h = hcos.get_power_1halo("nfw","electron")
    pme_2h = hcos.get_power_2halo("nfw","electron")
    
-Galaxy power spectra through HOD and associated cross-spectra are
-currently being implemented and tested.
+An HOD can be added as follows:
+
+.. code-block:: python
+				
+   hcos.add_hod(name="g",mthresh=10**10.5+zs*0.)
+
+and galaxy spectra and cross-spectra with matter and electrons can be
+calculated just as above by specifying the chosen name for the HOD.
