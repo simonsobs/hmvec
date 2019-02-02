@@ -353,7 +353,6 @@ def test_hod():
     ms = np.geomspace(1e7,1e17,2000)
     hcos = hmvec.HaloCosmology(zs,ks,ms,nfw_numeric=False)
     hcos.add_hod("g",mthresh=10**10.5+zs*0.,corr="max")
-    
     # pl = io.Plotter(xyscale='loglog')
     # for i in range(zs.size):
     #     pl.add(ms,hcos.hods['g']['Nc'][i])
@@ -366,7 +365,6 @@ def test_hod():
     pmm = hcos.get_power_1halo(name="nfw") + hcos.get_power_2halo(name="nfw")
     pee = hcos.get_power_1halo(name="electron") + hcos.get_power_2halo(name="electron")
     pgg =  hcos.get_power_2halo(name="g") + hcos.get_power_1halo(name="g")
-    print(pgg)
     pge = hcos.get_power_1halo("g","electron") + hcos.get_power_2halo("g","electron")
     #sys.exit()
     bg = hcos.hods['g']['bg']
