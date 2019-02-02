@@ -5,7 +5,7 @@ from scipy.interpolate import interp1d
 import camb
 from camb import model
 import numpy as np
-from . import tinker
+from . import tinker,utils
 import scipy
 from scipy.integrate import simps
 
@@ -112,7 +112,10 @@ default_params = {
 
     # HOD
     'hod_sig_log_mstellar': 0.2,
-
+    'hod_bisection_search_min_log10mthresh': 7.,
+    'hod_bisection_search_max_log10mthresh': 14.,
+    'hod_bisection_search_rtol': 1e-4,
+    'hod_bisection_search_warn_iter': 20,
 }
     
 
@@ -155,6 +158,8 @@ class HaloCosmology(object):
         # Profiles
         self.uk_profiles = {}
         if not(skip_nfw): self.add_nfw_profile("nfw",numeric=nfw_numeric)
+
+
                     
 
     def update_param(self,param,value,halofit=None):
@@ -448,12 +453,28 @@ class HaloCosmology(object):
         if central_profile_name is not None:
             assert central_profile_name in self.uk_profiles.keys(), \
                 "No matter profile by that name exists."
+        assert name not in self.hods.keys(), "HOD with that name already exists."
+        self.hods[name] = {}
         if ngal is not None:
             assert ngal.size == self.zs.size
             assert mthresh is None
-            raise NotImplementedError
+
+            nfunc = lambda ilog10mthresh: ngal_from_mthresh(ilog10mthresh,
+                                                            self.zs,
+                                                            self.nzm,
+                                                            self.ms,
+                                                            sig_log_mstellar=self.p['hod_sig_log_mstellar'])
+
+            log10mthresh = utils.vectorized_bisection_search(ngal,nfunc,
+                                                             [self.p['hod_bisection_search_min_log10mthresh'],
+                                                              self.p['hod_bisection_search_max_log10mthresh']],
+                                                             "decreasing",
+                                                             rtol=self.p['hod_bisection_search_rtol'],
+                                                             verbose=True,
+                                                             hang_check_num_iter=self.p['hod_bisection_search_warn_iter'])
+            mthresh = 10**log10mthresh
+            
         assert mthresh.size == self.zs.size
-        assert name not in self.hods.keys(), "HOD with that name already exists."
 
         log10mhalo = np.log10(self.ms[None,:])
         log10mstellar_thresh = np.log10(mthresh[:,None])
@@ -462,7 +483,6 @@ class HaloCosmology(object):
         NsNsm1 = np.nan_to_num(avg_NsNsm1(Ncs,Nss,corr)) # FIXME: treat division by zero better
         NcNs = avg_NcNs(Ncs,Nss,corr)
         
-        self.hods[name] = {}
         self.hods[name]['Nc'] = Ncs
         self.hods[name]['Ns'] = Nss
         self.hods[name]['NsNsm1'] = NsNsm1
@@ -472,9 +492,7 @@ class HaloCosmology(object):
         self.hods[name]['satellite_profile'] = satellite_profile_name
         self.hods[name]['central_profile'] = central_profile_name
         
-    def get_ngal(self,Nc,Ns):
-        integrand = self.nzm * (Nc+Ns)
-        return np.trapz(integrand,self.ms,axis=-1)        
+    def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
 
     def get_bg(self,Nc,Ns,ngal):
         integrand = self.nzm * (Nc+Ns) * self.bh
@@ -1022,3 +1040,17 @@ def generic_profile_fft(rhofunc_x,cmaxs,rss,zs,ks,xmax,nxs):
     # pl.hline(y=1)
     # pl.done()
     return ks, ukouts
+
+
+def ngal_from_mthresh(log10mthresh=None,zs=None,nzm=None,ms=None,sig_log_mstellar=None,Ncs=None,Nss=None):
+    if (Ncs is None) and (Nss is None):
+        log10mstellar_thresh = log10mthresh[:,None]
+        log10mhalo = np.log10(ms[None,:])    
+        Ncs = avg_Nc(log10mhalo,zs[:,None],log10mstellar_thresh,sig_log_mstellar)
+        Nss = avg_Ns(log10mhalo,zs[:,None],log10mstellar_thresh,Ncs,sig_log_mstellar)
+    else:
+        assert log10mthresh is None
+        assert zs is None
+        assert sig_log_mstellar is None
+    integrand = nzm * (Ncs+Nss)
+    return np.trapz(integrand,ms,axis=-1)        
