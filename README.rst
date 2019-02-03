@@ -54,7 +54,7 @@ the analytic NFW profile is initialized by default.
 .. code-block:: python
 		
 	import hmvec as hm
-	zs = np.linspace(0.1,3.,4)
+	zs = np.linspace(0.,3.,20)
 	ms = np.geomspace(2e10,1e17,200)
 	ks = np.geomspace(1e-4,100,1001)
 	hcos = hm.HaloModel(zs,ks,ms=ms)
@@ -68,7 +68,7 @@ be FFTd numerically to get the electron power spectrum, which is done as follows
 
 .. code-block:: python
 				
-   hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=10000)
+   hcos.add_battaglia_profile("electron",family="AGN",xmax=20,nxs=5000)
    pee_1h = hcos.get_power_1halo(name="electron")
    pee_2h = hcos.get_power_2halo(name="electron")
 	
@@ -100,11 +100,6 @@ spectrum and pass it to the relevant member function of `cosmology.Cosmology`,
 
 .. code-block:: python
 				
-   zs = np.linspace(0.,3.,30)
-   ms = np.geomspace(2e10,1e17,200)
-   ks = np.geomspace(1e-4,100,1001)
-   hcos = hm.HaloModel(zs,ks,ms=ms)
-   
    pmm_1h = hcos.get_power_1halo(name="nfw")
    pmm_2h = hcos.get_power_2halo(name="nfw")
    Pmm = pmm_1h + pmm_2h
