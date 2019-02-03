@@ -1,3 +1,9 @@
+import numpy as np
+from scipy.interpolate import interp2d
+from .params import default_params
+import camb
+from camb import model
+import scipy.interpolate as si
 
 """
 This module will (eventually) abstract away the choice of boltzmann codes.
@@ -10,11 +16,17 @@ results. It could be a test-bed for converging towards that.
 
 class Cosmology(object):
 
-    def __init__(self,params,engine='camb'):
+    def __init__(self,params,halofit=None,engine='camb'):
+
         assert engine in ['camb','class']
         if engine=='class': raise NotImplementedError
-
-        pass
+        
+        self.p = params
+        for param in default_params.keys():
+            if param not in self.p.keys(): self.p[param] = default_params[param]
+        
+        # Cosmology
+        self._init_cosmology(self.p,halofit)
 
 
     def P_mm_linear(self,zs,ks):
@@ -26,8 +38,13 @@ class Cosmology(object):
     def comoving_radial_distance(self,z):
         return self.results.comoving_radial_distance(z)
 
-    def hubble(self,z):
-        pass
+    def hubble_parameter(self,z):
+        # H(z) in km/s/Mpc
+        return self.results.hubble_parameter(z)
+    
+    def h_of_z(self,z):
+        # H(z) in 1/Mpc
+        return self.results.h_of_z(z)
 
     def _init_cosmology(self,params,halofit):
         try:
@@ -53,11 +70,6 @@ class Cosmology(object):
         self.h = self.params['H0']/100.
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
         self.om0 = omh2 / (self.params['H0']/100.)**2.
-        self.chis = self.comoving_radial_distance(self.zs)
-        self.Hzs = self.results.hubble_parameter(self.zs)
-        self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
-        if halofit is not None: self.nPzk = self._get_matter_power(self.zs,self.ks,nonlinear=True)
-
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
         PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
@@ -73,7 +85,7 @@ class Cosmology(object):
     def omz(self,z): return self.rho_matter_z(z)/self.rho_critical_z(z)
     
     def rho_critical_z(self,z):
-        Hz = self.hubble(z) * 3.241e-20 # SI # FIXME: constants need checking
+        Hz = self.hubble_parameter(z) * 3.241e-20 # SI # FIXME: constants need checking
         G = 6.67259e-11 # SI
         rho = 3.*(Hz**2.)/8./np.pi/G # SI
         return rho * 1.477543e37 # in msolar / megaparsec3
@@ -220,7 +232,7 @@ class Cosmology(object):
             res = fb * Tb + fc * Tc
         return res
 
-    def lensing_window(self,ezs,zs=None,dndz=None):
+    def lensing_window(self,ezs,zs,dndz=None):
         """
         Generates a lensing convergence window 
         W(z).
@@ -230,40 +242,85 @@ class Cosmology(object):
         for a top-hat window. If a single number, and no dndz is provided,
         it is a delta function source at zs.
         """
-
-        pass
+        zs = np.array(zs).reshape(-1)
+        H0 = self.h_of_z(0.)
+        H = self.h_of_z(ezs)
+        chis = self.comoving_radial_distance(ezs)
+        print(zs.shape)
+        chistar = self.comoving_radial_distance(zs)
+        if zs.size==1:
+            assert dndz is None
+            integrand = (chistar - chis)/chistar
+            integral = integrand
+            integral[ezs>zs] = 0
+        else:
+            nznorm = np.trapz(zs,dndz)
+            dndz = dndz/nznorm
+            # integrand has shape (num_z,num_zs) to be integrated over zs
+            integrand = (chistar[None,:] - chis[:,None])/chistar[None,:] * dndz[None,:]
+            for i in range(integrand.shape[0]): integrand[i][zs<ezs[i]] = 0 # FIXME: vectorize this
+            integral = np.trapz(zs,integrand,axis=-1)
+            
+        return 1.5*self.om0*H0**2.*(1.+ezs)*chis/H * integral
 
     def C_kg(self,ells,ks,Pgm,gzs,gdndz=None,lzs=None,ldndz=None,lwindow=None):
         gzs = np.asarray(gzs)
-        if lwindow is None: lwindow = self.lensing_window(gzs,lzs,ldndz)
+        if lwindow is None: Wz1s = self.lensing_window(gzs,lzs,ldndz)
         chis = self.comoving_radial_distance(gzs)
-        nznorm = np.trapz(gzs,gndz)
-        
+        hzs = self.h_of_z(gzs) # 1/Mpc
+        if gzs.size>1:
+            nznorm = np.trapz(gzs,gndz)
+            Wz2s = dndz/nznorm
+        else:
+            Wz2s = 1.
+        return limber_integral(ells,gzs,ks,Pgm,Wz1s,Wz2s,hzs,chis)
 
-        return limber_integral(ells,zs,ks,Pzks,Wzs,chis)        
+    def C_gg(self,ells,ks,Pgg,gzs,dndz=None,zmin=None,zmax=None):
+        gzs = np.asarray(gzs)
+        chis = self.comoving_radial_distance(gzs)
+        hzs = self.h_of_z(gzs) # 1/Mpc
+        if gzs.size>1:
+            nznorm = np.trapz(gzs,gndz)
+            Wz1s = dndz/nznorm
+            Wz2s = dndz/nznorm
+        else:
+            dchi = self.comoving_radial_distance(zmax) - self.comoving_radial_distance(zmin)
+            Wz1s = 1.
+            Wz2s = 1./dchi/hzs
+        return limber_integral(ells,gzs,ks,Pgg,Wz1s,Wz2s,hzs,chis)
 
-    def C_gg(self,ells,ks,Pgg,gzs,dndz=None):
-        pass
+    def C_kk(self,ells,ks,Pmm,zs,lzs1=None,ldndz1=None,lzs2=None,ldndz2=None,lwindow1=None,lwindow2=None):
+        if lwindow1 is None: lwindow1 = self.lensing_window(zs,lzs1,ldndz1)
+        if lwindow2 is None: lwindow2 = self.lensing_window(zs,lzs2,ldndz2)
+        chis = self.comoving_radial_distance(zs)
+        hzs = self.h_of_z(zs) # 1/Mpc
+        return limber_integral(ells,zs,ks,Pmm,lwindow1,lwindow2,hzs,chis)
 
-    def C_kk(self,ells,ks,Pmm,lzs=None,ldndz=None,lwindow=None):
-        pass
 
-
-def limber_integral(ells,zs,ks,Pzks,Wzs,chis):
+def limber_integral(ells,zs,ks,Pzks,Wz1s,Wz2s,hzs,chis):
     """
-    Get C(ell) = \int dz W(z) Pzks(z,k=ell/chi) / chis**2.
+    Get C(ell) = \int dz (H(z)/c) W1(z) W2(z) Pzks(z,k=ell/chi) / chis**2.
+    ells: (nells,) multipoles looped over
+    zs: redshifts (nz,) corresponding to Pzks, Wz1s, W2zs, Hzs and chis
+    ks: comoving wavenumbers (nks,) corresponding to Pzks
+    Pzks: (nzs,nks) power specrum
+    Wz1s: weight function (nzs,)
+    Wz2s: weight function (nzs,)
+    hzs: Hubble parameter (nzs,) in *1/Mpc* (e.g. camb.results.h_of_z(z))
+    chis: comoving distances (nzs,)
 
     We interpolate P(z,k)
     """
-    Pfunc = np.interp2d(zs,ks,Pzks)
-    w = np.ones(chis.shape)
+
+    integrand = hzs[:,None] * Wz1s[:,None] * Wz2s[:,None] * Pzks  / chis[:,None]**2.
+    f = interp2d(ks,zs,integrand,bounds_error=True)
+    zevals = zs
     Cells = np.zeros(ells.shape)
     for i,ell in enumerate(ells):
-        k=ell/chis
-        integrand = Wzs * Pfunc(zs,k) / chis**2.
-        if zs.size==1:
-            Cells[i] = integrand
-        else:
-            Cells[i] = np.trapz(zs,integrand)
+        kevals = ell/chis
+        # hack suggested in https://stackoverflow.com/questions/47087109/evaluate-the-output-from-scipy-2d-interpolation-along-a-curve
+        # to get around scipy.interpolate limitations
+        integrand0 = si.dfitpack.bispeu(f.tck[0], f.tck[1], f.tck[2], f.tck[3], f.tck[4], kevals, zevals)[0]
+        Cells[i] = np.trapz(integrand0,zevals)
     return Cells
     

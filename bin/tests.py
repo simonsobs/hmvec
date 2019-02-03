@@ -1,6 +1,6 @@
 import hmvec
 import numpy as np
-from orphics import io
+from orphics import io,cosmology
 from enlib import bench
 import os,sys
 
@@ -65,7 +65,7 @@ def test_cosmology():
 
     from enlib import bench
     with bench.show("init"):
-        hcos = hm.HaloCosmology(zs,ks,ms=ms)
+        hcos = hm.HaloModel(zs,ks,ms=ms)
 
     hcos.add_nfw_profile("matter",ms,dr=0.01)
 
@@ -84,7 +84,7 @@ def test_massfn():
 
     from enlib import bench
     with bench.show("init"):
-        hcos = hm.HaloCosmology(zs,ks,ms=ms,mass_function="tinker")
+        hcos = hm.HaloModel(zs,ks,ms=ms,mass_function="tinker")
 
     dndM_ct2 = np.zeros((zs.size,ms.size))
     for i,z in enumerate(zs):
@@ -135,7 +135,7 @@ def test_fft_transform():
     zs = np.linspace(0.1,4.,4)
     ms = np.geomspace(2e9,1e17,5)
     ks = np.geomspace(1e-4,100,1001)
-    hcos = hm.HaloCosmology(zs,ks,ms=ms)
+    hcos = hm.HaloModel(zs,ks,ms=ms)
     with bench.show("nfw"):
         _,ouks = hcos.add_nfw_profile("matter",ms)
     cs = hcos.concentration(ms)
@@ -181,7 +181,7 @@ def test_pmm():
     #print(mmP2h.shape)
     
     
-    hcos = hmvec.HaloCosmology(zs,ks,ms=ms,halofit='mead',mdef='vir',nfw_numeric=True)
+    hcos = hmvec.HaloModel(zs,ks,ms=ms,halofit='mead',mdef='vir',nfw_numeric=True)
 
     mmhb = mmhmod.halobias #np.load("mm_halobias.npy",)
     mmnfn = mmhmod.nfn #np.load("mm_nfn.npy")
@@ -256,7 +256,7 @@ def test_battaglia():
 
     zs = np.array([0.])
     ks = np.geomspace(1e-4,1,10)
-    hcos = hmvec.HaloCosmology(zs,ks,params = {'sigma2_numks':100}, skip_nfw=True)
+    hcos = hmvec.HaloModel(zs,ks,params = {'sigma2_numks':100}, skip_nfw=True)
 
     m200critz = 1.e13
     r = np.geomspace(1e-4,20.,10000)
@@ -281,7 +281,7 @@ def test_mcon():
 
     zs = np.linspace(0.,1.,30)
     ks = np.geomspace(1e-4,1,10)
-    hcos = hmvec.HaloCosmology(zs,ks,params = {'sigma2_numks':100}, skip_nfw=True)
+    hcos = hmvec.HaloModel(zs,ks,params = {'sigma2_numks':100}, skip_nfw=True)
 
     ms = np.geomspace(1e13,1e15,1000)
     cs = hmvec.duffy_concentration(ms[None,:],zs[:,None])
@@ -304,7 +304,7 @@ def test_gas_fft():
     zs = np.array([0.6,1.0])
     ks = np.geomspace(1e-4,100,100)
     ms = np.geomspace(1e7,1e17,2000)
-    hcos = hmvec.HaloCosmology(zs,ks,ms,nfw_numeric=False)
+    hcos = hmvec.HaloModel(zs,ks,ms,nfw_numeric=False)
     hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=30000)
     # hcos.add_nfw_profile("electron",numeric=False)
     
@@ -351,7 +351,7 @@ def test_hod():
     zs = np.linspace(0.,3.,3) #np.array([0.])
     ks = np.geomspace(1e-4,100,100)
     ms = np.geomspace(1e7,1e17,2000)
-    hcos = hmvec.HaloCosmology(zs,ks,ms,nfw_numeric=False)
+    hcos = hmvec.HaloModel(zs,ks,ms,nfw_numeric=False)
     hcos.add_hod("g",mthresh=10**10.5+zs*0.,corr="max")
     
     pl = io.Plotter(xyscale='loglog')
@@ -384,16 +384,56 @@ def test_hod_bisection():
     zs = np.linspace(0.,3.,3) #np.array([0.])
     ks = np.geomspace(1e-4,100,100)
     ms = np.geomspace(1e7,1e17,2000)
-    hcos = hmvec.HaloCosmology(zs,ks,ms,nfw_numeric=False)
+    hcos = hmvec.HaloModel(zs,ks,ms,nfw_numeric=False)
     hcos.add_hod("g",ngal=np.array([1e-3,1e-4,1e-5]),corr="max")
+    
+def test_lensing_window():
 
+    zs = np.geomspace(0.01,10.,100) #np.array([0.])
+    ks = np.geomspace(1e-4,10,100)
+    ms = np.geomspace(1e10,1e17,200)
+    hcos = hmvec.HaloModel(zs,ks,ms,nfw_numeric=False)
+    pmm_1h = hcos.get_power_1halo(name="nfw")
+    pmm_2h = hcos.get_power_2halo(name="nfw")
+
+    Wk = hcos.lensing_window(zs,zs=2.)
+    sigz = 0.1
+    dndz = np.exp(-(zs-2.)**2./2./sigz**2.)
+    Wk2 = hcos.lensing_window(zs,zs,dndz)
+    # print(Wk2)
+    pl = io.Plotter(xyscale='loglin')
+    pl.add(zs,Wk)
+    pl.add(zs,Wk2,ls="--")
+    pl.done()
+
+def test_lensing():
+
+    zs = np.geomspace(0.1,300.,30)
+    ks = np.geomspace(1e-4,20,100)
+    ms = np.geomspace(1e10,1e17,20)
+    hcos = hmvec.HaloModel(zs,ks,ms,nfw_numeric=False)
+    pmm_1h = hcos.get_power_1halo(name="nfw")
+    pmm_2h = hcos.get_power_2halo(name="nfw")
+
+    Wk = hcos.lensing_window(zs,zs=1100.)
+    Pmm = pmm_1h + pmm_2h
+    ells = np.linspace(100,1000,20)
+    ckk = hcos.C_kk(ells,ks,Pmm,zs,lwindow1=Wk,lwindow2=Wk)
+    theory = cosmology.default_theory()
+    
+    pl = io.Plotter(xyscale='linlog')
+    pl.add(ells,ckk)
+    pl.add(ells,theory.gCl('kk',ells),ls='--')
+    pl.done()
+    
+#test_lensing()
 #test_hod_bisection()
-test_hod()
+#test_hod()
 #test_gas_fft()
 #test_mcon()
 #test_battaglia()
 #test_massfn()
 #test_fft_transform()    
-#test_pmm()    
+test_pmm()    
 # test_fft_integral()
 #test_cosmology()
