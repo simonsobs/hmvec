@@ -57,7 +57,7 @@ the analytic NFW profile is initialized by default.
 	zs = np.linspace(0.1,3.,4)
 	ms = np.geomspace(2e10,1e17,200)
 	ks = np.geomspace(1e-4,100,1001)
-	hcos = hm.HaloCosmology(zs,ks,ms=ms)
+	hcos = hm.HaloModel(zs,ks,ms=ms)
 	pmm_1h = hcos.get_power_1halo(name="nfw")
 	pmm_2h = hcos.get_power_2halo(name="nfw")
 
@@ -87,3 +87,26 @@ An HOD can be added as follows:
 
 and galaxy spectra and cross-spectra with matter and electrons can be
 calculated just as above by specifying the chosen name for the HOD.
+
+Lensing
+~~~~~~~
+
+`HaloModel` inherits from `cosmology.Cosmology` which contains some
+convenient functions involving Limber integrals. To get a cosmic shear
+power spectrum for example, you first build the total matter power
+spectrum and pass it to the relevant member function of `cosmology.Cosmology`,
+
+.. code-block:: python
+				
+	zs = np.linspace(0.,3.,30)
+	ms = np.geomspace(2e10,1e17,200)
+	ks = np.geomspace(1e-4,100,1001)
+	hcos = hm.HaloModel(zs,ks,ms=ms)
+
+	pmm_1h = hcos.get_power_1halo(name="nfw")
+	pmm_2h = hcos.get_power_2halo(name="nfw")
+	Pmm = pmm_1h + pmm_2h
+	
+	ells = np.linspace(100,600,10)
+	Cls = hcos.C_kk(ells,ks,Pmm,lzs=2.5)
+

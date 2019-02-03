@@ -1,6 +1,6 @@
 
 """
-This module abstracts away the choice of boltzmann codes.
+This module will (eventually) abstract away the choice of boltzmann codes.
 However, it does it stupidly by simply providing a common
 stunted interface. It makes no guarantee that the same set
 of parameters passed to the two engines will produce the same
@@ -12,6 +12,7 @@ class Cosmology(object):
 
     def __init__(self,params,engine='camb'):
         assert engine in ['camb','class']
+        if engine=='class': raise NotImplementedError
 
         pass
 
@@ -23,7 +24,7 @@ class Cosmology(object):
         pass
 
     def comoving_radial_distance(self,z):
-        pass
+        return self.results.comoving_radial_distance(z)
 
     def hubble(self,z):
         pass
@@ -52,7 +53,7 @@ class Cosmology(object):
         self.h = self.params['H0']/100.
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
         self.om0 = omh2 / (self.params['H0']/100.)**2.
-        self.chis = self.results.comoving_radial_distance(self.zs)
+        self.chis = self.comoving_radial_distance(self.zs)
         self.Hzs = self.results.hubble_parameter(self.zs)
         self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
         if halofit is not None: self.nPzk = self._get_matter_power(self.zs,self.ks,nonlinear=True)
@@ -219,7 +220,7 @@ class Cosmology(object):
             res = fb * Tb + fc * Tc
         return res
 
-    def lensing_window(self,zs=None,dndz=None):
+    def lensing_window(self,ezs,zs=None,dndz=None):
         """
         Generates a lensing convergence window 
         W(z).
@@ -232,14 +233,37 @@ class Cosmology(object):
 
         pass
 
-
-
-    
     def C_kg(self,ells,ks,Pgm,gzs,gdndz=None,lzs=None,ldndz=None,lwindow=None):
-        pass
+        gzs = np.asarray(gzs)
+        if lwindow is None: lwindow = self.lensing_window(gzs,lzs,ldndz)
+        chis = self.comoving_radial_distance(gzs)
+        nznorm = np.trapz(gzs,gndz)
+        
+
+        return limber_integral(ells,zs,ks,Pzks,Wzs,chis)        
 
     def C_gg(self,ells,ks,Pgg,gzs,dndz=None):
         pass
 
     def C_kk(self,ells,ks,Pmm,lzs=None,ldndz=None,lwindow=None):
         pass
+
+
+def limber_integral(ells,zs,ks,Pzks,Wzs,chis):
+    """
+    Get C(ell) = \int dz W(z) Pzks(z,k=ell/chi) / chis**2.
+
+    We interpolate P(z,k)
+    """
+    Pfunc = np.interp2d(zs,ks,Pzks)
+    w = np.ones(chis.shape)
+    Cells = np.zeros(ells.shape)
+    for i,ell in enumerate(ells):
+        k=ell/chis
+        integrand = Wzs * Pfunc(zs,k) / chis**2.
+        if zs.size==1:
+            Cells[i] = integrand
+        else:
+            Cells[i] = np.trapz(zs,integrand)
+    return Cells
+    
