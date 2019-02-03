@@ -87,9 +87,11 @@ An HOD can be added as follows:
 
 and galaxy spectra and cross-spectra with matter and electrons can be
 calculated just as above by specifying the chosen name for the HOD.
+If the galaxy number density `ngal` is provided instead of `mthresh`,
+the latter will be found iteratively.
 
-Lensing
-~~~~~~~
+Cosmic Shear / CMB Lensing autospectrum
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `HaloModel` inherits from `cosmology.Cosmology` which contains some
 convenient functions involving Limber integrals. To get a cosmic shear
@@ -98,15 +100,31 @@ spectrum and pass it to the relevant member function of `cosmology.Cosmology`,
 
 .. code-block:: python
 				
-	zs = np.linspace(0.,3.,30)
-	ms = np.geomspace(2e10,1e17,200)
-	ks = np.geomspace(1e-4,100,1001)
-	hcos = hm.HaloModel(zs,ks,ms=ms)
+   zs = np.linspace(0.,3.,30)
+   ms = np.geomspace(2e10,1e17,200)
+   ks = np.geomspace(1e-4,100,1001)
+   hcos = hm.HaloModel(zs,ks,ms=ms)
+   
+   pmm_1h = hcos.get_power_1halo(name="nfw")
+   pmm_2h = hcos.get_power_2halo(name="nfw")
+   Pmm = pmm_1h + pmm_2h
+   
+   ells = np.linspace(100,600,10)
+   Cls = hcos.C_kk(ells,ks,Pmm,lzs=2.5)
 
-	pmm_1h = hcos.get_power_1halo(name="nfw")
-	pmm_2h = hcos.get_power_2halo(name="nfw")
-	Pmm = pmm_1h + pmm_2h
-	
-	ells = np.linspace(100,600,10)
-	Cls = hcos.C_kk(ells,ks,Pmm,lzs=2.5)
 
+Galaxy-galaxy lensing / Galaxy-CMB lensing
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Similarly, one can obtain cross-spectra for galaxy-galaxy lensing
+and galaxy-CMB lensing,
+
+.. code-block:: python
+				
+   hcos.add_hod(name="g",mthresh=10**10.5+zs*0.)
+   pgm_1h = hcos.get_power_1halo("nfw","electron")
+   pgm_2h = hcos.get_power_2halo("nfw","electron")
+   Pgm = pgm_1h + pgm_2h
+   
+   ells = np.linspace(100,600,10)
+   Cls = hcos.C_kg(ells,ks,Pgm,gzs=0.8,lzs=2.5)
