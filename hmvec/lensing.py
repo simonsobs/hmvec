@@ -1,6 +1,0 @@
-"""
-Halo model for lensing
-"""
-
-
-
