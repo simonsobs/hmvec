@@ -6,6 +6,9 @@ import camb
 from camb import model
 import numpy as np
 from . import tinker,utils
+from .cosmology import Cosmology
+from .params import default_params, battaglia_defaults
+from .fft import generic_profile_fft
 import scipy
 from scipy.integrate import simps
 
@@ -44,79 +47,6 @@ Limitations:
 respectively.
 
 """
-battaglia_defaults = {}
-battaglia_defaults['AGN'] = {
-    'rho0_A0':4000.,
-    'rho0_alpham':0.29,
-    'rho0_alphaz':-0.66,
-    'alpha_A0':0.88,
-    'alpha_alpham':-0.03,
-    'alpha_alphaz':0.19,
-    'beta_A0':3.83,
-    'beta_alpham':0.04,
-    'beta_alphaz':-0.025
-}
-battaglia_defaults['SH'] = {
-    'rho0_A0':19000.,
-    'rho0_alpham':0.09,
-    'rho0_alphaz':-0.95,
-    'alpha_A0':0.70,
-    'alpha_alpham':-0.017,
-    'alpha_alphaz':0.27,
-    'beta_A0':4.43,
-    'beta_alpham':0.005,
-    'beta_alphaz':0.037
-}
-    
-
-default_params = {
-    
-    # Mass function
-    'st_A': 0.3222,
-    'st_a': 0.707,
-    'st_p': 0.3,
-    'st_deltac': 1.686,
-    'sigma2_kmin':1e-4,
-    'sigma2_kmax':2000,
-    'sigma2_numks':10000,
-    'Wkr_taylor_switch':0.01,
-
-    # Profiles
-    'duffy_A_vir':7.85, # for Mvir
-    'duffy_alpha_vir':-0.081,
-    'duffy_beta_vir':-0.71,
-    'duffy_A_mean':10.14, # for M200rhomeanz
-    'duffy_alpha_mean':-0.081,
-    'duffy_beta_mean':-1.01,
-    'nfw_integral_numxs':40000, # not sufficient
-    'nfw_integral_xmax':200,
-    'battaglia_gas_gamma':-0.2,
-    'battaglia_gas_family': 'AGN',
-
-    # Power spectra
-    'kstar_damping':0.01,
-    'default_halofit':'mead',
-    
-    # Cosmology
-    'omch2': 0.1198,
-    'ombh2': 0.02225,
-    'H0': 67.3,
-    'ns': 0.9645,
-    'As': 2.2e-9,
-    'mnu': 0.0, # NOTE NO NEUTRINOS IN DEFAULT
-    'w0': -1.0,
-    'tau':0.06,
-    'nnu':3.046,
-    'wa': 0.,
-    'num_massive_neutrinos':3,
-
-    # HOD
-    'hod_sig_log_mstellar': 0.2,
-    'hod_bisection_search_min_log10mthresh': 7.,
-    'hod_bisection_search_max_log10mthresh': 14.,
-    'hod_bisection_search_rtol': 1e-4,
-    'hod_bisection_search_warn_iter': 20,
-}
     
 
 def Wkr_taylor(kR):
@@ -136,21 +66,17 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     h = default_params['H0'] / 100. if h is None else h
     return A*((h*m/2.e12)**alpha)*(1+z)**beta
     
-class HaloCosmology(object):
+class HaloModel(Cosmology):
     def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
                  halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
-        self.mdef = mdef
-        self.p = params
-        self.mode = mass_function
-        for param in default_params.keys():
-            if param not in self.p.keys(): self.p[param] = default_params[param]
         self.zs = np.asarray(zs)
         self.ks = ks
+        Cosmology.__init__(self,params,halofit)
+        
+        self.mdef = mdef
+        self.mode = mass_function
         self.ms = ms
         self.hods = {}
-        
-        # Cosmology
-        self._init_cosmology(self.p,halofit)
 
         # Mass function
         if ms is not None: self.init_mass_function(ms)
@@ -159,8 +85,10 @@ class HaloCosmology(object):
         self.uk_profiles = {}
         if not(skip_nfw): self.add_nfw_profile("nfw",numeric=nfw_numeric)
 
-
-                    
+    def _init_cosmology(self,params,halofit):
+        Cosmology._init_cosmology(self,params,halofit)
+        self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
+        if halofit is not None: self.nPzk = self._get_matter_power(self.zs,self.ks,nonlinear=True)
 
     def update_param(self,param,value,halofit=None):
         raise NotImplementedError # work in progress
@@ -179,54 +107,6 @@ class HaloCosmology(object):
         else:
             raise ValueError
         
-    def _init_cosmology(self,params,halofit):
-        try:
-            theta = params['theta100']/100.
-            H0 = None
-            print("WARNING: Using theta100 parameterization. H0 ignored.")
-        except:
-            H0 = params['H0']
-            theta = None
-        
-        self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
-                                    cosmomc_theta=theta,ombh2=params['ombh2'],
-                                    omch2=params['omch2'], mnu=params['mnu'],
-                                    tau=params['tau'],nnu=params['nnu'],
-                                    num_massive_neutrinos=
-                                    params['num_massive_neutrinos'],
-                                    w=params['w0'],wa=params['wa'],
-                                    dark_energy_model='ppf',
-                                    halofit_version=self.p['default_halofit'] if halofit is None else halofit,
-                                    AccuracyBoost=2)
-        self.results = camb.get_background(self.pars)
-        self.params = params
-        self.h = self.params['H0']/100.
-        omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
-        self.om0 = omh2 / (self.params['H0']/100.)**2.
-        self.chis = self.results.comoving_radial_distance(self.zs)
-        self.Hzs = self.results.hubble_parameter(self.zs)
-        self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
-        if halofit is not None: self.nPzk = self._get_matter_power(self.zs,self.ks,nonlinear=True)
-
-        
-    def _get_matter_power(self,zs,ks,nonlinear=False):
-        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
-                                                hubble_units=False,
-                                                k_hunit=False, kmax=ks.max(),
-                                                zmax=zs.max()+1.)
-        return PK.P(zs, ks, grid=True)
-
-        
-    def rho_critical_z(self,z):
-        Hz = self.results.hubble_parameter(z) * 3.241e-20 # SI # FIXME: constants need checking
-        G = 6.67259e-11 # SI
-        rho = 3.*(Hz**2.)/8./np.pi/G # SI
-        return rho * 1.477543e37 # in msolar / megaparsec3
-    
-    def rho_matter_z(self,z):
-        return self.rho_critical_z(0.) * self.om0 \
-            * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3
-    def omz(self,z): return self.rho_matter_z(z)/self.rho_critical_z(z)
     def deltav(self,z): # Duffy virial actually uses this from Bryan and Norman 1997
         # return 178. * self.omz(z)**(0.45) # Eke et al 1998
         x = self.omz(z) - 1.
@@ -317,23 +197,6 @@ class HaloCosmology(object):
         return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2. 
 
     
-    def D_growth(self, a):
-        # From Moritz Munchmeyer?
-        
-        _amin = 0.001    # minimum scale factor
-        _amax = 1.0      # maximum scale factor
-        _na = 512        # number of points in interpolation arrays
-        atab = np.linspace(_amin,
-                           _amax,
-                           _na)
-        ks = np.logspace(np.log10(1e-5),np.log10(1.),num=100) 
-        zs = a2z(atab)
-        deltakz = self.results.get_redshift_evolution(ks, zs, ['delta_cdm']) #index: k,z,0
-        D_camb = deltakz[0,:,0]/deltakz[0,0,0]
-        _da_interp = interp1d(atab, D_camb, kind='linear')
-        _da_interp_type = "camb"
-        return _da_interp(a)/_da_interp(1.0)
-
     def add_battaglia_profile(self,name,family=None,param_override={},
                               nxs=None,
                               xmax=None):
@@ -480,7 +343,7 @@ class HaloCosmology(object):
         log10mstellar_thresh = np.log10(mthresh[:,None])
         Ncs = avg_Nc(log10mhalo,self.zs[:,None],log10mstellar_thresh,sig_log_mstellar=self.p['hod_sig_log_mstellar'])
         Nss = avg_Ns(log10mhalo,self.zs[:,None],log10mstellar_thresh,Nc=Ncs,sig_log_mstellar=self.p['hod_sig_log_mstellar'])
-        NsNsm1 = np.nan_to_num(avg_NsNsm1(Ncs,Nss,corr)) # FIXME: treat division by zero better
+        NsNsm1 = avg_NsNsm1(Ncs,Nss,corr)
         NcNs = avg_NcNs(Ncs,Nss,corr)
         
         self.hods[name]['Nc'] = Ncs
@@ -577,130 +440,6 @@ class HaloCosmology(object):
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
         
 
-    def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
-        """
-        This function will provide the linear matter power spectrum used in calculation
-        of sigma2. It is written as
-        P_lin(k,z) = norm(z) * T(k)**2
-        where T(k) is the Eisenstein, Hu, 1998 transfer function.
-        Care has to be taken about interpreting this beyond LCDM.
-        For example, the transfer function can be inaccurate for nuCDM and wCDM cosmologies.
-        If this function is only used to model sigma2 -> N(M,z) -> halo model power spectra at small
-        scales, and cosmological dependence is obtained through an accurate CAMB based P(k),
-        one should be fine.
-        """
-        tk = self.Tk(ks,'eisenhu_osc') 
-        assert knorm<kmax
-        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False, 
-                                                     hubble_units=False, k_hunit=False, kmax=kmax,
-                                                     zmax=zs.max()+1.)
-        pnorm = PK.P(zs, knorm,grid=True)
-        tnorm = self.Tk(knorm,'eisenhu_osc') * knorm**(self.params['ns'])
-        plin = (pnorm/tnorm) * tk**2. * ks**(self.params['ns'])
-        return plin
-        
-        
-    def Tk(self,ks,type ='eisenhu_osc'):
-        """
-        Pulled from cosmicpy https://github.com/cosmicpy/cosmicpy/blob/master/LICENSE.rst
-        """
-        
-        k = ks/self.h
-        self.tcmb = 2.726
-        T_2_7_sqr = (self.tcmb/2.7)**2
-        h2 = self.h**2
-        w_m = self.params['omch2'] + self.params['ombh2']
-        w_b = self.params['ombh2']
-
-        self._k_eq = 7.46e-2*w_m/T_2_7_sqr / self.h     # Eq. (3) [h/Mpc]
-        self._z_eq = 2.50e4*w_m/(T_2_7_sqr)**2          # Eq. (2)
-
-        # z drag from Eq. (4)
-        b1 = 0.313*pow(w_m, -0.419)*(1.0+0.607*pow(w_m, 0.674))
-        b2 = 0.238*pow(w_m, 0.223)
-        self._z_d = 1291.0*pow(w_m, 0.251)/(1.0+0.659*pow(w_m, 0.828)) * \
-            (1.0 + b1*pow(w_b, b2))
-
-        # Ratio of the baryon to photon momentum density at z_d  Eq. (5)
-        self._R_d = 31.5 * w_b / (T_2_7_sqr)**2 * (1.e3/self._z_d)
-        # Ratio of the baryon to photon momentum density at z_eq Eq. (5)
-        self._R_eq = 31.5 * w_b / (T_2_7_sqr)**2 * (1.e3/self._z_eq)
-        # Sound horizon at drag epoch in h^-1 Mpc Eq. (6)
-        self.sh_d = 2.0/(3.0*self._k_eq) * np.sqrt(6.0/self._R_eq) * \
-            np.log((np.sqrt(1.0 + self._R_d) + np.sqrt(self._R_eq + self._R_d)) /
-                (1.0 + np.sqrt(self._R_eq)))
-        # Eq. (7) but in [hMpc^{-1}]
-        self._k_silk = 1.6 * pow(w_b, 0.52) * pow(w_m, 0.73) * \
-            (1.0 + pow(10.4*w_m, -0.95)) / self.h
-
-        Omega_m = self.om0
-        fb = self.params['ombh2'] / (self.params['omch2']+self.params['ombh2']) # self.Omega_b / self.Omega_m
-        fc = self.params['omch2'] / (self.params['omch2']+self.params['ombh2']) # self.params['ombh2'] #(self.Omega_m - self.Omega_b) / self.Omega_m
-        alpha_gamma = 1.-0.328*np.log(431.*w_m)*w_b/w_m + \
-            0.38*np.log(22.3*w_m)*(fb)**2
-        gamma_eff = Omega_m*self.h * \
-            (alpha_gamma + (1.-alpha_gamma)/(1.+(0.43*k*self.sh_d)**4))
-
-        res = np.zeros_like(k)
-
-        if(type == 'eisenhu'):
-
-            q = k * pow(self.tcmb/2.7, 2)/gamma_eff
-
-            # EH98 (29) #
-            L = np.log(2.*np.exp(1.0) + 1.8*q)
-            C = 14.2 + 731.0/(1.0 + 62.5*q)
-            res = L/(L + C*q*q)
-
-        elif(type == 'eisenhu_osc'):
-            # Cold dark matter transfer function
-
-            # EH98 (11, 12)
-            a1 = pow(46.9*w_m, 0.670) * (1.0 + pow(32.1*w_m, -0.532))
-            a2 = pow(12.0*w_m, 0.424) * (1.0 + pow(45.0*w_m, -0.582))
-            alpha_c = pow(a1, -fb) * pow(a2, -fb**3)
-            b1 = 0.944 / (1.0 + pow(458.0*w_m, -0.708))
-            b2 = pow(0.395*w_m, -0.0266)
-            beta_c = 1.0 + b1*(pow(fc, b2) - 1.0)
-            beta_c = 1.0 / beta_c
-
-            # EH98 (19). [k] = h/Mpc
-            def T_tilde(k1, alpha, beta):
-                # EH98 (10); [q] = 1 BUT [k] = h/Mpc
-                q = k1 / (13.41 * self._k_eq)
-                L = np.log(np.exp(1.0) + 1.8 * beta * q)
-                C = 14.2 / alpha + 386.0 / (1.0 + 69.9 * pow(q, 1.08))
-                T0 = L/(L + C*q*q)
-                return T0
-
-            # EH98 (17, 18)
-            f = 1.0 / (1.0 + (k * self.sh_d / 5.4)**4)
-            Tc = f * T_tilde(k, 1.0, beta_c) + \
-                (1.0 - f) * T_tilde(k, alpha_c, beta_c)
-
-            # Baryon transfer function
-            # EH98 (19, 14, 21)
-            y = (1.0 + self._z_eq) / (1.0 + self._z_d)
-            x = np.sqrt(1.0 + y)
-            G_EH98 = y * (-6.0 * x +
-                          (2.0 + 3.0*y) * np.log((x + 1.0) / (x - 1.0)))
-            alpha_b = 2.07 * self._k_eq * self.sh_d * \
-                pow(1.0 + self._R_d, -0.75) * G_EH98
-
-            beta_node = 8.41 * pow(w_m, 0.435)
-            tilde_s = self.sh_d / pow(1.0 + (beta_node /
-                                             (k * self.sh_d))**3, 1.0/3.0)
-
-            beta_b = 0.5 + fb + (3.0 - 2.0 * fb) * np.sqrt((17.2 * w_m)**2 + 1.0)
-
-            # [tilde_s] = Mpc/h
-            Tb = (T_tilde(k, 1.0, 1.0) / (1.0 + (k * self.sh_d / 5.2)**2) +
-                  alpha_b / (1.0 + (beta_b/(k * self.sh_d))**3) *
-                  np.exp(-pow(k / self._k_silk, 1.4))) * np.sinc(k*tilde_s/np.pi)
-
-            # Total transfer function
-            res = fb * Tb + fc * Tc
-        return res
 """
 Mass function
 """
@@ -796,7 +535,9 @@ def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None,sig_log_mstellar=default_pa
 
 def avg_NsNsm1(Nc,Ns,corr="max"):
     if corr=='max':
-        return Ns**2./Nc
+        ret = Ns**2./Nc
+        ret[np.isclose(Nc,0.)] = 0 #FIXME: is this kosher?
+        return ret
     elif corr=='min':
         return Ns**2.
     
@@ -935,111 +676,7 @@ def rho_gas_generic_x(x,m200critz,z,omb,omm,rhocritz,
     return (omb/omm) * rhocritz * rho0 * (x)**gamma * (1.+x**alpha)**(-(beta+gamma)/alpha)
 
 
-"""
-FFT routines
-"""
-
-def uk_fft(rhofunc,rvir,dr=0.001,rmax=100):
-    rvir = np.asarray(rvir)
-    rps = np.arange(dr,rmax,dr)
-    rs = rps
-    rhos = rhofunc(np.abs(rs))
-    theta = np.ones(rhos.shape)
-    theta[np.abs(rs)>rvir[...,None]] = 0 # CHECK
-    integrand = rhos * theta
-    m = np.trapz(integrand*rs**2.,rs,axis=-1)*4.*np.pi
-    ks,ukt = fft_integral(rs,integrand)
-    uk = 4.*np.pi*ukt/ks/m[...,None]
-    return ks,uk
-    
-
-def uk_brute_force(r,rho,rvir,ks):
-    sel = np.where(r<rvir)
-    rs = r[sel]
-    rhos = rho[sel]
-    m = np.trapz(rhos*rs**2.,rs)*4.*np.pi
-    # rs in dim 0, ks in dim 1
-    rs2d = rs[...,None]
-    rhos2d = rhos[...,None]
-    ks2d = ks[None,...]
-    sinkr = np.sin(rs2d*ks2d)
-    integrand = 4.*np.pi*rs2d*sinkr*rhos2d/ks2d
-    return np.trapz(integrand,rs,axis=0)/m
-
-def fft_integral(x,y,axis=-1):
-    """
-    Calculates
-    \int dx x sin(kx) y(|x|) from 0 to infinity using an FFT,
-    which appears often in fourier transforms of 1-d profiles.
-    For y(x) = exp(-x**2/2), this has the analytic solution
-    sqrt(pi/2) exp(-k**2/2) k
-    which this function can be checked against.
-    """
-    assert x.ndim==1
-    extent = x[-1]-x[0]
-    N = x.size
-    step = extent/N
-    integrand = x*y
-    uk = -np.fft.rfft(integrand,axis=axis).imag*step
-    ks = np.fft.rfftfreq(N, step) *2*np.pi
-    return ks,uk
-    
-def analytic_fft_integral(ks): return np.sqrt(np.pi/2.)*np.exp(-ks**2./2.)*ks
-
-
 def a2z(a): return (1.0/a)-1.0
-
-pcount = 0
-def generic_profile_fft(rhofunc_x,cmaxs,rss,zs,ks,xmax,nxs):
-    """
-    Generic profile FFTing
-    rhofunc_x: function that accepts vector spanning linspace(0,xmax,nxs)
-    xmax:  some O(10-1000) dimensionless number specifying maximum of real space
-    profile
-    nxs: number of samples of the profile.
-    cmaxs: typically an [nz,nm] array of the dimensionless cutoff for the profile integrals. 
-    For NFW, for example, this is concentration(z,mass).
-    For other profiles, you will want to do cmax = Rvir(z,m)/R_scale_radius where
-    R_scale_radius is whatever you have divided the physical distance by in the profile to
-    get the integration variable i.e. x = r / R_scale_radius.
-    rss: R_scale_radius
-    zs: [nz,] array to convert physical wavenumber to comoving wavenumber.
-    ks: target comoving wavenumbers to interpolate the resulting FFT on to.
-    
-    """
-    xs = np.linspace(0.,xmax,nxs+1)[1:]
-    rhos = rhofunc_x(xs)
-    if rhos.ndim==1:
-        rhos = rhos[None,None]
-    else:
-        assert rhos.ndim==3
-    rhos = rhos + cmaxs[...,None]*0.
-    theta = np.ones(rhos.shape)
-    theta[np.abs(xs)>cmaxs[...,None]] = 0 # CHECK
-    # m
-    integrand = theta * rhos * xs**2.
-    mnorm = np.trapz(integrand,xs) # mass but off by norm same as rho is off by
-    # u(kt)
-    integrand = rhos*theta
-    kts,ukts = fft_integral(xs,integrand)
-    uk = ukts/kts[None,None,:]/mnorm[...,None]
-    kouts = kts/rss/(1+zs[:,None,None]) # divide k by (1+z) here for comoving FIXME: check this!
-    ukouts = np.zeros((uk.shape[0],uk.shape[1],ks.size))
-    # sadly at this point we must loop to interpolate :(
-    # from orphics import io
-    # pl = io.Plotter(xyscale='loglog')
-    for i in range(uk.shape[0]):
-        for j in range(uk.shape[1]):
-            pks = kouts[i,j]
-            puks = uk[i,j]
-            puks = puks[pks>0]
-            pks = pks[pks>0]
-            ukouts[i,j] = np.interp(ks,pks,puks,left=puks[0],right=0)
-            #TODO: Add compulsory debug plot here
-    #         pl.add(ks,ukouts[i,j])
-    # pl.hline(y=1)
-    # pl.done()
-    return ks, ukouts
 
 
 def ngal_from_mthresh(log10mthresh=None,zs=None,nzm=None,ms=None,sig_log_mstellar=None,Ncs=None,Nss=None):
