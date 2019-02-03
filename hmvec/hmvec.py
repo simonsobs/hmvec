@@ -386,6 +386,10 @@ class HaloModel(Cosmology):
         uk = self.uk_profiles[name]
         if lowklim: uk = 1
         return ms*uk/self.rho_matter_z(0)
+
+    def get_power(self,name,name2=None,verbose=True):
+        if name2 is None: name2 = name
+        return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose)
     
     def get_power_1halo(self,name="nfw",name2=None):
         name2 = name if name2 is None else name2
@@ -438,6 +442,7 @@ class HaloModel(Cosmology):
             print("Two-halo consistency1: " , consistency1)
             print("Two-halo consistency2: " , consistency2)
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
+
         
 
 """

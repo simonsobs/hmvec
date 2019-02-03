@@ -17,7 +17,6 @@ results. It could be a test-bed for converging towards that.
 class Cosmology(object):
 
     def __init__(self,params,halofit=None,engine='camb'):
-
         assert engine in ['camb','class']
         if engine=='class': raise NotImplementedError
         
@@ -246,7 +245,6 @@ class Cosmology(object):
         H0 = self.h_of_z(0.)
         H = self.h_of_z(ezs)
         chis = self.comoving_radial_distance(ezs)
-        print(zs.shape)
         chistar = self.comoving_radial_distance(zs)
         if zs.size==1:
             assert dndz is None
@@ -263,8 +261,8 @@ class Cosmology(object):
             
         return 1.5*self.om0*H0**2.*(1.+ezs)*chis/H * integral
 
-    def C_kg(self,ells,ks,Pgm,gzs,gdndz=None,lzs=None,ldndz=None,lwindow=None):
-        gzs = np.asarray(gzs)
+    def C_kg(self,ells,zs,ks,Pgm,gzs,gdndz=None,lzs=None,ldndz=None,lwindow=None):
+        gzs = np.array(gzs).reshape(-1)
         if lwindow is None: Wz1s = self.lensing_window(gzs,lzs,ldndz)
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
@@ -273,9 +271,9 @@ class Cosmology(object):
             Wz2s = dndz/nznorm
         else:
             Wz2s = 1.
-        return limber_integral(ells,gzs,ks,Pgm,Wz1s,Wz2s,hzs,chis)
+        return limber_integral(ells,zs,ks,Pgm,gzs,Wz1s,Wz2s,hzs,chis)
 
-    def C_gg(self,ells,ks,Pgg,gzs,dndz=None,zmin=None,zmax=None):
+    def C_gg(self,ells,zs,ks,Pgg,gzs,dndz=None,zmin=None,zmax=None):
         gzs = np.asarray(gzs)
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
@@ -287,23 +285,35 @@ class Cosmology(object):
             dchi = self.comoving_radial_distance(zmax) - self.comoving_radial_distance(zmin)
             Wz1s = 1.
             Wz2s = 1./dchi/hzs
-        return limber_integral(ells,gzs,ks,Pgg,Wz1s,Wz2s,hzs,chis)
+        return limber_integral(ells,zs,ks,Pgg,gzs,Wz1s,Wz2s,hzs,chis)
 
-    def C_kk(self,ells,ks,Pmm,zs,lzs1=None,ldndz1=None,lzs2=None,ldndz2=None,lwindow1=None,lwindow2=None):
+    def C_kk(self,ells,zs,ks,Pmm,lzs1=None,ldndz1=None,lzs2=None,ldndz2=None,lwindow1=None,lwindow2=None):
         if lwindow1 is None: lwindow1 = self.lensing_window(zs,lzs1,ldndz1)
         if lwindow2 is None: lwindow2 = self.lensing_window(zs,lzs2,ldndz2)
         chis = self.comoving_radial_distance(zs)
         hzs = self.h_of_z(zs) # 1/Mpc
-        return limber_integral(ells,zs,ks,Pmm,lwindow1,lwindow2,hzs,chis)
+        return limber_integral(ells,zs,ks,Pmm,zs,lwindow1,lwindow2,hzs,chis)
 
+    def total_matter_power_spectrum(self,Pnn,Pne,Pee):
+        omtoth2 = self.p['omch2'] + self.p['ombh2']
+        fc = self.p['omch2']/omtoth2
+        fb = self.p['ombh2']/omtoth2
+        return fc**2.*Pnn + 2.*fc*fb*Pne + fb*fb*Pee
 
-def limber_integral(ells,zs,ks,Pzks,Wz1s,Wz2s,hzs,chis):
+    def total_matter_galaxy_power_spectrum(self,Pgn,Pge):
+        omtoth2 = self.p['omch2'] + self.p['ombh2']
+        fc = self.p['omch2']/omtoth2
+        fb = self.p['ombh2']/omtoth2
+        return fc*Pgn + fb*Pge
+
+def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
     """
     Get C(ell) = \int dz (H(z)/c) W1(z) W2(z) Pzks(z,k=ell/chi) / chis**2.
     ells: (nells,) multipoles looped over
-    zs: redshifts (nz,) corresponding to Pzks, Wz1s, W2zs, Hzs and chis
+    zs: redshifts (npzs,) corresponding to Pzks
     ks: comoving wavenumbers (nks,) corresponding to Pzks
-    Pzks: (nzs,nks) power specrum
+    Pzks: (npzs,nks) power specrum
+    gzs: (nzs,) corersponding to Wz1s, W2zs, Hzs and chis
     Wz1s: weight function (nzs,)
     Wz2s: weight function (nzs,)
     hzs: Hubble parameter (nzs,) in *1/Mpc* (e.g. camb.results.h_of_z(z))
@@ -312,15 +322,21 @@ def limber_integral(ells,zs,ks,Pzks,Wz1s,Wz2s,hzs,chis):
     We interpolate P(z,k)
     """
 
-    integrand = hzs[:,None] * Wz1s[:,None] * Wz2s[:,None] * Pzks  / chis[:,None]**2.
-    f = interp2d(ks,zs,integrand,bounds_error=True)
-    zevals = zs
+    hzs = np.array(hzs).reshape(-1)
+    Wz1s = np.array(Wz1s).reshape(-1)
+    Wz2s = np.array(Wz2s).reshape(-1)
+    chis = np.array(chis).reshape(-1)
+    
+    prefactor = hzs * Wz1s * Wz2s   / chis**2.
+    zevals = gzs
+    f = interp2d(ks,zs,Pzks,bounds_error=True)
     Cells = np.zeros(ells.shape)
     for i,ell in enumerate(ells):
         kevals = ell/chis
         # hack suggested in https://stackoverflow.com/questions/47087109/evaluate-the-output-from-scipy-2d-interpolation-along-a-curve
         # to get around scipy.interpolate limitations
-        integrand0 = si.dfitpack.bispeu(f.tck[0], f.tck[1], f.tck[2], f.tck[3], f.tck[4], kevals, zevals)[0]
-        Cells[i] = np.trapz(integrand0,zevals)
+        interpolated = si.dfitpack.bispeu(f.tck[0], f.tck[1], f.tck[2], f.tck[3], f.tck[4], kevals, zevals)[0]
+        if zevals.size==1: Cells[i] = interpolated * prefactor
+        else: Cells[i] = np.trapz(interpolated*prefactor,zevals)
     return Cells
     

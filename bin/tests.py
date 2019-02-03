@@ -416,9 +416,13 @@ def test_lensing():
     pmm_2h = hcos.get_power_2halo(name="nfw")
 
     Wk = hcos.lensing_window(zs,zs=1100.)
+    pl = io.Plotter(xyscale='loglin')
+    pl.add(zs,Wk)
+    pl.done()
+    
     Pmm = pmm_1h + pmm_2h
     ells = np.linspace(100,1000,20)
-    ckk = hcos.C_kk(ells,ks,Pmm,zs,lwindow1=Wk,lwindow2=Wk)
+    ckk = hcos.C_kk(ells,zs,ks,Pmm,lwindow1=Wk,lwindow2=Wk)
     theory = cosmology.default_theory()
     
     pl = io.Plotter(xyscale='linlog')
@@ -426,7 +430,7 @@ def test_lensing():
     pl.add(ells,theory.gCl('kk',ells),ls='--')
     pl.done()
     
-#test_lensing()
+test_lensing()
 #test_hod_bisection()
 #test_hod()
 #test_gas_fft()
@@ -434,6 +438,6 @@ def test_lensing():
 #test_battaglia()
 #test_massfn()
 #test_fft_transform()    
-test_pmm()    
+#test_pmm()    
 # test_fft_integral()
 #test_cosmology()

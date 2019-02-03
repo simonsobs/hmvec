@@ -105,7 +105,7 @@ spectrum and pass it to the relevant member function of `cosmology.Cosmology`,
    Pmm = pmm_1h + pmm_2h
    
    ells = np.linspace(100,600,10)
-   Cls = hcos.C_kk(ells,ks,Pmm,lzs=2.5)
+   Cls = hcos.C_kk(ells,zs,ks,Pmm,lzs=2.5)
 
 
 Galaxy-galaxy lensing / Galaxy-CMB lensing
@@ -122,4 +122,4 @@ and galaxy-CMB lensing,
    Pgm = pgm_1h + pgm_2h
    
    ells = np.linspace(100,600,10)
-   Cls = hcos.C_kg(ells,ks,Pgm,gzs=0.8,lzs=2.5)
+   Cls = hcos.C_kg(ells,zs,ks,Pgm,gzs=0.8,lzs=2.5)
