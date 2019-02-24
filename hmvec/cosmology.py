@@ -252,12 +252,12 @@ class Cosmology(object):
             integral = integrand
             integral[ezs>zs] = 0
         else:
-            nznorm = np.trapz(zs,dndz)
+            nznorm = np.trapz(dndz,zs)
             dndz = dndz/nznorm
             # integrand has shape (num_z,num_zs) to be integrated over zs
             integrand = (chistar[None,:] - chis[:,None])/chistar[None,:] * dndz[None,:]
             for i in range(integrand.shape[0]): integrand[i][zs<ezs[i]] = 0 # FIXME: vectorize this
-            integral = np.trapz(zs,integrand,axis=-1)
+            integral = np.trapz(integrand,zs,axis=-1)
             
         return 1.5*self.om0*H0**2.*(1.+ezs)*chis/H * integral
 
@@ -267,7 +267,7 @@ class Cosmology(object):
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
         if gzs.size>1:
-            nznorm = np.trapz(gzs,gndz)
+            nznorm = np.trapz(gndz,gzs)
             Wz2s = dndz/nznorm
         else:
             Wz2s = 1.
@@ -278,7 +278,7 @@ class Cosmology(object):
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
         if gzs.size>1:
-            nznorm = np.trapz(gzs,gndz)
+            nznorm = np.trapz(gndz,gzs)
             Wz1s = dndz/nznorm
             Wz2s = dndz/nznorm
         else:
