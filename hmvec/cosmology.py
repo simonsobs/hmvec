@@ -267,8 +267,8 @@ class Cosmology(object):
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
         if gzs.size>1:
-            nznorm = np.trapz(gndz,gzs)
-            Wz2s = dndz/nznorm
+            nznorm = np.trapz(gdndz,gzs)
+            Wz2s = ddndz/nznorm
         else:
             Wz2s = 1.
         return limber_integral(ells,zs,ks,Pgm,gzs,Wz1s,Wz2s,hzs,chis)
