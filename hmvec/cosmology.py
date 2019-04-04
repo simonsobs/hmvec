@@ -53,6 +53,13 @@ class Cosmology(object):
         except:
             H0 = params['H0']
             theta = None
+        try:
+            omm = params['omm']
+            h = params['H0']/100.
+            params['omch2'] = omm*h**2-params['ombh2']
+            print("WARNING: omm specified. Ignoring omch2.")
+        except:
+            pass
         
         self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
                                     cosmomc_theta=theta,ombh2=params['ombh2'],
@@ -69,19 +76,23 @@ class Cosmology(object):
         self.h = self.params['H0']/100.
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
         self.om0 = omh2 / (self.params['H0']/100.)**2.
+        try: self.as8 = self.params['as8']
+        except: self.as8 = 1
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
         PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
                                                 hubble_units=False,
                                                 k_hunit=False, kmax=ks.max(),
                                                 zmax=zs.max()+1.)
-        return PK.P(zs, ks, grid=True)
+        return (self.as8**2.) * PK.P(zs, ks, grid=True)
 
         
     def rho_matter_z(self,z):
         return self.rho_critical_z(0.) * self.om0 \
             * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3
-    def omz(self,z): return self.rho_matter_z(z)/self.rho_critical_z(z)
+    
+    def omz(self,z):
+        return self.rho_matter_z(z)/self.rho_critical_z(z)
     
     def rho_critical_z(self,z):
         Hz = self.hubble_parameter(z) * 3.241e-20 # SI # FIXME: constants need checking
@@ -126,7 +137,7 @@ class Cosmology(object):
         pnorm = PK.P(zs, knorm,grid=True)
         tnorm = self.Tk(knorm,'eisenhu_osc') * knorm**(self.params['ns'])
         plin = (pnorm/tnorm) * tk**2. * ks**(self.params['ns'])
-        return plin
+        return (self.as8**2.) * plin
         
         
     def Tk(self,ks,type ='eisenhu_osc'):
@@ -268,7 +279,7 @@ class Cosmology(object):
         hzs = self.h_of_z(gzs) # 1/Mpc
         if gzs.size>1:
             nznorm = np.trapz(gdndz,gzs)
-            Wz2s = ddndz/nznorm
+            Wz2s = gdndz/nznorm
         else:
             Wz2s = 1.
         return limber_integral(ells,zs,ks,Pgm,gzs,Wz1s,Wz2s,hzs,chis)

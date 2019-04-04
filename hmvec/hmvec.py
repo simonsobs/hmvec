@@ -83,6 +83,9 @@ class HaloModel(Cosmology):
         
         # Profiles
         self.uk_profiles = {}
+        self._battaglia_profile_calls = {}
+        self._nfw_profile_calls = {}
+        self._hod_calls = {}
         if not(skip_nfw): self.add_nfw_profile("nfw",numeric=nfw_numeric)
 
     def _init_cosmology(self,params,halofit):
@@ -90,28 +93,41 @@ class HaloModel(Cosmology):
         self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
         if halofit is not None: self.nPzk = self._get_matter_power(self.zs,self.ks,nonlinear=True)
 
-    def update_param(self,param,value,halofit=None):
-        raise NotImplementedError # work in progress
-        cosmo_params = ['omch2','ombh2','H0','ns','As','mnu','w0','tau','nnu','wa','num_massive_neutrinos']
+    def update_param(self,param,value,halofit=None,ms=None):
+        raise NotImplementedError # This is a dangerous function
+        cosmo_params = ['omch2','ombh2','H0','ns','As','mnu','w0','tau','nnu','wa','num_massive_neutrinos','as8','omm']
+        mass_function_params = [] # Not Implemented
+        profile_params = ['hod_sig_log_mstellar','battaglia_gas_gamma']
         self.p[param] = value
         if param in cosmo_params:
+            from enlib import bench
             self._init_cosmology(self.p,halofit)
-            self._init_mass_function()
-            # update profiles
-            pass
-        elif param in profile_params:
-            # update profiles
-            pass
+            self.init_mass_function(ms=self.ms if ms is None else ms)
+            self._update_profiles()
+        elif (param in profile_params) or ("duffy" in param):
+            self._update_profiles()
         elif param in mass_function_params:
-            self._init_mass_function()
+            raise NotImplementedError
+            self.init_mass_function(ms=self.ms if ms is None else ms)
         else:
             raise ValueError
+
+    def _update_profiles(self):
+        self.hods = {}
+        self.uk_profiles = {}
+        for name in self._nfw_profile_calls.keys():
+            self.add_nfw_profile(name,*self._nfw_profile_calls[name])
+        for name in self._battaglia_profile_calls.keys():
+            self.add_battaglia_profile(name,*self._battaglia_profile_calls[name])
+        for name in self._hod_calls.keys():
+            self.add_hod(name,*self._hod_calls[name])
         
     def deltav(self,z): # Duffy virial actually uses this from Bryan and Norman 1997
-        # return 178. * self.omz(z)**(0.45) # Eke et al 1998
+        # return 178. * self.omz(z)**(0.45) # Eke et al 1998 # !!!
         x = self.omz(z) - 1.
         d = 18.*np.pi**2. + 82.*x - 39. * x**2.
         return d
+    
     def rvir(self,m,z):
         if self.mdef == 'vir':
             return R_from_M(m,self.rho_critical_z(z),delta=self.deltav(z))
@@ -199,9 +215,10 @@ class HaloModel(Cosmology):
     
     def add_battaglia_profile(self,name,family=None,param_override={},
                               nxs=None,
-                              xmax=None):
-        assert name not in self.uk_profiles.keys(), "Profile name already exists."
+                              xmax=None,ignore_existing=False):
+        if not(ignore_existing): assert name not in self.uk_profiles.keys(), "Profile name already exists."
         assert name!='nfw', "Name nfw is reserved."
+        self._battaglia_profile_calls[name] = (family,param_override,nxs,xmax)
         
         # Set default parameters
         if family is None: family = self.p['battaglia_gas_family'] # AGN or SH?
@@ -259,7 +276,7 @@ class HaloModel(Cosmology):
                         
     def add_nfw_profile(self,name,numeric=False,
                         nxs=None,
-                        xmax=None):
+                        xmax=None,ignore_existing=False):
 
         """
         xmax should be thought of in "concentration units", i.e.,
@@ -275,7 +292,9 @@ class HaloModel(Cosmology):
         nxs decides accuracy on small scales
         
         """
-        assert name not in self.uk_profiles.keys(), "Profile name already exists."
+        if not(ignore_existing): assert name not in self.uk_profiles.keys(), "Profile name already exists."
+        self._nfw_profile_calls[name] = (numeric,nxs,xmax)
+        
         if nxs is None: nxs = self.p['nfw_integral_numxs']
         if xmax is None: xmax = self.p['nfw_integral_xmax']
         cs = self.concentration()
@@ -298,7 +317,7 @@ class HaloModel(Cosmology):
 
     def add_hod(self,name,mthresh=None,ngal=None,corr="max",
                 satellite_profile_name='nfw',
-                central_profile_name=None):
+                central_profile_name=None,ignore_exist=False):
         """
         Specify an HOD.
         This requires either a stellar mass threshold mthresh (nz,)
@@ -309,14 +328,17 @@ class HaloModel(Cosmology):
         Miscentering could be included through central_profile_name (default uk=1 for default name of None).
 
         """
-        assert name not in self.uk_profiles.keys(), \
-            "HOD name already used by profile."
+        if not(ignore_existing): 
+            assert name not in self.uk_profiles.keys(), \
+                "HOD name already used by profile."
         assert satellite_profile_name in self.uk_profiles.keys(), \
             "No matter profile by that name exists."
         if central_profile_name is not None:
             assert central_profile_name in self.uk_profiles.keys(), \
                 "No matter profile by that name exists."
         assert name not in self.hods.keys(), "HOD with that name already exists."
+        self._hod_calls[name] = (mthresh,ngal,corr,satellite_profile_name,central_profile_name)
+        
         self.hods[name] = {}
         if ngal is not None:
             assert ngal.size == self.zs.size
@@ -387,7 +409,7 @@ class HaloModel(Cosmology):
         if lowklim: uk = 1
         return ms*uk/self.rho_matter_z(0)
 
-    def get_power(self,name,name2=None,verbose=True):
+    def get_power(self,name,name2=None,verbose=False):
         if name2 is None: name2 = name
         return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose)
     
