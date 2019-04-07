@@ -67,6 +67,11 @@ default_params = {
 
     # HOD
     'hod_sig_log_mstellar': 0.2,
+    'hod_alphasat': 1.0,
+    'hod_Bsat':9.04,
+    'hod_betasat':0.74,
+    'hod_Bcut':1.65,
+    'hod_betacut':0.59,
     'hod_bisection_search_min_log10mthresh': 7.,
     'hod_bisection_search_max_log10mthresh': 14.,
     'hod_bisection_search_rtol': 1e-4,

@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.interpolate import interp2d
+from scipy.interpolate import interp2d,interp1d
 from .params import default_params
 import camb
 from camb import model
@@ -289,9 +289,9 @@ class Cosmology(object):
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
         if gzs.size>1:
-            nznorm = np.trapz(gndz,gzs)
-            Wz1s = dndz/nznorm
-            Wz2s = dndz/nznorm
+            nznorm = np.trapz(gdndz,gzs)
+            Wz1s = gdndz/nznorm
+            Wz2s = gdndz/nznorm
         else:
             dchi = self.comoving_radial_distance(zmax) - self.comoving_radial_distance(zmin)
             Wz1s = 1.
@@ -340,13 +340,19 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
     
     prefactor = hzs * Wz1s * Wz2s   / chis**2.
     zevals = gzs
-    f = interp2d(ks,zs,Pzks,bounds_error=True)
+    if zs.size>1:
+        f = interp2d(ks,zs,Pzks,bounds_error=True)
+    else:
+        f = interp1d(ks,Pzks[0],bounds_error=True)
     Cells = np.zeros(ells.shape)
     for i,ell in enumerate(ells):
         kevals = ell/chis
-        # hack suggested in https://stackoverflow.com/questions/47087109/evaluate-the-output-from-scipy-2d-interpolation-along-a-curve
-        # to get around scipy.interpolate limitations
-        interpolated = si.dfitpack.bispeu(f.tck[0], f.tck[1], f.tck[2], f.tck[3], f.tck[4], kevals, zevals)[0]
+        if zs.size>1:
+            # hack suggested in https://stackoverflow.com/questions/47087109/evaluate-the-output-from-scipy-2d-interpolation-along-a-curve
+            # to get around scipy.interpolate limitations
+            interpolated = si.dfitpack.bispeu(f.tck[0], f.tck[1], f.tck[2], f.tck[3], f.tck[4], kevals, zevals)[0]
+        else:
+            interpolated = f(kevals)
         if zevals.size==1: Cells[i] = interpolated * prefactor
         else: Cells[i] = np.trapz(interpolated*prefactor,zevals)
     return Cells
