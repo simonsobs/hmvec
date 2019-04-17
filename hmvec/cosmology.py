@@ -291,7 +291,7 @@ class Cosmology(object):
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
         if gzs.size>1:
-            nznorm = np.trapz(gndz,gzs)
+            nznorm = np.trapz(gdndz,gzs)
             Wz1s = gdndz/nznorm
             Wz2s = gdndz/nznorm
         else:
