@@ -48,6 +48,7 @@ def f_nu(nu,zs,delta=200.,norm_consistency=True,
     # if n = (rho/m) nu f(nu) dlnsigmainv/dm
     assert np.isclose(delta,200.), "delta!=200 note implemented yet." # FIXME: interpolate for any value of delta
     # FIXME: set z>3 to z=3
+    zs = zs*np.heaviside(3-zs,0)+3*np.heaviside(zs-3,0)
     beta0 = 0.589
     gamma0 = 0.864
     phi0 = -0.729

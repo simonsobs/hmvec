@@ -5,7 +5,6 @@ from scipy.stats import binned_statistic as binnedstat
 
 """
 Covariances
-
 We implement the Gaussian covariance between bandpowers.
 """
 
@@ -88,5 +87,3 @@ def KnoxCov(self,specTypeXY,specTypeWZ,ellBinEdges,fsky):
         covs.append(var)
         sigs1.append(self._bin_cls(specTypeXY,ell_left,ell_right,noise=False)**2.*np.nan_to_num(1./var))
         sigs2.append(self._bin_cls(specTypeWZ,ell_left,ell_right,noise=False)**2.*np.nan_to_num(1./var))
-
-

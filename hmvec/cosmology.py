@@ -4,6 +4,7 @@ from .params import default_params
 import camb
 from camb import model
 import scipy.interpolate as si
+import scipy.constants as constants
 
 """
 This module will (eventually) abstract away the choice of boltzmann codes.
@@ -53,14 +54,13 @@ class Cosmology(object):
         except:
             H0 = params['H0']
             theta = None
-        try:
-            omm = params['omm']
-            h = params['H0']/100.
-            params['omch2'] = omm*h**2-params['ombh2']
-            print("WARNING: omm specified. Ignoring omch2.")
-        except:
-            pass
-        
+        try:        
+             omm = params['omm']        
+             h = params['H0']/100.      
+             params['omch2'] = omm*h**2-params['ombh2']     
+             print("WARNING: omm specified. Ignoring omch2.")       
+         except:        
+             pass        
         self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
                                     cosmomc_theta=theta,ombh2=params['ombh2'],
                                     omch2=params['omch2'], mnu=params['mnu'],
@@ -75,8 +75,8 @@ class Cosmology(object):
         self.params = params
         self.h = self.params['H0']/100.
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
-        self.om0 = omh2 / (self.params['H0']/100.)**2.
-        try: self.as8 = self.params['as8']
+        self.om0 = omh2 / (self.params['H0']/100.)**2.        
+        try: self.as8 = self.params['as8']        
         except: self.as8 = 1
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
@@ -90,8 +90,8 @@ class Cosmology(object):
     def rho_matter_z(self,z):
         return self.rho_critical_z(0.) * self.om0 \
             * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3
-    
-    def omz(self,z):
+
+    def omz(self,z): 
         return self.rho_matter_z(z)/self.rho_critical_z(z)
     
     def rho_critical_z(self,z):
@@ -137,9 +137,9 @@ class Cosmology(object):
         pnorm = PK.P(zs, knorm,grid=True)
         tnorm = self.Tk(knorm,'eisenhu_osc') * knorm**(self.params['ns'])
         plin = (pnorm/tnorm) * tk**2. * ks**(self.params['ns'])
-        return (self.as8**2.) * plin
-        
-        
+        return (self.as8**2.) *plin
+ 
+
     def Tk(self,ks,type ='eisenhu_osc'):
         """
         Pulled from cosmicpy https://github.com/cosmicpy/cosmicpy/blob/master/LICENSE.rst
@@ -284,7 +284,7 @@ class Cosmology(object):
             Wz2s = 1.
         return limber_integral(ells,zs,ks,Pgm,gzs,Wz1s,Wz2s,hzs,chis)
 
-    def C_gg(self,ells,zs,ks,Pgg,gzs,dndz=None,zmin=None,zmax=None):
+    def C_gg(self,ells,zs,ks,Pgg,gzs,gdndz=None,zmin=None,zmax=None):
         gzs = np.asarray(gzs)
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
@@ -305,6 +305,35 @@ class Cosmology(object):
         hzs = self.h_of_z(zs) # 1/Mpc
         return limber_integral(ells,zs,ks,Pmm,zs,lwindow1,lwindow2,hzs,chis)
 
+    def C_gy(self,ells,zs,ks,Pgp,gzs,gdndz=None,zmin=None,zmax=None):
+        gzs = np.asarray(gzs)
+        chis = self.comoving_radial_distance(gzs)
+        hzs = self.h_of_z(gzs) # 1/Mpc
+        if gzs.size>1:
+            nznorm = np.trapz(gdndz,gzs)
+            Wz1s = dndz/nznorm
+            Wz2s = gdndz/nznorm
+        else:
+            dchi = self.comoving_radial_distance(zmax) - self.comoving_radial_distance(zmin)
+            Wz1s = 1.
+            Wz2s = 1./dchi/hzs
+
+        return limber_integral(ells,zs,ks,Ppy,gzs,1,Wz2s,hzs,chis)
+
+    def C_ky(self,ells,zs,ks,Pym,lzs1=None,ldndz1=None,lzs2=None,ldndz2=None,lwindow1=None):
+        if lwindow1 is None: lwindow1 = self.lensing_window(zs,lzs1,ldndz1)
+        chis = self.comoving_radial_distance(zs)
+        hzs = self.h_of_z(zs) # 1/Mpc
+        return limber_integral(ells,zs,ks,Pym,zs,lwindow1,1,hzs,chis)
+
+    def C_yy(self,ells,zs,ks,Ppp,dndz=None,zmin=None,zmax=None):
+        chis = self.comoving_radial_distance(zs)
+        hzs = self.h_of_z(zs) # 1/Mpc
+        # Convert to y units
+        # 
+
+        return limber_integral(ells,zs,ks,Ppp,zs,1,1,hzs,chis)
+
     def total_matter_power_spectrum(self,Pnn,Pne,Pee):
         omtoth2 = self.p['omch2'] + self.p['ombh2']
         fc = self.p['omch2']/omtoth2
@@ -316,6 +345,10 @@ class Cosmology(object):
         fc = self.p['omch2']/omtoth2
         fb = self.p['ombh2']/omtoth2
         return fc*Pgn + fb*Pge
+
+
+
+def a2z(a): return (1.0/a)-1.0
 
 def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
     """
@@ -340,10 +373,10 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
     
     prefactor = hzs * Wz1s * Wz2s   / chis**2.
     zevals = gzs
-    if zs.size>1:
-        f = interp2d(ks,zs,Pzks,bounds_error=True)
-    else:
-        f = interp1d(ks,Pzks[0],bounds_error=True)
+    if zs.size>1:            
+         f = interp2d(ks,zs,Pzks,bounds_error=True)     
+    else:      
+         f = interp1d(ks,Pzks[0],bounds_error=True)
     Cells = np.zeros(ells.shape)
     for i,ell in enumerate(ells):
         kevals = ell/chis
