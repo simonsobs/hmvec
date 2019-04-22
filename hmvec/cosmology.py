@@ -5,8 +5,6 @@ import camb
 from camb import model
 import scipy.interpolate as si
 import scipy.constants as constants
-from scipy.integrate import simps
-import tqdm
 
 """
 This module will (eventually) abstract away the choice of boltzmann codes.
@@ -307,14 +305,14 @@ class Cosmology(object):
         hzs = self.h_of_z(zs) # 1/Mpc
         return limber_integral(ells,zs,ks,Pmm,zs,lwindow1,lwindow2,hzs,chis)
 
-    def C_gy(self,ells,zs,ks,Pgp,gzs,dndz=None,zmin=None,zmax=None):
+    def C_gy(self,ells,zs,ks,Pgp,gzs,gdndz=None,zmin=None,zmax=None):
         gzs = np.asarray(gzs)
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
         if gzs.size>1:
-            nznorm = np.trapz(gndz,gzs)
+            nznorm = np.trapz(gdndz,gzs)
             Wz1s = dndz/nznorm
-            Wz2s = dndz/nznorm
+            Wz2s = gdndz/nznorm
         else:
             dchi = self.comoving_radial_distance(zmax) - self.comoving_radial_distance(zmin)
             Wz1s = 1.

@@ -108,22 +108,6 @@ class HaloModel(Cosmology):
         self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
         if halofit is not None: self.nPzk = self._get_matter_power(self.zs,self.ks,nonlinear=True)
 
-    def update_param(self,param,value,halofit=None):
-        raise NotImplementedError # work in progress
-        cosmo_params = ['omch2','ombh2','H0','ns','As','mnu','w0','tau','nnu','wa','num_massive_neutrinos']
-        self.p[param] = value
-        if param in cosmo_params:
-            self._init_cosmology(self.p,halofit)
-            self._init_mass_function()
-            # update profiles
-            pass
-        elif param in profile_params:
-            # update profiles
-            pass
-        elif param in mass_function_params:
-            self._init_mass_function()
-        else:
-            raise ValueError
         
     def deltav(self,z): # Duffy virial actually uses this from Bryan and Norman 1997
         # return 178. * self.omz(z)**(0.45) # Eke et al 1998
@@ -328,21 +312,13 @@ class HaloModel(Cosmology):
                                     beta_alpham=pparams['beta_alpham'],
                                     beta_alphaz=pparams['beta_alphaz'])
 
-        # This function returns the pressure in units of 1/Mpc/s^2
-
         rgs = r200critz
         cgs = rvirs/rgs
-
         sigmaT=constants.physical_constants['Thomson cross section'][0] # units m^2
         mElect=constants.physical_constants['electron mass'][0] / default_params['mSun']# units kg
-        # c^2 and sigma cancel units so dont rescale.
-        # There is a G in pressure, units m3/kg/s2. But converted to Mpc, mSun, s
-        # P_200 = G M rho_crit 200 /(2* r_200)
-
         ks,pkouts = generic_profile_fft(presFunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs,doMassNorm=False)
-        self.pk_profiles[name] = pkouts.copy()*4*np.pi*(sigmaT/(mElect*constants.c**2))*(r200critz**3*((1+self.zs)**2/self.h_of_z(self.zs))[...,None])[...,None]# *(r200critz**3*((1+self.zs)**2/self.comoving_radial_distance(self.zs)**1)[...,None])[...,None] # *(r200critz**3*((1+self.zs)**2/self.comoving_radial_distance(self.zs)**3)[...,None])[...,None]
-        #print ((r200critz**3*((1+self.zs)**2/self.comoving_radial_distance(self.zs)**3)[...,None])[...,None])
-        # Seems to be a unit mismatch somewhere. This should probably be diminsionless?              
+        self.pk_profiles[name] = pkouts.copy()*4*np.pi*(sigmaT/(mElect*constants.c**2))*(r200critz**3*((1+self.zs)**2/self.h_of_z(self.zs))[...,None])[...,None]            
+
     def add_nfw_profile(self,name,numeric=False,
                         nxs=None,
                         xmax=None,ignore_existing=False):
@@ -470,7 +446,7 @@ class HaloModel(Cosmology):
         self.hods[name]['bg'] = self.get_bg(Ncs,Nss,self.hods[name]['ngal'])
         self.hods[name]['satellite_profile'] = satellite_profile_name
         self.hods[name]['central_profile'] = central_profile_name
-        self.hods[name]['mthres'] = np.log10(mthresh[:,None])
+        self.hods[name]['log10mthresh'] = np.log10(mthresh[:,None])
         
     def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
 
@@ -520,35 +496,23 @@ class HaloModel(Cosmology):
         mnames = self.uk_profiles.keys()
         hnames = self.hods.keys()
         pnames =self.pk_profiles.keys()
-        dampingTerm=1.
         if (name in hnames) and (name2 in hnames): 
             square_term = self._get_hod_square(name)
-            dampingTerm *= np.exp(-(self.ks/self.p['kstar_damping'])**2.)
         elif (name in pnames) and (name2 in pnames): 
             square_term = self._get_pressure(name)**2
-            dampingTerm = np.exp(-(self.ks/self.p['kstar_damping'])**2.)
         else:
             square_term=1.
             for nm in [name,name2]:
                 if nm in hnames:
                     square_term *= self._get_hod(nm)
-                    dampingTerm *= np.exp(-(self.ks/self.p['kstar_damping']))
                 elif nm in mnames:
                     square_term *= self._get_matter(nm)
-                    dampingTerm *= np.exp(-(self.ks/self.p['kstar_damping']))
                 elif nm in pnames:
                     square_term *= self._get_pressure(nm)
                 else: raise ValueError
-
-
-        # if (name in mnames) and (name2 in mnames): square_term = self._get_matter(name)*self._get_matter(name2)
-        # elif (name in hnames) and (name2 in hnames): square_term = self._get_hod_square(name)
-        # elif (name in hnames) and (name2 in mnames): square_term = self._get_hod(name)*self._get_matter(name2)
-        # elif (name2 in hnames) and (name in mnames): square_term = self._get_hod(name2)*self._get_matter(name)
-        # else: raise ValueError
         
         integrand = self.nzm[...,None] * square_term
-        return np.trapz(integrand,ms,axis=-2)*(1-dampingTerm)
+        return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
     
     def get_power_2halo(self,name="nfw",name2=None,verbose=False):
         name2 = name if name2 is None else name2
