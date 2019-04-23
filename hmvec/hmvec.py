@@ -531,6 +531,8 @@ class HaloModel(Cosmology):
                 rterm1 = self._get_pressure(iname)
                 rterm01 = self._get_pressure(iname,lowklim=True)
                 print ('Check the consistency relation for tSZ')
+                # These are set to zero so the large scale tSZ term is 
+                # a simple two halo term without any consistency relation.
                 b = rterm01 =0
             elif iname in self.hods.keys():
                 rterm1 = self._get_hod(iname)
