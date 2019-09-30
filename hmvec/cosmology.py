@@ -55,12 +55,12 @@ class Cosmology(object):
             H0 = params['H0']
             theta = None
         try:        
-             omm = params['omm']        
-             h = params['H0']/100.      
-             params['omch2'] = omm*h**2-params['ombh2']     
-             print("WARNING: omm specified. Ignoring omch2.")       
-         except:        
-             pass        
+            omm = params['omm']        
+            h = params['H0']/100.      
+            params['omch2'] = omm*h**2-params['ombh2']     
+            print("WARNING: omm specified. Ignoring omch2.")       
+        except:        
+            pass        
         self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
                                     cosmomc_theta=theta,ombh2=params['ombh2'],
                                     omch2=params['omch2'], mnu=params['mnu'],
