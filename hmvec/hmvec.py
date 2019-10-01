@@ -792,7 +792,8 @@ def rho_gas_generic_x(x,m200critz,z,omb,omm,rhocritz,
     rho0 = battaglia_gas_fit(m200critz,z,rho0_A0,rho0_alpham,rho0_alphaz)
     alpha = battaglia_gas_fit(m200critz,z,alpha_A0,alpha_alpham,alpha_alphaz)
     beta = battaglia_gas_fit(m200critz,z,beta_A0,beta_alpham,beta_alphaz)
-    return (omb/omm) * rhocritz * rho0 * (x)**gamma * (1.+x**alpha)**(-(beta+gamma)/alpha)
+    # Note the sign difference in the second gamma. Battaglia 2016 had a typo here.
+    return (omb/omm) * rhocritz * rho0 * (x**gamma) * (1.+x**alpha)**(-(beta+gamma)/alpha)
 
 
    
