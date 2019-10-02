@@ -516,7 +516,7 @@ def test_pgm():
         
 def test_illustris():
     
-    zs = np.linspace(0.,3.,4)
+    zs = np.linspace(0.,3.,4)[:1]
     ms = np.geomspace(1e8,1e16,1000)
     ks = np.geomspace(1e-2,30,1001)
 
@@ -529,16 +529,44 @@ def test_illustris():
     p1 = hcos.total_matter_power_spectrum(pnn,pne,pee)
     p0 = pnn
 
+    
+
     h = hcos.h
     from matplotlib import cm
     pl = io.Plotter(xyscale='loglin',xlabel='$k$ (h/Mpc)',ylabel='$\\Delta P / P$')
     for i in range(zs.size):
-        pl.add(ks/h,p1[i]/p0[i],color=cm.Reds(np.linspace(0.3,0.95,zs.size)[i]))
+        pl.add(ks/h,p1[i]/p0[i],color=cm.Reds(np.linspace(0.3,0.95,zs.size)[::-1][i]),label='hmvec + Battaglia')
+    ok,od = np.loadtxt("data/schneider_horizon_agn.csv",delimiter=',',unpack=True)
+    pl.add(ok,od,lw=2,color='k',label='Horizon AGN')
+    ok,od = np.loadtxt("data/schneider_owls.csv",delimiter=',',unpack=True)
+    pl.add(ok,od,lw=2,color='k',ls='--',label='OWLS')
     pl.vline(x=10.)
     pl.hline(y=1.)
     pl._ax.set_ylim(0.68,1.04)
     pl._ax.set_xlim(0.08,25)
     pl.done("illustris_comp.png")
+
+def test_limber():
+
+    zs = np.geomspace(0.1,1.,20)
+    ks = np.geomspace(1e-4,10,100)
+    ms = np.geomspace(1e8,1e16,30)
+    # hcos = hmvec.HaloModel(zs,ks,ms,nfw_numeric=False)
+    # pmm_1h = hcos.get_power_1halo(name="nfw")
+    # pmm_2h = hcos.get_power_2halo(name="nfw")
+
+    Wk = hcos.lensing_window(zs,zs=1100.)
+    
+    Pmm = pmm_1h + pmm_2h
+    ells = np.linspace(100,1000,20)
+    ckk = hcos.C_kk(ells,zs,ks,Pmm,lwindow1=Wk,lwindow2=Wk)
+    theory = cosmology.default_theory()
+    
+    pl = io.Plotter(xyscale='linlog')
+    pl.add(ells,ckk)
+    pl.add(ells,theory.gCl('kk',ells),ls='--')
+    pl.done()
+    
     
         
 #test_lensing()
@@ -551,7 +579,7 @@ def test_illustris():
 #test_fft_transform()    
 #test_pmm()
 #test_pee()
-test_illustris()
+#test_illustris()
 #test_pgm()
 # test_fft_integral()
 #test_cosmology()
