@@ -9,7 +9,7 @@ exploration and forecasting rather than allow for precision cosmological inferen
 It calculates a vectorized FFT for a given profile over all points in mass and
 redshift, but it currently does have one double loop over mass and redshift
 to interpolate the profile Fourier transforms to the target wavenumbers. Every
-other part of the code is vectorized.
+other part of the code is vectorized. Heavy memory usage can be an issue -- watch out for that!
 
 
 * Free software: BSD license
