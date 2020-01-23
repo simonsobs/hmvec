@@ -81,7 +81,7 @@ def generic_profile_fft(rhofunc_x,cmaxs,rss,zs,ks,xmax,nxs,do_mass_norm=True):
     # m
     integrand = theta * rhos * xs**2.
     mnorm = np.trapz(integrand,xs) # mass but off by norm same as rho is off by
-    if not do_mass_norm:
+    if not(do_mass_norm):
         mnorm *= 0
         mnorm +=1
     # u(kt)

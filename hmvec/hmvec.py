@@ -204,6 +204,9 @@ class HaloModel(Cosmology):
                               xmax=None,ignore_existing=False):
         if not(ignore_existing): assert name not in self.uk_profiles.keys(), "Profile name already exists."
         assert name!='nfw', "Name nfw is reserved."
+        if nxs is None: nxs = self.p['electron_density_profile_integral_numxs']
+        if xmax is None: xmax = self.p['electron_density_profile_integral_xmax']
+
         
         # Set default parameters
         if family is None: family = self.p['battaglia_gas_family'] # AGN or SH?
@@ -262,6 +265,8 @@ class HaloModel(Cosmology):
                               xmax=None,ignore_existing=False):
         if not(ignore_existing): assert name not in self.pk_profiles.keys(), "Profile name already exists."
         assert name!='nfw', "Name nfw is reserved."
+        if nxs is None: nxs = self.p['electron_pressure_profile_integral_numxs']
+        if xmax is None: xmax = self.p['electron_pressure_profile_integral_xmax']
         
         # Set default parameters
         if family is None: family = self.p['battaglia_pres_family'] # AGN or SH?
@@ -316,7 +321,7 @@ class HaloModel(Cosmology):
         cgs = rvirs/rgs
         sigmaT=constants.physical_constants['Thomson cross section'][0] # units m^2
         mElect=constants.physical_constants['electron mass'][0] / default_params['mSun']# units kg
-        ks,pkouts = generic_profile_fft(presFunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs,doMassNorm=False)
+        ks,pkouts = generic_profile_fft(presFunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs,do_mass_norm=False)
         self.pk_profiles[name] = pkouts.copy()*4*np.pi*(sigmaT/(mElect*constants.c**2))*(r200critz**3*((1+self.zs)**2/self.h_of_z(self.zs))[...,None])[...,None]            
 
     def add_nfw_profile(self,name,numeric=False,
