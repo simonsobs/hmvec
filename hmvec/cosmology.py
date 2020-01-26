@@ -21,7 +21,7 @@ class Cosmology(object):
         assert engine in ['camb','class']
         if engine=='class': raise NotImplementedError
         
-        self.p = params
+        self.p = dict(params) if params is not None else {}
         for param in default_params.keys():
             if param not in self.p.keys(): self.p[param] = default_params[param]
         

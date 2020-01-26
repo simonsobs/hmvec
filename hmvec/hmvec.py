@@ -84,7 +84,7 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     return A*((h*m/2.e12)**alpha)*(1+z)**beta
     
 class HaloModel(Cosmology):
-    def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
+    def __init__(self,zs,ks,ms=None,params=None,mass_function="sheth-torman",
                  halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
         self.zs = np.asarray(zs)
         self.ks = ks
@@ -199,7 +199,7 @@ class HaloModel(Cosmology):
         return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2. 
 
     
-    def add_battaglia_profile(self,name,family=None,param_override={},
+    def add_battaglia_profile(self,name,family=None,param_override=None,
                               nxs=None,
                               xmax=None,ignore_existing=False):
         if not(ignore_existing): assert name not in self.uk_profiles.keys(), "Profile name already exists."
@@ -215,13 +215,14 @@ class HaloModel(Cosmology):
         pparams.update(battaglia_defaults[family])
 
         # Update with overrides
-        for key in param_override:
-            if key=='battaglia_gas_gamma':
-                pparams[key] = param_override[key]
-            elif key in battaglia_defaults[family]:
-                pparams[key] = param_override[key]
-            else:
-                raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
+        if param_override is not None:
+            for key in param_override.keys():
+                if key=='battaglia_gas_gamma':
+                    pparams[key] = param_override[key]
+                elif key in battaglia_defaults[family]:
+                    pparams[key] = param_override[key]
+                else:
+                    raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
 
         # Convert masses to m200critz
         rhocritz = self.rho_critical_z(self.zs)
@@ -260,7 +261,7 @@ class HaloModel(Cosmology):
         ks,ukouts = generic_profile_fft(rhofunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs)
         self.uk_profiles[name] = ukouts.copy()
 
-    def add_battaglia_pres_profile(self,name,family=None,param_override={},
+    def add_battaglia_pres_profile(self,name,family=None,param_override=None,
                               nxs=None,
                               xmax=None,ignore_existing=False):
         if not(ignore_existing): assert name not in self.pk_profiles.keys(), "Profile name already exists."
@@ -276,13 +277,14 @@ class HaloModel(Cosmology):
         pparams.update(battaglia_defaults[family])
 
         # Update with overrides
-        for key in param_override:
-            if key in ['battaglia_pres_gamma','battaglia_pres_alpha']:
-                pparams[key] = param_override[key]
-            elif key in battaglia_defaults[family]:
-                pparams[key] = param_override[key]
-            else:
-                raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
+        if param_override is not None:
+            for key in param_override.keys():
+                if key in ['battaglia_pres_gamma','battaglia_pres_alpha']:
+                    pparams[key] = param_override[key]
+                elif key in battaglia_defaults[family]:
+                    pparams[key] = param_override[key]
+                else:
+                    raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
 
         # Convert masses to m200critz
         rhocritz = self.rho_critical_z(self.zs)
@@ -365,7 +367,7 @@ class HaloModel(Cosmology):
 
     def add_hod(self,name,mthresh=None,ngal=None,corr="max",
                 satellite_profile_name='nfw',
-                central_profile_name=None,ignore_existing=False,param_override={}):
+                central_profile_name=None,ignore_existing=False,param_override=None):
         """
         Specify an HOD.
         This requires either a stellar mass threshold mthresh (nz,)
@@ -395,12 +397,12 @@ class HaloModel(Cosmology):
             pparams[ip] = self.p[ip]
 
         # Update with overrides
-        for key in param_override:
-            if key in hod_params:
-                pparams[key] = param_override[key]
-            else:
-                raise ValueError # param in param_override doesn't seem to be an HOD parameter
-
+        if param_override is not None:
+            for key in param_override.keys():
+                if key in hod_params:
+                    pparams[key] = param_override[key]
+                else:
+                    raise ValueError # param in param_override doesn't seem to be an HOD parameter
         
         
         self.hods[name] = {}
