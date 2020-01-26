@@ -87,6 +87,9 @@ default_params = {
     'T_CMB':2.7255e6,
     'parsec': 3.08567758e16,
     'mSun': 1.989e30,
+    'thompson_SI': 6.6524e-29,
+    'meterToMegaparsec': 3.241e-23,
+    'Yp': 0.24,
 
     # HOD
     'hod_sig_log_mstellar': 0.2,

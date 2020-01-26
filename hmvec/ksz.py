@@ -9,7 +9,8 @@ of small-scale Pge, Pee and Pgg.
 
 """
 
-from hmvec import HaloModel
+from .params import default_params
+from .hmvec import HaloModel
 import numpy as np
 
 defaults = {'min_mass':1e8, 'max_mass':1e6, 'num_mass':1000}
@@ -46,34 +47,32 @@ def get_kmin(volume_gpc3):
     return np.pi/vol_mpc3**(1./3.)
 
 
+def chi(Yp,NHe):
+    val = (1-Yp*(1-NHe/4.))/(1-Yp/2.)
+    return val
 
-
-def ne0z_SI(YHe,ombh2,z,shaw=True,chi=0.86,gasfrac=0.9):
+def ne0_shaw(ombh2,Yp,NHe=0,me = 1.14,gasfrac = 0.9):
     '''
-    Average electron density today but with
-    Helium II reionization at z<3
-    Units: SI (1/meter**3)
+    Average electron density today
+    Eq 3 of 1109.0553
+    Units: 1/meter**3
     '''
-    if not(shaw):
-        if z>3.: 
-            NHe=1.
-        else:
-            NHe=2.
-        ne0_SI = (1.-(4.-NHe)*YHe/4.)*ombh2 * 3.*(constants['H100_SI']**2.)/constants['mProton_SI']/8./np.pi/constants['G_SI']
-    else:
-        me = 1.14 # reduced mass
-        omgh2 = gasfrac* ombh2
-        ne0_SI = chi*omgh2 * 3.*(constants['H100_SI']**2.)/constants['mProton_SI']/8./np.pi/constants['G_SI']/me
+    omgh2 = gasfrac* ombh2
+    mu_e = 1.14 # mu_e*mass_proton = mean mass per electron
+    ne0_SI = chi(Yp,NHe)*omgh2 * 3.*(constants['H100_SI']**2.)/constants['mProton_SI']/8./np.pi/constants['G_SI']/mu_e
     return ne0_SI
 
-
-def Fstar(YHe,ombh2,z,xe=1,shaw=True,TCMB=2.726,chi=0.86,gasfrac=0.9):
-    '''
-    Get the norm of the kSZ temperature at redshift z
-    '''
-    TcmbMuK = TCMB*1.e6
-    ne0_SI = ne0z_SI(YHe,ombh2,z,shaw=shaw,chi=chi,gasfrac=gasfrac)
-    return TcmbMuK*constants['thompson_SI']*ne0*(1.+z)**2./constants['meter_to_megaparsec']  * xe
+def ksz_radial_function(z,ombh2, Yp, gasfrac = 0.9,xe=1, tau=0, params=None):
+    """
+    K(z) = - T_CMB sigma_T n_e0 x_e(z) exp(-tau(z)) (1+z)^2
+    Eq 4 of 1810.13423
+    """
+    if params is None: params = default_params
+    T_CMB_muk = params['T_CMB'] # muK
+    thompson_SI = constants['thompson_SI']
+    meterToMegaparsec = constants['meter_to_megaparsec']
+    ne0 = ne0_shaw(ombh2,Yp)
+    return TcmbMuK*thompson_SI*ne0*(1.+z)**2./meterToMegaparsec  * xe  *np.exp(-tau)
 
 
 class kSZ(HaloModel):
@@ -224,3 +223,9 @@ def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,fparams,params=None,
     fPgg = fksz.Pgg(zindex=0) + ngg
     fPge = fksz.Pge(zindex=0)
     pPge = pksz.Pge(zindex=0) if params is not None else fPge
+
+
+
+
+
+
