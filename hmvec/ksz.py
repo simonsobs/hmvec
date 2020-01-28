@@ -114,8 +114,8 @@ class kSZ(HaloModel):
         self.Pmms = []
         self.fs = []
         self.d2vs = []
-        self.sPggs = []
-        self.sPges = []
+        self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=False) 
+        self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=False) 
         for zindex,volume_gpc3 in enumerate(volumes_gpc3):
             kL = np.geomspace(get_kmin(volume_gpc3),kL_max,num_kL_bins)
             self.kLs.append(kL.copy())
@@ -124,9 +124,8 @@ class kSZ(HaloModel):
             self.fs.append( self.results.get_redshift_evolution(self.kLs[zindex], self.zs[zindex], ['growth']).ravel() )
             z = self.zs[zindex]
             a = 1./(1.+z)
-            self.sPggs.append(self.get_power(hod_name,name2=hod_name,verbose=False) )
-            self.sPges.append(self.get_power(hod_name,name2=electron_profile_name,verbose=False) )
-            #self.d2vs.append(  self.fs[zindex]*a*self.H / kL )
+            H = self.results.h_of_z(z)
+            self.d2vs.append(  self.fs[zindex]*a*H / kL )
         
         # self.D = self.cc.D_growth(self.cc.z2a(self.z),"camb_anorm")
         # self.T = lambda x: self.cc.transfer(x)
@@ -138,7 +137,7 @@ class kSZ(HaloModel):
         # self.krs = self.mus.reshape((self.mus.size,1)) * self.kLs.reshape((1,self.kLs.size))
             
     
-    def Pvv(self,zindex,bv1=1,bv2=1):
+    def lPvv(self,zindex,bv1=1,bv2=1):
         """The long-wavelength power spectrum of vxv.
         This is calculated as:
         (faH/kL)**2*Pmm(kL)
@@ -148,9 +147,25 @@ class kSZ(HaloModel):
         Here Pmm is the non-linear power for all halos.
         bv1 and bv2 are the velocity biases in each bin.
         """
-        Pvv = (self.d2v_func(kL))**2. * self.Pmms[zindex] *bv1*bv2
+        Pvv = (self.d2vs[zindex])**2. * self.Pmms[zindex] *bv1*bv2
         return Pvv
 
+    def lPgg(self,zindex,bg1,bg2):
+        """The long-wavelength power spectrum of gxg.
+        Here Pmm is the non-linear power for all halos.
+        bg1 and bg2 are the linear galaxy biases in each bin.
+        """
+        Pgg =  self.Pmms[zindex] *bg1*bg2
+        return Pgg
+
+    def lPgv(self,zindex,bg,bv=1):
+        """The long-wavelength power spectrum of gxg.
+        Here Pmm is the non-linear power for all halos.
+        bg1 and bg2 are the linear galaxy biases in each bin.
+        """
+        Pgv =  self.Pmms[zindex] *bg*bv * (self.d2vs[zindex])
+        return Pgv
+    
 
     def ksz_radial_function(self,zindex, gasfrac = 0.9,xe=1, tau=0, params=None):
         return ksz_radial_function(self.zs[zindex],self.pars.ombh2, self.pars.YHe, gasfrac = gasfrac,xe=xe, tau=tau, params=params)    
@@ -205,12 +220,16 @@ def Nvv_core_integral(chi_star,Fstar,mu,kL,ngalMpc3,kSs,Cls,Pge,Pgg,Pgg_photo=No
 
 
 
-def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,fparams=None,params=None,
+def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=None,params=None,
                             kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
                             num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
                             mdef='vir',nfw_numeric=False,
                             electron_profile_family='AGN',
                             electron_profile_nxs=None,electron_profile_xmax=None):
+    """
+    Get C_ell_That_T, the expected cross-correlation between a kSZ template
+    and the CMB temperature.
+    """
 
     fksz = kSZ([z],[volume_gpc3],[ngal_mpc3],
                kL_max=kL_max,num_kL_bins=num_kL_bins,kS_min=kS_min,kS_max=kS_max,
@@ -218,7 +237,8 @@ def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,fparams=None,params=Non
                halofit=None,mdef=mdef,nfw_numeric=nfw_numeric,skip_nfw=False,
                electron_profile_name='e',electron_profile_family=electron_profile_family,
                skip_electron_profile=False,electron_profile_param_override=fparams,
-               electron_profile_nxs=electron_profile_nxs,electron_profile_xmax=electron_profile_xmax)
+               electron_profile_nxs=electron_profile_nxs,electron_profile_xmax=electron_profile_xmax,
+               skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None)
 
     if params is not None:
         pksz = kSZ([z],[volume_gpc3],[ngal_mpc3],
@@ -232,8 +252,15 @@ def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,fparams=None,params=Non
         pksz = fksz
 
     ngg = Ngg(ngal_mpc3)
+    
     fsPgg = fksz.sPggs[0] + ngg
     fsPge = fksz.sPges[0]
+
+    # !!!
+    # fsPgg = fksz._get_matter_power(fksz.zs[0],fksz.kS,nonlinear=True)[0] * bg**2. + ngg
+    # fsPge = fksz._get_matter_power(fksz.zs[0],fksz.kS,nonlinear=True)[0] * bg
+    # !!!
+    
     psPge = pksz.sPges[0] if params is not None else fsPge
     chistar = pksz.results.comoving_radial_distance(z)
 
@@ -245,17 +272,64 @@ def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,fparams=None,params=Non
     V = volume_gpc3 * 1e9
     pref = fFstar * pFstar * (V**(1/3.)) / 6 / np.pi**2 / chistar**2
 
-    flPgg = fksz.lPgg(zindex=0) + ngg
-    flPgv = fksz.lPgv(zindex=0)
-    plPgv = pksz.lPgv(zindex=0) if params is not None else flPgv
+    flPgg = fksz.lPgg(zindex=0,bg1=bg,bg2=bg)[0,:] + ngg
+    flPgv = fksz.lPgv(zindex=0,bg=bg)[0,:]
+    plPgv = pksz.lPgv(zindex=0,bg=bg)[0,:] if params is not None else flPgv
     kls = fksz.kLs[0]
     integrand = _sanitize((kls**2.)*(flPgv*plPgv)/flPgg)
     vrec = np.trapz(integrand,kls)
 
-    return pref * Pks * vrec
+    return pref * Pks * vrec,fksz,pksz
 
 
 
 
 
 
+def get_ksz_snr(volume_gpc3,z,ngal_mpc3,bg,Cls,params=None,
+                kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
+                num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
+                mdef='vir',nfw_numeric=False,
+                electron_profile_family='AGN',
+                electron_profile_nxs=None,electron_profile_xmax=None):
+
+
+    fksz = kSZ([z],[volume_gpc3],[ngal_mpc3],
+               kL_max=kL_max,num_kL_bins=num_kL_bins,kS_min=kS_min,kS_max=kS_max,
+               num_kS_bins=num_kS_bins,num_mu_bins=num_mu_bins,ms=ms,params=params,mass_function=mass_function,
+               halofit=None,mdef=mdef,nfw_numeric=nfw_numeric,skip_nfw=False,
+               electron_profile_name='e',electron_profile_family=electron_profile_family,
+               skip_electron_profile=False,electron_profile_param_override=params,
+               electron_profile_nxs=electron_profile_nxs,electron_profile_xmax=electron_profile_xmax,
+               skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None)
+    
+    Fstar = fksz.ksz_radial_function(zindex=0)
+    V = volume_gpc3 * 1e9
+    ngg = Ngg(ngal_mpc3)
+    
+    lPgg = fksz.lPgg(zindex=0,bg1=bg,bg2=bg)[0,:] + ngg
+    lPgv = fksz.lPgv(zindex=0,bg=bg)[0,:]
+    kls = fksz.kLs[0]
+    integrand = _sanitize((kls**2.)*(lPgv**2)/lPgg)
+    vrec = np.trapz(integrand,kls)
+
+
+    sPgg = fksz.sPggs[0] + ngg
+    sPge = fksz.sPges[0]
+    chistar = fksz.results.comoving_radial_distance(z)
+
+    
+    
+    kss = fksz.kS
+    ls = np.arange(Cls.size)
+    Cls[ls<2] = 0
+    def _Cls(ell):
+        if ell<=ls[-1]:
+            return Cls[int(ell)]
+        else:
+            return np.inf
+    Clkstot = np.array([_Cls(chistar*k) for k in kss])
+    integrand = _sanitize(kss * sPge**2. / sPgg / Clkstot)
+    ksint = np.trapz(integrand,kss)
+
+    return np.sqrt(V*Fstar**2. * vrec * ksint / 12 / np.pi**3 / chistar**2.),fksz

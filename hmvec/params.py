@@ -92,6 +92,7 @@ default_params = {
     'Yp': 0.24,
 
     # HOD
+    'hod_A_log10mthresh': 1.0, # This parameter is used to vary log10mthresh
     'hod_sig_log_mstellar': 0.2,
     'hod_alphasat': 1.0,
     'hod_Bsat':9.04,

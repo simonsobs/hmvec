@@ -222,7 +222,8 @@ class HaloModel(Cosmology):
                 elif key in battaglia_defaults[family]:
                     pparams[key] = param_override[key]
                 else:
-                    raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
+                    #raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
+                    pass
 
         # Convert masses to m200critz
         rhocritz = self.rho_critical_z(self.zs)
@@ -284,7 +285,8 @@ class HaloModel(Cosmology):
                 elif key in battaglia_defaults[family]:
                     pparams[key] = param_override[key]
                 else:
-                    raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
+                    #raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
+                    pass
 
         # Convert masses to m200critz
         rhocritz = self.rho_critical_z(self.zs)
@@ -390,7 +392,7 @@ class HaloModel(Cosmology):
         hod_params = ['hod_sig_log_mstellar','hod_bisection_search_min_log10mthresh',
                    'hod_bisection_search_max_log10mthresh','hod_bisection_search_rtol',
                    'hod_bisection_search_warn_iter','hod_alphasat','hod_Bsat',
-                   'hod_betasat','hod_Bcut','hod_betacut']
+                      'hod_betasat','hod_Bcut','hod_betacut','hod_A_log10mthresh']
         # Set default parameters
         pparams = {}
         for ip in hod_params:
@@ -412,6 +414,15 @@ class HaloModel(Cosmology):
                 raise ValueError("ngal has to be a vector of size self.zs")
             assert mthresh is None
 
+            try:
+                Msat_override = pparams['hod_Msat_override']
+            except:
+                Msat_override = None
+            try:
+                Mcut_override = pparams['hod_Mcut_override']
+            except:
+                Mcut_override = None
+
             nfunc = lambda ilog10mthresh: ngal_from_mthresh(ilog10mthresh,
                                                             self.zs,
                                                             self.nzm,
@@ -419,7 +430,9 @@ class HaloModel(Cosmology):
                                                             sig_log_mstellar=pparams['hod_sig_log_mstellar'],
                                                             alphasat=pparams['hod_alphasat'],
                                                             Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
-                                                            Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'])
+                                                            Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
+                                                            Msat_override=Msat_override,
+                                                            Mcut_override=Mcut_override)
 
             log10mthresh = utils.vectorized_bisection_search(ngal,nfunc,
                                                              [pparams['hod_bisection_search_min_log10mthresh'],
@@ -428,7 +441,7 @@ class HaloModel(Cosmology):
                                                              rtol=pparams['hod_bisection_search_rtol'],
                                                              verbose=True,
                                                              hang_check_num_iter=pparams['hod_bisection_search_warn_iter'])
-            mthresh = 10**log10mthresh
+            mthresh = 10**(log10mthresh*pparams['hod_A_log10mthresh'])
             
         try: assert mthresh.size == self.zs.size
         except:
@@ -441,7 +454,9 @@ class HaloModel(Cosmology):
                      sig_log_mstellar=pparams['hod_sig_log_mstellar'],
                      alphasat=pparams['hod_alphasat'],
                      Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
-                     Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'])
+                     Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
+                     Msat_override=Msat_override,
+                     Mcut_override=Mcut_override)
         NsNsm1 = avg_NsNsm1(Ncs,Nss,corr)
         NcNs = avg_NcNs(Ncs,Nss,corr)
         
@@ -847,17 +862,17 @@ def P_e_generic(r,m200critz,z,omb,omm,rhocritz,
                              beta_A0,beta_alpham,beta_alphaz)
 
 def P_e_generic_x(x,m200critz,R200critz,z,omb,omm,rhocritz,
-                        alpha=default_params['battaglia_pres_alpha'],
-                        gamma=default_params['battaglia_pres_gamma'],
-                           P0_A0=battaglia_defaults['pres']['P0_A0'],
-                           P0_alpham=battaglia_defaults['pres']['P0_alpham'],
-                           P0_alphaz=battaglia_defaults['pres']['P0_alphaz'],
-                           xc_A0=battaglia_defaults['pres']['xc_A0'],
-                           xc_alpham=battaglia_defaults['pres']['xc_alpham'],
-                           xc_alphaz=battaglia_defaults['pres']['xc_alphaz'],
-                           beta_A0=battaglia_defaults['pres']['beta_A0'],
-                           beta_alpham=battaglia_defaults['pres']['beta_alpham'],
-                           beta_alphaz=battaglia_defaults['pres']['beta_alphaz']):
+                  alpha=default_params['battaglia_pres_alpha'],
+                  gamma=default_params['battaglia_pres_gamma'],
+                  P0_A0=battaglia_defaults['pres']['P0_A0'],
+                  P0_alpham=battaglia_defaults['pres']['P0_alpham'],
+                  P0_alphaz=battaglia_defaults['pres']['P0_alphaz'],
+                  xc_A0=battaglia_defaults['pres']['xc_A0'],
+                  xc_alpham=battaglia_defaults['pres']['xc_alpham'],
+                  xc_alphaz=battaglia_defaults['pres']['xc_alphaz'],
+                  beta_A0=battaglia_defaults['pres']['beta_A0'],
+                  beta_alpham=battaglia_defaults['pres']['beta_alpham'],
+                  beta_alphaz=battaglia_defaults['pres']['beta_alphaz']):
     P0 = battaglia_gas_fit(m200critz,z,P0_A0,P0_alpham,P0_alphaz)
     xc = battaglia_gas_fit(m200critz,z,xc_A0,xc_alpham,xc_alphaz)
     beta = battaglia_gas_fit(m200critz,z,beta_A0,beta_alpham,beta_alphaz)
@@ -879,12 +894,19 @@ def a2z(a): return (1.0/a)-1.0
 def ngal_from_mthresh(log10mthresh=None,zs=None,nzm=None,ms=None,
                       sig_log_mstellar=None,Ncs=None,Nss=None,
                       alphasat=None,Bsat=None,betasat=None,
-                      Bcut=None,betacut=None):
+                      Bcut=None,betacut=None,
+                      Msat_override=None,
+                      Mcut_override=None):
     if (Ncs is None) and (Nss is None):
         log10mstellar_thresh = log10mthresh[:,None]
         log10mhalo = np.log10(ms[None,:])    
         Ncs = avg_Nc(log10mhalo,zs[:,None],log10mstellar_thresh,sig_log_mstellar)
-        Nss = avg_Ns(log10mhalo,zs[:,None],log10mstellar_thresh,Ncs,sig_log_mstellar,alphasat,Bsat,betasat,Bcut,betacut)
+        Nss = avg_Ns(log10mhalo,zs[:,None],log10mstellar_thresh,Ncs,
+                     sig_log_mstellar,alphasat,
+                     Bsat,betasat,
+                     Bcut,betacut,
+                     Msat_override=Msat_override,
+                     Mcut_override=Mcut_override)
     else:
         assert log10mthresh is None
         assert zs is None
