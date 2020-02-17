@@ -49,13 +49,13 @@ def capitalSigma(M):
 
     return M/np.sqrt(2*np.pi*sigma2) * np.exp(- (np.log10(M)-logM_eff)**2 / (2*sigma2))
 
-def luminosity(M, z, v_obs, a=0.2, b=1.6, d=2.4):
+def luminosity(M, z, v_obs, a=0.2, b=1.6, d=2.4, L_o=1):
     #Data Dictionary
     #   a = alpha
     #   b = beta
     #   d = delta
 
-    return capitalSigma(M) * capitalPhi(z, d) * capitalTheta(v_obs, z, b, a)
+    return L_o * capitalSigma(M) * capitalPhi(z, d) * capitalTheta(v_obs, z, b, a)
 
 # #Input data
 # nu_obs = np.array([353.0e9])
