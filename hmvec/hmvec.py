@@ -7,6 +7,7 @@ from camb import model
 import numpy as np
 from . import tinker,utils
 from .cosmology import Cosmology
+from .cib import luminosity
 
 import scipy.constants as constants
 from .params import default_params, battaglia_defaults
@@ -84,7 +85,7 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     return A*((h*m/2.e12)**alpha)*(1+z)**beta
 
 class HaloModel(Cosmology):
-    def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
+    def __init__(self,zs,ks,ms=None,v_obs=None,params={},mass_function="sheth-torman",
                  halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
         self.zs = np.asarray(zs)
         self.ks = ks
@@ -94,6 +95,9 @@ class HaloModel(Cosmology):
         self.mode = mass_function
         self.ms = ms
         self.hods = {}
+
+        # CIB stuff
+        self.v_obs = v_obs
 
         # Mass function
         if ms is not None: self.init_mass_function(ms)
@@ -485,6 +489,11 @@ class HaloModel(Cosmology):
         if lowklim: pk[:,:,:] = pk[:,:,0][...,None]
         return pk
 
+    def _get_cib(self):
+        uhalo = self.uk_profiles['nfw']
+        fcen = luminosity(self.zs, self.ms, len(self.ks), self.v_obs) / (4.0*np.pi)
+        return uhalo*fcen
+
 
     def get_power(self,name,name2=None,verbose=True):
         if name2 is None: name2 = name
@@ -536,11 +545,15 @@ class HaloModel(Cosmology):
                 rterm1 = self._get_hod(iname)
                 rterm01 = self._get_hod(iname,lowklim=True)
                 b = self.get_bg(self.hods[iname]['Nc'],self.hods[iname]['Ns'],self.hods[iname]['ngal'])[:,None]
+            elif iname.lower()=='cib':
+                rterm1 = self._get_cib()
+                rterm01 = 0
+                b = 0
             else: raise ValueError
+
             return rterm1,rterm01,b
 
         ms = self.ms[...,None]
-
 
         iterm1,iterm01,b1 = _get_term(name)
         iterm2,iterm02,b2 = _get_term(name2)
