@@ -298,12 +298,12 @@ class Cosmology(object):
             Wz2s = 1./dchi/hzs
         return limber_integral(ells,zs,ks,Pgg,gzs,Wz1s,Wz2s,hzs,chis)
 
-    def C_kk(self,ells,zs,ks,Pmm,lzs1=None,ldndz1=None,lzs2=None,ldndz2=None,lwindow1=None,lwindow2=None):
+    def C_kk(self,ells,zs,ks,Pmm,lzs1=None,ldndz1=None,lzs2=None,ldndz2=None,lwindow1=None,lwindow2=None,dcdzflag=False):
         if lwindow1 is None: lwindow1 = self.lensing_window(zs,lzs1,ldndz1)
         if lwindow2 is None: lwindow2 = self.lensing_window(zs,lzs2,ldndz2)
         chis = self.comoving_radial_distance(zs)
         hzs = self.h_of_z(zs) # 1/Mpc
-        return limber_integral(ells,zs,ks,Pmm,zs,lwindow1,lwindow2,hzs,chis)
+        return limber_integral(ells,zs,ks,Pmm,zs,lwindow1,lwindow2,hzs,chis,dcdzflag)
 
     def C_gy(self,ells,zs,ks,Pgp,gzs,gdndz=None,zmin=None,zmax=None):
         gzs = np.asarray(gzs)
@@ -334,8 +334,12 @@ class Cosmology(object):
 
         return limber_integral(ells,zs,ks,Ppp,zs,1,1,hzs,chis)
 
-    # def C_cc(self,ells,zs,ks,Pcc):
+    def C_ii(self,ells,zs,ks,Pjj,dcdzflag=False):
+        a = 1.0/(1.0+zs)        # scale factor
+        chis = self.comoving_radial_distance(zs) # Mpc
+        hzs = self.h_of_z(zs)           # 1/Mpc
 
+        return limber_integral(ells, zs, ks, Pjj, zs, a, a, hzs, chis, dcdzflag)
 
     def total_matter_power_spectrum(self,Pnn,Pne,Pee):
         omtoth2 = self.p['omch2'] + self.p['ombh2']
@@ -353,18 +357,19 @@ class Cosmology(object):
 
 def a2z(a): return (1.0/a)-1.0
 
-def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
+def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis,dcdzflag=False):
     """
     Get C(ell) = \int dz (H(z)/c) W1(z) W2(z) Pzks(z,k=ell/chi) / chis**2.
     ells: (nells,) multipoles looped over
     zs: redshifts (npzs,) corresponding to Pzks
     ks: comoving wavenumbers (nks,) corresponding to Pzks
-    Pzks: (npzs,nks) power specrum
+    Pzks: (npzs,nks) power spectrum
     gzs: (nzs,) corersponding to Wz1s, W2zs, Hzs and chis
     Wz1s: weight function (nzs,)
     Wz2s: weight function (nzs,)
     hzs: Hubble parameter (nzs,) in *1/Mpc* (e.g. camb.results.h_of_z(z))
     chis: comoving distances (nzs,)
+    dcdzflag: if you want dC/dz(ell, z) as well as C(ell)
 
     We interpolate P(z,k)
     """
@@ -381,6 +386,11 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
     else:
          f = interp1d(ks,Pzks[0],bounds_error=True)
     Cells = np.zeros(ells.shape)
+
+    #Integrand
+    if dcdzflag:
+        integrand = np.zeros((len(ells), len(chis)))
+
     for i,ell in enumerate(ells):
         kevals = ell/chis
         if zs.size>1:
@@ -391,4 +401,9 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
             interpolated = f(kevals)
         if zevals.size==1: Cells[i] = interpolated * prefactor
         else: Cells[i] = np.trapz(interpolated*prefactor,zevals)
-    return Cells
+
+        #Integrand
+        if dcdzflag:
+            integrand[i,:] = interpolated * prefactor
+
+    return Cells, integrand

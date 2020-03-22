@@ -85,7 +85,7 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     return A*((h*m/2.e12)**alpha)*(1+z)**beta
 
 class HaloModel(Cosmology):
-    def __init__(self,zs,ks,ms=None,v_obs=None,params={},mass_function="sheth-torman",
+    def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
                  halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
         self.zs = np.asarray(zs)
         self.ks = ks
@@ -95,9 +95,6 @@ class HaloModel(Cosmology):
         self.mode = mass_function
         self.ms = ms
         self.hods = {}
-
-        # CIB stuff
-        self.v_obs = v_obs
 
         # Mass function
         if ms is not None: self.init_mass_function(ms)
@@ -489,9 +486,9 @@ class HaloModel(Cosmology):
         if lowklim: pk[:,:,:] = pk[:,:,0][...,None]
         return pk
 
-    def _get_cib(self):
+    def _get_cib(self, nu):
         uhalo = self.uk_profiles['nfw']
-        fcen = luminosity(self.zs, self.ms, len(self.ks), self.v_obs) / (4.0*np.pi)
+        fcen = luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
         return uhalo*fcen
 
 
@@ -523,7 +520,7 @@ class HaloModel(Cosmology):
         integrand = self.nzm[...,None] * square_term
         return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
 
-    def get_power_2halo(self,name="nfw",name2=None,verbose=False):
+    def get_power_2halo(self,name="nfw",name2=None,verbose=False,nu_obs=None):
         name2 = name if name2 is None else name2
 
         def _2haloint(iterm):
@@ -546,7 +543,7 @@ class HaloModel(Cosmology):
                 rterm01 = self._get_hod(iname,lowklim=True)
                 b = self.get_bg(self.hods[iname]['Nc'],self.hods[iname]['Ns'],self.hods[iname]['ngal'])[:,None]
             elif iname.lower()=='cib':
-                rterm1 = self._get_cib()
+                rterm1 = self._get_cib(nu_obs)
                 rterm01 = 0
                 b = 0
             else: raise ValueError
