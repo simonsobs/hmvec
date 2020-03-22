@@ -548,12 +548,12 @@ def test_illustris():
 
 def test_limber():
 
-    zs = np.geomspace(0.1,1.,20)
+    zs = np.geomspace(0.1,10.,40)
     ks = np.geomspace(1e-4,10,100)
     ms = np.geomspace(1e8,1e16,30)
-    # hcos = hmvec.HaloModel(zs,ks,ms,nfw_numeric=False)
-    # pmm_1h = hcos.get_power_1halo(name="nfw")
-    # pmm_2h = hcos.get_power_2halo(name="nfw")
+    hcos = hmvec.HaloModel(zs,ks,ms,nfw_numeric=False)
+    pmm_1h = hcos.get_power_1halo(name="nfw")
+    pmm_2h = hcos.get_power_2halo(name="nfw")
 
     Wk = hcos.lensing_window(zs,zs=1100.)
     
@@ -565,9 +565,29 @@ def test_limber():
     pl = io.Plotter(xyscale='linlog')
     pl.add(ells,ckk)
     pl.add(ells,theory.gCl('kk',ells),ls='--')
-    pl.done()
+    pl.done('ckk_comp.png')
+
+    bias = 2.
+    nzs = np.exp(-(zs-1.0)**2./0.3**2.)
+    ckg = hcos.C_kg(ells,zs,ks,Pmm*bias,lwindow=Wk,gzs=zs,gdndz=nzs)
+    cgg = hcos.C_gg(ells,zs,ks,Pmm*bias**2,gzs=zs,gdndz=nzs)
+    lc = cosmology.LimberCosmology(skipCls=True,low_acc=True)
+    lc.addNz('g',zs,nzs,bias=bias)
+    lc.generateCls(ells)
+    ckg2 = lc.getCl('cmb','g')
+    cgg2 = lc.getCl('g','g')
     
+    pl = io.Plotter(xyscale='linlog')
+    pl.add(ells,ckg)
+    pl.add(ells,ckg2,ls='--')
+    pl.done('ckg_comp.png')
+
+    pl = io.Plotter(xyscale='linlog')
+    pl.add(ells,cgg)
+    pl.add(ells,cgg2,ls='--')
+    pl.done('cgg_comp.png')
     
+test_limber()
         
 #test_lensing()
 #test_hod_bisection()

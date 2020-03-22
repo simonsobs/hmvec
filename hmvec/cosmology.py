@@ -275,6 +275,7 @@ class Cosmology(object):
     def C_kg(self,ells,zs,ks,Pgm,gzs,gdndz=None,lzs=None,ldndz=None,lwindow=None):
         gzs = np.array(gzs).reshape(-1)
         if lwindow is None: Wz1s = self.lensing_window(gzs,lzs,ldndz)
+        else: Wz1s = lwindow
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
         if gzs.size>1:

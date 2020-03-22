@@ -87,7 +87,8 @@ class kSZ(HaloModel):
                  electron_profile_name='e',electron_profile_family='AGN',
                  skip_electron_profile=False,electron_profile_param_override=None,
                  electron_profile_nxs=None,electron_profile_xmax=None,
-                 skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None):
+                 skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None,
+                 mthreshs_override=None):
 
         if ms is None: ms = np.geomspace(defaults['min_mass'],defaults['max_mass'],defaults['num_mass'])
         volumes_gpc3 = np.atleast_1d(volumes_gpc3)
@@ -107,7 +108,7 @@ class kSZ(HaloModel):
                                             xmax=electron_profile_xmax,ignore_existing=False)
 
         if not(skip_hod):
-            self.add_hod(hod_name,mthresh=None,ngal=ngals_mpc3,corr=hod_corr,
+            self.add_hod(hod_name,mthresh=mthreshs_override,ngal=ngals_mpc3,corr=hod_corr,
                          satellite_profile_name='nfw',
                          central_profile_name=None,ignore_existing=False,param_override=hod_param_override)
             
@@ -168,7 +169,11 @@ class kSZ(HaloModel):
     
 
     def ksz_radial_function(self,zindex, gasfrac = 0.9,xe=1, tau=0, params=None):
-        return ksz_radial_function(self.zs[zindex],self.pars.ombh2, self.pars.YHe, gasfrac = gasfrac,xe=xe, tau=tau, params=params)    
+        return ksz_radial_function(self.zs[zindex],self.pars.ombh2, self.pars.YHe, gasfrac = gasfrac,xe=xe, tau=tau, params=params)
+
+    def Nvv(self,Cls):
+        pass
+
     
 def Nvv_core_integral(chi_star,Fstar,mu,kL,ngalMpc3,kSs,Cls,Pge,Pgg,Pgg_photo=None,errs=False,
                       robust_term=False,photo=True):
