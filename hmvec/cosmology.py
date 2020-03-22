@@ -369,7 +369,7 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis,dcdzflag=False):
     Wz2s: weight function (nzs,)
     hzs: Hubble parameter (nzs,) in *1/Mpc* (e.g. camb.results.h_of_z(z))
     chis: comoving distances (nzs,)
-    dcdzflag: if you want dC/dz(ell, z) as well as C(ell)
+    dcdzflag: if you want dC/dz(z, ell) as well as C(ell)
 
     We interpolate P(z,k)
     """
@@ -389,7 +389,7 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis,dcdzflag=False):
 
     #Integrand
     if dcdzflag:
-        integrand = np.zeros((len(ells), len(chis)))
+        integrand = np.zeros((len(chis), len(ells)))
 
     for i,ell in enumerate(ells):
         kevals = ell/chis
@@ -404,6 +404,6 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis,dcdzflag=False):
 
         #Integrand
         if dcdzflag:
-            integrand[i,:] = interpolated * prefactor
+            integrand[:, i] = interpolated * prefactor
 
     return Cells, integrand
