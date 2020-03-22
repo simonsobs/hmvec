@@ -87,8 +87,12 @@ default_params = {
     'T_CMB':2.7255e6,
     'parsec': 3.08567758e16,
     'mSun': 1.989e30,
+    'thompson_SI': 6.6524e-29,
+    'meterToMegaparsec': 3.241e-23,
+    'Yp': 0.24,
 
     # HOD
+    'hod_A_log10mthresh': 1.0, # This parameter is used to vary log10mthresh
     'hod_sig_log_mstellar': 0.2,
     'hod_alphasat': 1.0,
     'hod_Bsat':9.04,

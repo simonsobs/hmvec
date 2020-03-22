@@ -1,4 +1,8 @@
 import numpy as np
+from scipy.interpolate import interp1d
+
+def interp(x,y,bounds_error=False,fill_value=0.,**kwargs):
+    return interp1d(x,y,bounds_error=bounds_error,fill_value=fill_value,**kwargs)
 
 def vectorized_bisection_search(x,inv_func,ybounds,monotonicity,rtol=1e-4,verbose=True,hang_check_num_iter=20):
     """

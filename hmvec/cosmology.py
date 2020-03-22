@@ -21,7 +21,7 @@ class Cosmology(object):
         assert engine in ['camb','class']
         if engine=='class': raise NotImplementedError
         
-        self.p = params
+        self.p = dict(params) if params is not None else {}
         for param in default_params.keys():
             if param not in self.p.keys(): self.p[param] = default_params[param]
         
@@ -275,6 +275,7 @@ class Cosmology(object):
     def C_kg(self,ells,zs,ks,Pgm,gzs,gdndz=None,lzs=None,ldndz=None,lwindow=None):
         gzs = np.array(gzs).reshape(-1)
         if lwindow is None: Wz1s = self.lensing_window(gzs,lzs,ldndz)
+        else: Wz1s = lwindow
         chis = self.comoving_radial_distance(gzs)
         hzs = self.h_of_z(gzs) # 1/Mpc
         if gzs.size>1:
