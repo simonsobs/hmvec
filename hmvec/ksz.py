@@ -236,6 +236,7 @@ def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=None,params=
     and the CMB temperature.
     """
 
+    # Define kSZ object corresponding to fiducial parameters
     fksz = kSZ([z],[volume_gpc3],[ngal_mpc3],
                kL_max=kL_max,num_kL_bins=num_kL_bins,kS_min=kS_min,kS_max=kS_max,
                num_kS_bins=num_kS_bins,num_mu_bins=num_mu_bins,ms=ms,params=fparams,mass_function=mass_function,
@@ -245,6 +246,7 @@ def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=None,params=
                electron_profile_nxs=electron_profile_nxs,electron_profile_xmax=electron_profile_xmax,
                skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None)
 
+    # Define kSZ object corresponding to "true" parameters, if specified
     if params is not None:
         pksz = kSZ([z],[volume_gpc3],[ngal_mpc3],
                kL_max=kL_max,num_kL_bins=num_kL_bins,kS_min=kS_min,kS_max=kS_max,
@@ -255,9 +257,11 @@ def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=None,params=
                electron_profile_nxs=electron_profile_nxs,electron_profile_xmax=electron_profile_xmax)
     else:
         pksz = fksz
-
+        
+    # Get galaxy shot power as 1/nbar
     ngg = Ngg(ngal_mpc3)
     
+    # Get P_gg + N_gg and P_ge as a function of k_S, for fiducial parameters
     fsPgg = fksz.sPggs[0] + ngg
     fsPge = fksz.sPges[0]
 
@@ -266,25 +270,41 @@ def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=None,params=
     # fsPge = fksz._get_matter_power(fksz.zs[0],fksz.kS,nonlinear=True)[0] * bg
     # !!!
     
+    # Get P_ge as a function of k_S, for "true" parameters
     psPge = pksz.sPges[0] if params is not None else fsPge
+    
+    # Get comoving distance to redshift z
     chistar = pksz.results.comoving_radial_distance(z)
 
+    # Get interpolating function for P_ge^fid * P_ge^true / P_gg^{tot,fid}
     iPk = utils.interp(fksz.kS,_sanitize(fsPge * psPge / fsPgg))
+    # Get product above at k = ell/chi_* for specified ells
     Pks = np.asarray([iPk(k) for k in ells/chistar])
     
+    # Get kSZ radial weight function K(z) for fiducial and "true" parameters,
+    # at input z
     fFstar = fksz.ksz_radial_function(zindex=0)
     pFstar = pksz.ksz_radial_function(zindex=0) if params is not None else fFstar
+    
+    # Get volume in Mpc^3
     V = volume_gpc3 * 1e9
+    
+    # Compute prefactor: K^fid K^true V^{1/3} / (6 \pi^2 \chi_*^2)
     pref = fFstar * pFstar * (V**(1/3.)) / 6 / np.pi**2 / chistar**2
 
+    # Compute P_gg + N_gg and P_gv for fiducial and "true" parameters, as functions of k_L
     flPgg = fksz.lPgg(zindex=0,bg1=bg,bg2=bg)[0,:] + ngg
     flPgv = fksz.lPgv(zindex=0,bg=bg)[0,:]
     plPgv = pksz.lPgv(zindex=0,bg=bg)[0,:] if params is not None else flPgv
+    
+    # Construct integrand (without prefactor) as function of tabulated k_L values,
+    # and integrate
     kls = fksz.kLs[0]
     integrand = _sanitize((kls**2.)*(flPgv*plPgv)/flPgg)
     vrec = np.trapz(integrand,kls)
 
-    return pref * Pks * vrec,fksz,pksz
+    # Return full integral as function of input ell values, and other info
+    return pref * Pks * vrec, fksz, pksz
 
 
 
