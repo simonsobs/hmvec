@@ -13,6 +13,8 @@ from .params import default_params
 from .hmvec import HaloModel
 from . import utils
 import numpy as np
+from scipy.interpolate import interp1d, interp2d
+from scipy.integrate import quad, dblquad
 
 defaults = {'min_mass':1e6, 'max_mass':1e16, 'num_mass':1000}
 constants = {
@@ -88,7 +90,8 @@ class kSZ(HaloModel):
                  skip_electron_profile=False,electron_profile_param_override=None,
                  electron_profile_nxs=None,electron_profile_xmax=None,
                  skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None,
-                 mthreshs_override=None):
+                 mthreshs_override=None,
+                verbose=False):
 
         if ms is None: ms = np.geomspace(defaults['min_mass'],defaults['max_mass'],defaults['num_mass'])
         volumes_gpc3 = np.atleast_1d(volumes_gpc3)
@@ -97,27 +100,37 @@ class kSZ(HaloModel):
         ks = np.geomspace(kS_min,kS_max,num_kS_bins)
         self.mu = np.linspace(-1.,1.,num_mu_bins)
         self.kLs = []
+        if verbose: print('Defining HaloModel')
         HaloModel.__init__(self,zs,ks,ms=ms,params=params,mass_function=mass_function,
                  halofit=halofit,mdef=mdef,nfw_numeric=nfw_numeric,skip_nfw=skip_nfw)
+        if verbose: print('Defining HaloModel: finished')
         self.kS = self.ks
         if not(skip_electron_profile):
+            if verbose: print('Defining electron profile')
             self.add_battaglia_profile(name=electron_profile_name,
                                             family=electron_profile_family,
                                             param_override=electron_profile_param_override,
                                             nxs=electron_profile_nxs,
                                             xmax=electron_profile_xmax,ignore_existing=False)
-
+            if verbose: print('Defining electron profile: finished')
+        
         if not(skip_hod):
+            if verbose: print('Defining HOD')
             self.add_hod(hod_name,mthresh=mthreshs_override,ngal=ngals_mpc3,corr=hod_corr,
                          satellite_profile_name='nfw',
                          central_profile_name=None,ignore_existing=False,param_override=hod_param_override)
-            
+            if verbose: print('Defining HOD: finished')
+        
         self.Pmms = []
         self.fs = []
+        self.adotf = []
         self.d2vs = []
-        self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=False) 
-        self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=False) 
+        if not skip_hod:
+            self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=False) 
+            self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=False) 
+            
         for zindex,volume_gpc3 in enumerate(volumes_gpc3):
+            if verbose: print('Getting properties for zindex %d' % zindex)
             kL = np.geomspace(get_kmin(volume_gpc3),kL_max,num_kL_bins)
             self.kLs.append(kL.copy())
             p = self._get_matter_power(self.zs[zindex],self.kLs[zindex],nonlinear=False)
@@ -127,6 +140,7 @@ class kSZ(HaloModel):
             a = 1./(1.+z)
             H = self.results.h_of_z(z)
             self.d2vs.append(  self.fs[zindex]*a*H / kL )
+            self.adotf.append(self.fs[zindex]*a*H)
         
         # self.D = self.cc.D_growth(self.cc.z2a(self.z),"camb_anorm")
         # self.T = lambda x: self.cc.transfer(x)
@@ -302,10 +316,9 @@ def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=None,params=
     kls = fksz.kLs[0]
     integrand = _sanitize((kls**2.)*(flPgv*plPgv)/flPgg)
     vrec = np.trapz(integrand,kls)
-
+    
     # Return full integral as function of input ell values, and other info
     return pref * Pks * vrec, fksz, pksz
-
 
 
 
@@ -358,3 +371,194 @@ def get_ksz_snr(volume_gpc3,z,ngal_mpc3,bg,Cls,params=None,
     ksint = np.trapz(integrand,kss)
 
     return np.sqrt(V*Fstar**2. * vrec * ksint / 12 / np.pi**3 / chistar**2.),fksz
+
+
+def get_ksz_auto_signal(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
+                        k_max = 100., num_k_bins = 200,
+#                             kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
+                            num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
+                            mdef='vir',nfw_numeric=False,
+                            electron_profile_family='AGN',
+                            electron_profile_nxs=None,electron_profile_xmax=None,
+                       verbose=False, pksz_in=None, save_debug_files=False):
+    """
+    Get C_ell_^kSZ, the CMB kSZ auto power, as described by Eq. (B28) and the following
+    (unnumbered) equation in Smith et al:
+    
+        C_\ell = \frac{1}{2} (\frac{\sigma_T \bar{n}_{e,0}}{c})^2
+                    \int \frac{d\chi}{\chi^4 a(\chi)^2} 
+                    \exp(-2\tau) P_{q_\perp}(k=\ell/\chi, \chi)
+                    
+        P_{q_\perp}(k,z) = \dot{a}^2 f^2 \int \frac{d^3 k'}{(2\pi)^3} 
+                            P_{ee}^{NL}(|\vec{k}-\vec{k}'|,z)
+                            P_{\delta\delta}^{lin}(k',z)
+                            \frac{k(k-2k'\mu')(1-\mu'^2)}{k'^2(k^2+k'^2-2kk'\mu}
+
+    C_ell^kSZ is returned in uK^2.
+    """
+
+    # Make sure input redshifts are sorted
+    zs = np.sort(np.asarray(zs))
+    
+    # Make arrays for volume and galaxy number density, for feeding to kSZ object
+    volumes_gpc3 = volume_gpc3 * np.ones_like(zs)
+    ngals_mpc3 = ngal_mpc3 * np.ones_like(zs)
+    
+    # Define kSZ object, if not specified as input
+    if pksz_in is not None:
+        pksz = pksz_in
+    else:
+        if verbose: print('Initializing kSZ objects')
+        pksz = kSZ(
+            zs, 
+            volumes_gpc3, 
+            ngals_mpc3,
+            kL_max=k_max,                 # Same k_max for kL and kS
+            num_kL_bins=num_k_bins, 
+            kS_min=get_kmin(volume_gpc3), # Same k_min for kL and kS
+            kS_max=k_max, 
+            num_kS_bins=num_k_bins,
+            num_mu_bins=num_mu_bins,
+            ms=ms, 
+            params=params, 
+            mass_function=mass_function,
+            halofit=None, 
+            mdef=mdef, 
+            nfw_numeric=nfw_numeric, 
+            skip_nfw=False,
+            electron_profile_name='e', 
+            electron_profile_family=electron_profile_family,
+            skip_electron_profile=False, 
+            electron_profile_param_override=params,
+            electron_profile_nxs=electron_profile_nxs,
+            electron_profile_xmax=electron_profile_xmax,
+            skip_hod=True,                # Skip HOD computation to save time
+            verbose=verbose
+        )
+        
+    # Get ks and mus that P_{q_perp} integrand is evaluated at
+    ks = pksz.kS
+    mus = pksz.mu
+        
+    # Get P_ee as a function of z and k (packed as [z,k])
+    sPee = pksz.get_power('e',name2='e',verbose=False)
+    
+    # Get P_linear as a function of z and k (packed as [z,k])
+    Pmm = np.asarray(pksz.Pmms)
+    Pmm = Pmm[:,0,:]
+
+    # Make meshes of mu and k, packed as [k,mu]
+    mu_mesh,k_mesh = np.meshgrid(mus, ks)
+    
+    # Define function that returns fraction in P_{q_perp} integrand,
+    # and also |\vec{k} - \vec{k}'|
+    def Pqperp_igr_poly(k,kp,mu,z):
+        
+        frac = k * (k - 2*kp*mu) * (1 - mu**2)
+        frac /= (kp**2 * (kp**2 + k**2 - 2*k*kp*mu))
+        
+        kmkp = np.sqrt(kp**2 + k**2 - 2*k*kp*mu)
+        
+        igr = kp**2 * frac
+        
+        return igr, kmkp
+    
+    # Compute P_{q_perp} values on grid in k,z
+    if verbose: print('Computing P_{q_perp} on grid in k,z')
+    Pqperp = np.zeros((ks.shape[0], zs.shape[0]))
+    for iz,z in enumerate(zs):
+    
+        # Define interpolating functions for P_ee and P_mm at this z
+        isPee = interp1d(ks, sPee[iz], bounds_error=False, fill_value=0.)
+        iPmm = interp1d(ks, Pmm[iz], bounds_error=False, fill_value=0.)
+    
+        for ik,k in enumerate(ks):
+        
+            # Compute \dot{a} f = a H f at this redshift
+            adotf = pksz.adotf[iz][0]
+            
+            if True:
+                # Get P_{q_perp} integrand on [k,mu] mesh
+                Pqperp_igr_mesh, kmkp_mesh = Pqperp_igr_poly(k,k_mesh,mu_mesh,z)
+                Pee_mesh = isPee(kmkp_mesh.flatten()).reshape(kmkp_mesh.shape)
+                Pmm_mesh = iPmm(k_mesh.flatten()).reshape(kmkp_mesh.shape)
+                Pqperp_igr_mesh *= Pmm_mesh * Pee_mesh
+
+                # If desired, save some meshes to disk for debugging
+                if save_debug_files and ik == 0 and iz == 0:
+                    np.savetxt('debug_files/kmkp_mesh.dat', kmkp_mesh)
+                    np.savetxt('debug_files/pee_mesh.dat', Pee_mesh)
+                    np.savetxt('debug_files/pqperp_igr_mesh.dat', Pqperp_igr_mesh)
+
+                # Integrate integrand mesh along k axis with trapezoid rule
+                integral = np.trapz(np.nan_to_num(Pqperp_igr_mesh), ks, axis=0) 
+                
+                # If desired, save partial integral to disk for debugging
+                if save_debug_files and ik == 0 and iz == 0:
+                    np.savetxt('debug_files/pqperp_igr_mu.dat', np.transpose([mus,integral]))
+
+                # Integrate along mu axis with trapezoid rule
+                integral = np.trapz(integral, mus)
+
+            else:
+                # Could also do double integral with dblquad, but in practice
+                # this takes forever
+                integral = dblquad(lambda kp,mu: Pqperp_igr(k,kp,mu,z),
+                                        -1, 1, ks[0], ks[-1])[0]
+            
+            # Include prefactors for integral
+            Pqperp[ik,iz] = adotf**2 * (2*np.pi)**-2 * integral
+        
+    # Make 2d interpolating function for P_{q_\perp}, with arguments z,k.
+    # Resulting interpolating function automatically sorts arguments if
+    # arrays are fed in, but we'll only call iPqperp with one (z,k) pair
+    # at a time, so we'll be fine.
+    iPqperp = interp2d(zs, ks, Pqperp)
+    
+    # Compute C_ell integral at each ell
+    if verbose: print('Computing C_ell')
+    cl = np.zeros(ells.shape[0])
+    for iell,ell in enumerate(ells):
+        
+        # Set chi_min based on k=30Mpc^-1, and chi_max from max redshift
+        chi_min = ell/30.
+        chi_max = pksz.results.comoving_radial_distance(zs[-1])
+        chi_int = np.geomspace(chi_min, chi_max, 100)
+        k_int = ell/chi_int
+        z_int = pksz.results.redshift_at_comoving_radial_distance(chi_int)
+        
+        # Get integrand evaluated at z,k corresponding to Limber integral
+        integrand = np.zeros(k_int.shape[0])
+        for ki,k in enumerate(k_int):
+            integrand[ki] = iPqperp(z_int[ki], k)
+        integrand /= chi_int**2 * 1/(1+z_int)**4
+        
+        # Include prefactors
+        ne0 = ne0_shaw(pksz.pars.ombh2, pksz.pars.YHe)
+        integrand *= 0.5 
+        # Units: (m^2 * m^-3 * Mpc^-1 m^1)^2
+        integrand *= (constants['thompson_SI'] \
+                      * ne0 \
+                      * 1/constants['meter_to_megaparsec'] )**2
+        integrand *= (pksz.pars.TCMB * 1e6)**2
+        
+        if True:
+            # Do C_ell integral via trapezoid rule
+            cl[iell] = np.trapz(integrand, chi_int)
+        else:
+            # Doing integral of an interpolating function gives
+            # equivalent results at the precision we care about
+            igr_interp = interp1d(chi_int, integrand)
+            cl[iell] = quad(igr_interp, chi_int[0], chi_int[-1])[0]
+
+    # If desired, save some files for debugging
+    if save_debug_files:
+        np.savetxt('debug_files/zs.dat', zs)
+        np.savetxt('debug_files/k_invMpc.dat', ks)
+        np.savetxt('debug_files/pee.dat', sPee)
+        np.savetxt('debug_files/pmm.dat', Pmm)
+        np.savetxt('debug_files/pqperp.dat', Pqperp)
+        
+    # Return kSZ object (in case we want to use it later) and C_ell array
+    return pksz, cl
+
