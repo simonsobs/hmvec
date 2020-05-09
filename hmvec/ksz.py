@@ -239,7 +239,7 @@ def Nvv_core_integral(chi_star,Fstar,mu,kL,ngalMpc3,kSs,Cls,Pge,Pgg,Pgg_photo=No
 
 
 
-def get_ksz_template_signal(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=None,params=None,
+def get_ksz_template_signal_snapshot(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=None,params=None,
                             kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
                             num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
                             mdef='vir',nfw_numeric=False,
@@ -373,7 +373,7 @@ def get_ksz_snr(volume_gpc3,z,ngal_mpc3,bg,Cls,params=None,
     return np.sqrt(V*Fstar**2. * vrec * ksint / 12 / np.pi**3 / chistar**2.),fksz
 
 
-def get_ksz_auto_signal(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
+def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
                         k_max = 100., num_k_bins = 200,
 #                             kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
                             num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
@@ -561,4 +561,185 @@ def get_ksz_auto_signal(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
         
     # Return kSZ object (in case we want to use it later) and C_ell array
     return pksz, cl
+
+
+def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
+                        k_max = 100., num_k_bins = 200,
+#                             kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
+                            num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
+                            mdef='vir',nfw_numeric=False,
+                            electron_profile_family='AGN',
+                            electron_profile_nxs=None,electron_profile_xmax=None,
+                       verbose=False, pksz_in=None, save_debug_files=False,
+                                template=False):
+    """
+    Get C_ell_^kSZ, the CMB kSZ auto power, as described by the squeezed limit
+    in Ma & Fry, with some altered notation:
+    
+        C_\ell = \int \frac{d\chi}{\chi^2 H_0^2} \tilde{K}(z[\chi])^2
+                 P_{q_r}(k=\ell/\chi, \chi)
+    
+        \tilde{K}(z) = T_{CMB} \bar{n}_{e,0} \sigma_T (1+z)^2 \exp(-\tau(z))
+        
+        P_{q_r}(k,z) = \frac{1}{6\pi^2} \int dk' (k')^2 P_{vv}(k',z) P_{ee}(k,z)
+    
+    C_ell^kSZ is returned in uK^2.
+    """
+
+    # Make sure input redshifts are sorted
+    zs = np.sort(np.asarray(zs))
+    
+    # Make arrays for volume and galaxy number density, for feeding to kSZ object
+    volumes_gpc3 = volume_gpc3 * np.ones_like(zs)
+    ngals_mpc3 = ngal_mpc3 * np.ones_like(zs)
+    
+    # If not computing for a kSZ template, skip HOD computation to save time
+    if template:
+        skip_hod = False
+    else:
+        skip_hod = True
+    
+    # Define kSZ object, if not specified as input
+    if pksz_in is not None:
+        pksz = pksz_in
+    else:
+        if verbose: print('Initializing kSZ objects')
+        pksz = kSZ(
+            zs, 
+            volumes_gpc3, 
+            ngals_mpc3,
+            kL_max=k_max,                 # Same k_max for kL and kS
+            num_kL_bins=num_k_bins, 
+            kS_min=get_kmin(volume_gpc3), # Same k_min for kL and kS
+            kS_max=k_max, 
+            num_kS_bins=num_k_bins,
+            num_mu_bins=num_mu_bins,
+            ms=ms, 
+            params=params, 
+            mass_function=mass_function,
+            halofit=None, 
+            mdef=mdef, 
+            nfw_numeric=nfw_numeric, 
+            skip_nfw=False,
+            electron_profile_name='e', 
+            electron_profile_family=electron_profile_family,
+            skip_electron_profile=False, 
+            electron_profile_param_override=params,
+            electron_profile_nxs=electron_profile_nxs,
+            electron_profile_xmax=electron_profile_xmax,
+            skip_hod=skip_hod,
+            verbose=verbose
+        )
+        
+    # Get ks and that P_{q_perp} integrand is evaluated at
+    ks = pksz.kS
+        
+    # If not computing for a kSZ template, get P_ee and P_vv
+    # on grids in z and k
+    if not template:
+        
+        # Get P_ee as a function of z and k (packed as [z,k])
+        sPee = pksz.get_power('e',name2='e',verbose=False)
+
+        # Get P_vv as a function of z and k (packed as [z,k]),
+        # by getting it for each z individually
+        lPvv0 = pksz.lPvv(zindex=0)[0,:]
+        lPvv = np.zeros((len(zs), lPvv0.shape[0]))
+        lPvv[0,:] = lPvv0
+        for zi in range(1, len(zs)):
+            lPvv[zi,:] = pksz.lPvv(zindex=zi)[0,:]
+            
+    # If computing for a kSZ template, get P_gg^total, P_ge, and
+    # P_vv on grids in z and k
+    else:
+        
+        # Get P_gg and P_ee as functions of z and k (packed as [z,k])
+        sPgg = pksz.sPggs
+        for zi in range(zs.shape[0]):
+            sPgg[zi] += 1/ngals_mpc3[zi]
+        sPge = pksz.sPges
+        
+        # Get P_vv as a function of z and k (packed as [z,k]),
+        # by getting it for each z individually
+        lPgv0 = pksz.lPgv(zindex=0)[0,:]
+        lPgv = np.zeros((len(zs), lPgv0.shape[0]))
+        lPgv[0,:] = lPgv0
+        for zi in range(1, len(zs)):
+            lPgv[zi,:] = pksz.lPgv(zindex=zi)[0,:]
+        
+    # Compute P_{q_r} values on grid in k,z
+    if verbose: print('Computing P_{q_r} on grid in k,z')
+    Pqr = np.zeros((ks.shape[0], zs.shape[0]))
+    for zi,z in enumerate(zs):
+        
+        # Get P_gv^2 / P_gg^total or P_vv, and integrate in k
+        kls = pksz.kLs[0]
+        if template:
+            integrand = _sanitize((kls**2.)*lPgv[zi]**2/sPgg[zi])
+        else:
+            integrand = _sanitize((kls**2.)*lPvv[zi])
+        vint = np.trapz(integrand,kls)
+        
+        # Get P_ge^2 / P_gg^total or P_ee
+        if template:
+            Pqr[:,zi] = sPge[zi]**2 / sPgg[zi]
+        else:
+            Pqr[:,zi] = sPee[zi]
+        
+        # Multiply by numerical prefactor and integral from above
+        Pqr[:,zi] *= (6*np.pi**2)**-1 * vint
+    
+    # Make 2d interpolating function for P_{q_r}, with arguments z,k.
+    # The resulting interpolating function automatically sorts arguments if
+    # arrays are fed in, but we'll only call iPqperp with one (z,k) pair
+    # at a time, so we'll be fine.
+    iPqr = interp2d(zs, ks, Pqr)
+    
+    # Compute C_ell integral at each ell
+    if verbose: print('Computing C_ell')
+    cl = np.zeros(ells.shape[0])
+    for iell,ell in enumerate(ells):
+        
+        # Set chi_min based on k=30Mpc^-1, and chi_max from max redshift
+        chi_min = ell/30.
+        chi_max = pksz.results.comoving_radial_distance(zs[-1])
+        chi_int = np.geomspace(chi_min, chi_max, 100)
+        k_int = ell/chi_int
+        z_int = pksz.results.redshift_at_comoving_radial_distance(chi_int)
+        
+        # Get integrand evaluated at z,k corresponding to Limber integral
+        integrand = np.zeros(k_int.shape[0])
+        for ki,k in enumerate(k_int):
+            integrand[ki] = iPqr(z_int[ki], k)
+        integrand /= chi_int**2
+        integrand *= (1+z_int)**4
+        
+        # Include prefactors
+        ne0 = ne0_shaw(pksz.pars.ombh2, pksz.pars.YHe)
+        # Units: (m^2 * m^-3 * Mpc^-1 m^1)^2
+        integrand *= (constants['thompson_SI'] \
+                      * ne0 \
+                      * 1/constants['meter_to_megaparsec'] )**2
+        integrand *= (pksz.pars.TCMB * 1e6)**2
+        
+        if True:
+            # Do C_ell integral via trapezoid rule
+            cl[iell] = np.trapz(integrand, chi_int)
+        else:
+            # Doing integral of an interpolating function gives
+            # equivalent results at the precision we care about
+            igr_interp = interp1d(chi_int, integrand)
+            cl[iell] = quad(igr_interp, chi_int[0], chi_int[-1])[0]
+
+    # If desired, save some files for debugging
+    if save_debug_files:
+        np.savetxt('debug_files/zs.dat', zs)
+        np.savetxt('debug_files/k_invMpc.dat', ks)
+        np.savetxt('debug_files/pee.dat', sPee)
+        np.savetxt('debug_files/pvv.dat', lPvv)
+        np.savetxt('debug_files/pqr.dat', Pqr)
+        
+    # Return kSZ object (in case we want to use it later) and C_ell array
+    return pksz, cl
+#     return pksz
 
