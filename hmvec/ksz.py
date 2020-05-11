@@ -596,7 +596,7 @@ def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
     return pksz, cl
 
 
-def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
+def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
                         k_max = 100., num_k_bins = 200,
 #                             kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
                             num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
@@ -700,18 +700,18 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
         
         # Get large-scale P_vv as a function of z and k (packed as [z,k]),
         # by getting it for each z individually
-        lPgv0 = pksz.lPgv(zindex=0,bg=bg)[0,:]
+        lPgv0 = pksz.lPgv(zindex=0,bg=bgs[0])[0,:]
         lPgv = np.zeros((len(zs), lPgv0.shape[0]))
         lPgv[0,:] = lPgv0
         for zi in range(1, len(zs)):
-            lPgv[zi,:] = pksz.lPgv(zindex=zi,bg=bg)[0,:]
+            lPgv[zi,:] = pksz.lPgv(zindex=zi,bg=bgs[zi])[0,:]
             
         # Same for large-scale Pgg
-        lPgg0 = pksz.lPgg(0,bg,bg)[0,:]
+        lPgg0 = pksz.lPgg(0,bgs[0],bgs[0])[0,:]
         lPgg = np.zeros((len(zs), lPgg0.shape[0]))
         lPgg[0,:] = lPgg0
         for zi in range(1, len(zs)):
-            lPgg[zi,:] = pksz.lPgg(zi,bg,bg)[0,:]
+            lPgg[zi,:] = pksz.lPgg(zi,bgs[zi],bgs[zi])[0,:]
         
     # Compute P_{q_r} values on grid in k,z
     if verbose: print('Computing P_{q_r} on grid in k,z')
