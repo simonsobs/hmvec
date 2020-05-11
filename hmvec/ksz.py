@@ -148,7 +148,6 @@ class kSZ(HaloModel):
         )[:,:,0]
     
         for zindex,volume_gpc3 in enumerate(volumes_gpc3):
-            if verbose: print('Getting properties for zindex %d' % zindex)
             self.kLs.append(kL.copy())
             self.Pmms.append(np.resize(p[zindex],(self.mu.size,self.kLs[zindex].size)))
             self.fs.append(growth[:,zindex])
@@ -619,6 +618,9 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
     C_ell^kSZ is returned in uK^2.
     """
 
+    # Define empty dict for storing spectra
+    spec_dict = {}
+    
     # Widen search range for setting lower mass threshold from nbar
     if params is None:
         params = default_params
@@ -671,6 +673,7 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
         
     # Get ks and that P_{q_perp} integrand is evaluated at
     ks = pksz.kS
+    spec_dict['ks'] = ks
         
     # If not computing for a kSZ template, get P_ee and P_vv
     # on grids in z and k
@@ -686,6 +689,9 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
         lPvv[0,:] = lPvv0
         for zi in range(1, len(zs)):
             lPvv[zi,:] = pksz.lPvv(zindex=zi)[0,:]
+            
+        spec_dict['sPee'] = sPee
+        spec_dict['lPvv'] = lPvv
             
     # If computing for a kSZ template, get P_gg^total, P_ge, and
     # P_vv on grids in z and k
@@ -710,8 +716,14 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
         lPgg0 = pksz.lPgg(0,bgs[0],bgs[0])[0,:]
         lPgg = np.zeros((len(zs), lPgg0.shape[0]))
         lPgg[0,:] = lPgg0
-        for zi in range(1, len(zs)):
+        for zi in range(zs.shape[0]):
             lPgg[zi,:] = pksz.lPgg(zi,bgs[zi],bgs[zi])[0,:]
+            lPgg[zi] += 1/ngals_mpc3[zi]
+            
+        spec_dict['sPgg'] = sPgg
+        spec_dict['sPge'] = sPge
+        spec_dict['lPgv'] = lPgv
+        spec_dict['lPgg'] = lPgg
         
     # Compute P_{q_r} values on grid in k,z
     if verbose: print('Computing P_{q_r} on grid in k,z')
@@ -785,7 +797,8 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
         np.savetxt('debug_files/pvv.dat', lPvv)
         np.savetxt('debug_files/pqr.dat', Pqr)
         
-    # Return kSZ object (in case we want to use it later) and C_ell array
-    return pksz, cl
+    # Return kSZ object (in case we want to use it later), C_ell array,
+    # and dict of spectra used
+    return pksz, cl, spec_dict
 #     return pksz
 
