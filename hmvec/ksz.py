@@ -9,6 +9,8 @@ of small-scale Pge, Pee and Pgg.
 
 """
 
+import warnings
+
 from .params import default_params
 from .hmvec import HaloModel
 from . import utils
@@ -129,19 +131,50 @@ class kSZ(HaloModel):
             self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=False) 
             self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=False) 
             
+        # SF: Mat's code used a different k_min for each z if the volumes are different, but
+        # for speed, I've changed it to use a single k_min for all z - this lets us evaluate
+        # all P_matter values we need in one shot
+        if np.max(volumes_gpc3) != np.min(volumes_gpc3):
+            warnings.warn('Using equal k_min at each z, despite different volumes at each z')
+ 
+        # Define log-spaced array of k values, and get P_linear and f(z)
+        # on grid in z and k
+        kL = np.geomspace(get_kmin(np.max(volumes_gpc3)),kL_max,num_kL_bins)
+        p = self._get_matter_power(self.zs,kL,nonlinear=False)
+        growth = self.results.get_redshift_evolution(
+            kL, 
+            self.zs, 
+            ['growth']
+        )[:,:,0]
+    
         for zindex,volume_gpc3 in enumerate(volumes_gpc3):
             if verbose: print('Getting properties for zindex %d' % zindex)
-            kL = np.geomspace(get_kmin(volume_gpc3),kL_max,num_kL_bins)
             self.kLs.append(kL.copy())
-            p = self._get_matter_power(self.zs[zindex],self.kLs[zindex],nonlinear=False)
-            self.Pmms.append(np.resize(p,(self.mu.size,kL.size)))
-            self.fs.append( self.results.get_redshift_evolution(self.kLs[zindex], self.zs[zindex], ['growth']).ravel() )
+            self.Pmms.append(np.resize(p[zindex],(self.mu.size,self.kLs[zindex].size)))
+            self.fs.append(growth[:,zindex])
             z = self.zs[zindex]
             a = 1./(1.+z)
             H = self.results.h_of_z(z)
             self.d2vs.append(  self.fs[zindex]*a*H / kL )
             self.adotf.append(self.fs[zindex]*a*H)
-        
+
+
+
+######## MAT'S VERSION - slow for many z's 
+#         for zindex,volume_gpc3 in enumerate(volumes_gpc3):
+#             if verbose: print('Getting properties for zindex %d' % zindex)
+#             kL = np.geomspace(get_kmin(volume_gpc3),kL_max,num_kL_bins)
+#             self.kLs.append(kL.copy())
+#             p = self._get_matter_power(self.zs[zindex],self.kLs[zindex],nonlinear=False)
+#             self.Pmms.append(np.resize(p,(self.mu.size,kL.size)))
+#             self.fs.append( self.results.get_redshift_evolution(self.kLs[zindex], self.zs[zindex], ['growth']).ravel() )
+#             z = self.zs[zindex]
+#             a = 1./(1.+z)
+#             H = self.results.h_of_z(z)
+#             self.d2vs.append(  self.fs[zindex]*a*H / kL )
+#             self.adotf.append(self.fs[zindex]*a*H)
+########    
+
         # self.D = self.cc.D_growth(self.cc.z2a(self.z),"camb_anorm")
         # self.T = lambda x: self.cc.transfer(x)
         # self.alpha_func = lambda x: (2. * x**2. * self.T(x)) / (3.* self.cc.Omega_m * self.cc.results.h_of_z(0)**2.) * self.D
@@ -586,6 +619,11 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
     C_ell^kSZ is returned in uK^2.
     """
 
+    # Widen search range for setting lower mass threshold from nbar
+    if params is None:
+        params = default_params
+        params['hod_bisection_search_min_log10mthresh'] = 1
+    
     # Make sure input redshifts are sorted
     zs = np.sort(np.asarray(zs))
     
@@ -661,11 +699,11 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
         
         # Get P_vv as a function of z and k (packed as [z,k]),
         # by getting it for each z individually
-        lPgv0 = pksz.lPgv(zindex=0)[0,:]
+        lPgv0 = pksz.lPgv(zindex=0,bg=bg)[0,:]
         lPgv = np.zeros((len(zs), lPgv0.shape[0]))
         lPgv[0,:] = lPgv0
         for zi in range(1, len(zs)):
-            lPgv[zi,:] = pksz.lPgv(zindex=zi)[0,:]
+            lPgv[zi,:] = pksz.lPgv(zindex=zi,bg=bg)[0,:]
         
     # Compute P_{q_r} values on grid in k,z
     if verbose: print('Computing P_{q_r} on grid in k,z')
@@ -732,7 +770,7 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
             cl[iell] = quad(igr_interp, chi_int[0], chi_int[-1])[0]
 
     # If desired, save some files for debugging
-    if save_debug_files:
+    if save_debug_files and not template:
         np.savetxt('debug_files/zs.dat', zs)
         np.savetxt('debug_files/k_invMpc.dat', ks)
         np.savetxt('debug_files/pee.dat', sPee)
