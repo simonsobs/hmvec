@@ -691,19 +691,27 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
     # P_vv on grids in z and k
     else:
         
-        # Get P_gg and P_ee as functions of z and k (packed as [z,k])
+        # Get small-scale P_gg and P_ee as functions of z and k 
+        # (packed as [z,k])
         sPgg = pksz.sPggs
         for zi in range(zs.shape[0]):
             sPgg[zi] += 1/ngals_mpc3[zi]
         sPge = pksz.sPges
         
-        # Get P_vv as a function of z and k (packed as [z,k]),
+        # Get large-scale P_vv as a function of z and k (packed as [z,k]),
         # by getting it for each z individually
         lPgv0 = pksz.lPgv(zindex=0,bg=bg)[0,:]
         lPgv = np.zeros((len(zs), lPgv0.shape[0]))
         lPgv[0,:] = lPgv0
         for zi in range(1, len(zs)):
             lPgv[zi,:] = pksz.lPgv(zindex=zi,bg=bg)[0,:]
+            
+        # Same for large-scale Pgg
+        lPgg0 = pksz.lPgg(0,bg,bg)[0,:]
+        lPgg = np.zeros((len(zs), lPgg0.shape[0]))
+        lPgg[0,:] = lPgg0
+        for zi in range(1, len(zs)):
+            lPgg[zi,:] = pksz.lPgg(zi,bg,bg)[0,:]
         
     # Compute P_{q_r} values on grid in k,z
     if verbose: print('Computing P_{q_r} on grid in k,z')
@@ -713,7 +721,7 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
         # Get P_gv^2 / P_gg^total or P_vv, and integrate in k
         kls = pksz.kLs[0]
         if template:
-            integrand = _sanitize((kls**2.)*lPgv[zi]**2/sPgg[zi])
+            integrand = _sanitize((kls**2.)*lPgv[zi]**2/lPgg[zi])
         else:
             integrand = _sanitize((kls**2.)*lPvv[zi])
         vint = np.trapz(integrand,kls)
