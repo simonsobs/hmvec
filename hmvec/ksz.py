@@ -622,7 +622,7 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
     # Widen search range for setting lower mass threshold from nbar
     if params is None:
         params = default_params
-        params['hod_bisection_search_min_log10mthresh'] = 1
+    params['hod_bisection_search_min_log10mthresh'] = 1
     
     # Make sure input redshifts are sorted
     zs = np.sort(np.asarray(zs))
