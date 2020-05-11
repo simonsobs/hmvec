@@ -508,9 +508,9 @@ class HaloModel(Cosmology):
         return pk
 
 
-    def get_power(self,name,name2=None,verbose=True):
+    def get_power(self,name,name2=None,verbose=True,b1=None,b2=None):
         if name2 is None: name2 = name
-        return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose)
+        return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose,b1,b2)
     
     def get_power_1halo(self,name="nfw",name2=None):
         name2 = name if name2 is None else name2
@@ -536,7 +536,7 @@ class HaloModel(Cosmology):
         integrand = self.nzm[...,None] * square_term
         return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
     
-    def get_power_2halo(self,name="nfw",name2=None,verbose=False):
+    def get_power_2halo(self,name="nfw",name2=None,verbose=False,b1_in=None,b2_in=None):
         name2 = name if name2 is None else name2
         
         def _2haloint(iterm):
@@ -566,7 +566,11 @@ class HaloModel(Cosmology):
 
         iterm1,iterm01,b1 = _get_term(name)
         iterm2,iterm02,b2 = _get_term(name2)
-        
+        if b1_in is not None:
+            b1 = b1_in.reshape((b1_in.shape[0],1))
+        if b2_in is not None:
+            b2 = b2_in.reshape((b1_in.shape[0],1))
+
         integral = _2haloint(iterm1)
         integral2 = _2haloint(iterm2)
             

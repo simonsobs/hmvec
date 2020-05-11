@@ -93,7 +93,8 @@ class kSZ(HaloModel):
                  electron_profile_nxs=None,electron_profile_xmax=None,
                  skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None,
                  mthreshs_override=None,
-                verbose=False):
+                verbose=False,
+                b1=None,b2=None):
 
         if ms is None: ms = np.geomspace(defaults['min_mass'],defaults['max_mass'],defaults['num_mass'])
         volumes_gpc3 = np.atleast_1d(volumes_gpc3)
@@ -128,8 +129,8 @@ class kSZ(HaloModel):
         self.adotf = []
         self.d2vs = []
         if not skip_hod:
-            self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=False) 
-            self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=False) 
+            self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=False,b1=b1,b2=b1) 
+            self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=False,b1=b1) 
             
         # SF: Mat's code used a different k_min for each z if the volumes are different, but
         # for speed, I've changed it to use a single k_min for all z - this lets us evaluate
@@ -668,7 +669,9 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
             electron_profile_nxs=electron_profile_nxs,
             electron_profile_xmax=electron_profile_xmax,
             skip_hod=skip_hod,
-            verbose=verbose
+            verbose=verbose,
+            b1=bgs,
+            b2=bgs
         )
         
     # Get ks and that P_{q_perp} integrand is evaluated at
@@ -733,7 +736,8 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
         # Get P_gv^2 / P_gg^total or P_vv, and integrate in k
         kls = pksz.kLs[0]
         if template:
-            integrand = _sanitize((kls**2.)*lPgv[zi]**2/lPgg[zi])
+#             integrand = _sanitize((kls**2.)*lPgv[zi]**2/lPgg[zi])
+             integrand = _sanitize((kls**2.)*lPgv[zi]**2/sPgg[zi])
         else:
             integrand = _sanitize((kls**2.)*lPvv[zi])
         vint = np.trapz(integrand,kls)
