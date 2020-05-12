@@ -596,7 +596,7 @@ def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
     return pksz, cl
 
 
-def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
+def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
                         k_max = 100., num_k_bins = 200,
 #                             kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
                             num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
@@ -604,7 +604,8 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
                             electron_profile_family='AGN',
                             electron_profile_nxs=None,electron_profile_xmax=None,
                        verbose=False, pksz_in=None, save_debug_files=False,
-                                template=False):
+                                template=False,
+                         ngals_mpc3_for_v=None):
     """
     Get C_ell_^kSZ, the CMB kSZ auto power, as described by the squeezed limit
     in Ma & Fry, with some altered notation:
@@ -630,9 +631,11 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
     # Make sure input redshifts are sorted
     zs = np.sort(np.asarray(zs))
     
-    # Make arrays for volume and galaxy number density, for feeding to kSZ object
+    # Make arrays for volume, for feeding to kSZ object
     volumes_gpc3 = volume_gpc3 * np.ones_like(zs)
-    ngals_mpc3 = ngal_mpc3 * np.ones_like(zs)
+    
+    if ngals_mpc3_for_v is None:
+        ngals_mpc3_for_v = ngals_mpc3
     
     # If not computing for a kSZ template, skip HOD computation to save time
     if template:
@@ -702,9 +705,11 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
         
         # Get small-scale P_gg and P_ee as functions of z and k 
         # (packed as [z,k])
-        sPgg = pksz.sPggs
+        sPgg_for_e = pksz.sPggs
+        sPgg_for_v = sPgg_for_e.copy()
         for zi in range(zs.shape[0]):
-            sPgg[zi] += 1/ngals_mpc3[zi]
+            sPgg_for_e[zi] += 1/ngals_mpc3[zi]
+            sPgg_for_v[zi] += 1/ngals_mpc3_for_v[zi]
         sPge = pksz.sPges
         
         # Get large-scale P_vv as a function of z and k (packed as [z,k]),
@@ -721,9 +726,9 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
         lPgg[0,:] = lPgg0
         for zi in range(zs.shape[0]):
             lPgg[zi,:] = pksz.lPgg(zi,bgs[zi],bgs[zi])[0,:]
-            lPgg[zi] += 1/ngals_mpc3[zi]
+            lPgg[zi] += 1/ngals_mpc3_for_v[zi]
             
-        spec_dict['sPgg'] = sPgg
+        spec_dict['sPgg'] = sPgg_for_e
         spec_dict['sPge'] = sPge
         spec_dict['lPgv'] = lPgv
         spec_dict['lPgg'] = lPgg
@@ -737,14 +742,14 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngal_mpc3,bgs,params=None,
         kls = pksz.kLs[0]
         if template:
 #             integrand = _sanitize((kls**2.)*lPgv[zi]**2/lPgg[zi])
-             integrand = _sanitize((kls**2.)*lPgv[zi]**2/sPgg[zi])
+            integrand = _sanitize((kls**2.)*lPgv[zi]**2/sPgg_for_v[zi])
         else:
             integrand = _sanitize((kls**2.)*lPvv[zi])
         vint = np.trapz(integrand,kls)
         
         # Get P_ge^2 / P_gg^total or P_ee
         if template:
-            Pqr[:,zi] = sPge[zi]**2 / sPgg[zi]
+            Pqr[:,zi] = sPge[zi]**2 / sPgg_for_e[zi]
         else:
             Pqr[:,zi] = sPee[zi]
         
