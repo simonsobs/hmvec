@@ -5,7 +5,6 @@ from scipy.interpolate import interp1d
 import camb
 from camb import model
 import numpy as np
-import astropy.constants as const
 from . import tinker,utils
 from .cosmology import Cosmology
 from .cib import luminosity
@@ -491,7 +490,7 @@ class HaloModel(Cosmology):
         uhalo = self.uk_profiles['nfw']
         fcen = luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
         return uhalo*fcen
-        
+
 
     def get_power(self,name,name2=None,verbose=True):
         if name2 is None: name2 = name
@@ -566,16 +565,6 @@ class HaloModel(Cosmology):
             print("Two-halo consistency1: " , consistency1,integral)
             print("Two-halo consistency2: " , consistency2,integral2)
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
-
-    def get_sfrd(self, freq_range):
-        h = const.h.cgs.value
-        m_min = 1.0e8 * h
-        m_max = 1.0e15 * h
-
-        sfr = luminosity(self.zs, self.ms, len(self.ks), freq_range, L_o=0.02) * 1.7e-10
-
-        
-
 
 
 
