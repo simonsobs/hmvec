@@ -131,6 +131,7 @@ def capitalTheta(nu_obs, z, alpha, beta, gamma, T_o, plot=False):
     else:            
         sed = np.where(freq_array < nu_o_array, lowSED(freq_array, temp_array), highSED(freq_array, A_array))
     
+
     #Plot the whole spectrum
     if plot:
         #Sample Redshifts
@@ -188,15 +189,17 @@ def capitalPhi(z, delta):
     """ Redshift dependent global normalization """
     return (1+z)**delta
 
-def capitalSigma(M, M_eff):
-    """ Halo mass dependance of galaxy luminosity """
-
-    logM_eff = M_eff  # logM_eff = log10(mass peak of specific IR emissivity) in solar masses
-    sigma2 = 0.3      # (standard deviation)^2 of the Gaussian
+def capitalSigma(M, logM_eff, sigma2):
+    """Halo mass dependance of galaxy luminosity 
+    
+    Data Dictionary
+    logM_eff : log10(mass peak of specific IR emissivity) in solar masses
+    sigma2   : (standard deviation)^2 of the Gaussian
+    """
 
     return M/np.sqrt(2*np.pi*sigma2) * np.exp(- (np.log10(M)-logM_eff)**2 / (2*sigma2))
 
-def luminosity(z, M, Nks, v_obs, a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff=12.3, L_o=1):  
+def luminosity(z, M, Nks, v_obs, a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff=12.3, var = 0.3, L_o=1):  
     """Luminosity of CIB galaxies. It depends only on mass and redshift, but the luminosity is on a grid of [z, M, k/r].
     
     Arguments:
@@ -212,6 +215,7 @@ def luminosity(z, M, Nks, v_obs, a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff
         d [float]: fit parameter - delta (default = 2.4)
         Td_o [float]: fit parameter - dust temp at z=0 (default = 20.7)
         logM_eff [float]: fit parameter - log(M_eff) in L-M relation (default = 12.3)
+        var [float]: model parameter - variance of Gaussian part of L-M relation (default = 0.3)
         L_o [float]: fit parameter - normalization constant (default: 1)
 
     Returns:
@@ -220,7 +224,7 @@ def luminosity(z, M, Nks, v_obs, a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff
     
     #Calculate the z and M Dependence
     Lz = capitalPhi(z, d) * capitalTheta(v_obs, z, a, b, g, Td_o)
-    Lm = capitalSigma(M, logM_eff)
+    Lm = capitalSigma(M, logM_eff, var)
     
     #Put Luminosity on Grid
     Lk = np.ones(Nks)

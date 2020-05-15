@@ -568,15 +568,17 @@ class HaloModel(Cosmology):
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
     def get_sfrd(self, freq_range):
-        h = const.h.cgs.value
         m_min = 1.0e8 * h
         m_max = 1.0e15 * h
+        kennicutt = 1.7e-10
 
-        sfr = luminosity(self.zs, self.ms, len(self.ks), freq_range, L_o=0.02) * 1.7e-10
-
+        import pdb; pdb.set_trace()
         
+        sfr = kennicutt * luminosity(self.zs, self.ms, len(self.ks), freq_range, 
+                                     a=0.36, b=1.75, g=1.7, d=3.6, Td_o=24.4, logM_eff=12.6, var=0.5, L_o=0.02)
 
-
+        return np.trapz(self.nzm * sfr[:,:,0], self.ms, axis=-1)
+        
 
 
 """
