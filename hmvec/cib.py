@@ -181,7 +181,12 @@ def capitalTheta(nu_obs, z, alpha, beta, gamma, T_o, plot=False):
             ax[iplt].legend()
 
             iplt += 1
-        plt.savefig('sed.pdf', dpi=900, bbox_inches='tight');
+        
+        #Save file
+        if bandpassflag:
+            plt.savefig('sed_range.pdf', dpi=900, bbox_inches='tight');
+        else:
+            plt.savefig('sed_1freq.pdf', dpi=900, bbox_inches='tight');
 
     return sed
 
@@ -234,6 +239,6 @@ def luminosity(z, M, Nks, v_obs, a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff
     return L_o * L
 
 #Testing
-nu_obs = np.array([143e9, 3000e9])
+nu_obs = np.array([857.0e9])
 redshifts = np.linspace(0.01, 5, 500)
 sed = capitalTheta(nu_obs, redshifts, alpha=0.2, beta=1.6, gamma=1.7, T_o=20.7, plot=True)
