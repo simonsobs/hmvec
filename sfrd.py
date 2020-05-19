@@ -1,11 +1,11 @@
 import numpy as np
-from hmvec import hmvec
+from hmvec import hmvec as hm
 import matplotlib.pyplot as plt
 import astropy.constants as const
 
 #Grid for Integration
-Nz = 150                                 # num of redshifts
-Nm = 200                                 # num of masses
+Nz = 1000                                 # num of redshifts
+Nm = 1000                                 # num of masses
 Nk = 100                                # num of wavenumbers
 redshifts = np.linspace(0.01, 3, Nz)             # redshifts
 masses = np.geomspace(1e10, 1e16, Nm)           # masses
@@ -19,5 +19,9 @@ nurange = 3.0e8 / lamdarange
 hcos = hm.HaloModel(redshifts, ks, ms=masses)
 
 #Get SFRD
-SFRD = hcos.get_sfrd(nurange)
+sfrd = hcos.get_sfrd(nurange)
 
+#Plot
+plt.plot(redshifts, sfrd)
+plt.ylabel('SFRD')
+plt.xlabel('z')
