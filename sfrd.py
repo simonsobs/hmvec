@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import astropy.constants as const
 
 #Grid for Integration
-Nz = 1000                                 # num of redshifts
-Nm = 1000                                 # num of masses
+Nz = 600                                 # num of redshifts
+Nm = 500                                 # num of masses
 Nk = 100                                # num of wavenumbers
 redshifts = np.linspace(0.01, 3, Nz)             # redshifts
 masses = np.geomspace(1e10, 1e16, Nm)           # masses
