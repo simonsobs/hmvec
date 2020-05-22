@@ -19,9 +19,11 @@ nurange = 3.0e8 / lamdarange
 hcos = hm.HaloModel(redshifts, ks, ms=masses)
 
 #Get SFRD
-sfrd = hcos.get_sfrd(nurange)
+sfrd = hcos.get_sfrd(nurange, model='Planck')
 
 #Plot
-plt.plot(redshifts, sfrd)
+plt.plot(redshifts, sfrd, label='Planck theory')
 plt.ylabel('SFRD')
 plt.xlabel('z')
+plt.legend()
+plt.savefig('sfrd.pdf', dpi=500, bbox_inches='tight')
