@@ -61,6 +61,11 @@ def capitalTheta(nu_obs, z, alpha, beta, gamma, T_o, plot=False):
     #Is there a bandpass or just 1 frequency?
     bandpassflag = False if len(nu_obs) == 1 else True
 
+    #Put Bandpasss Ends in Order
+    if bandpassflag:
+        if nu_obs[0] > nu_obs[1]:
+            nu_obs = nu_obs[::-1]
+
     #Undoing Redshift: from Observing to Original
     if bandpassflag:
         freq_array = np.outer((1+z), nu_obs)
@@ -166,7 +171,8 @@ def capitalTheta(nu_obs, z, alpha, beta, gamma, T_o, plot=False):
                 lowend = freq_array[zi, 0]
                 highend = freq_array[zi, 1]
                 bandpass_range = np.logspace(np.log10(lowend), np.log10(highend))
-                ax[iplt].fill_between(bandpass_range, wholeSED(bandpass_range, nu_o, temp_array[zi], A_array[zi]), color=colorsalpha[iplt], label=f'Bandpass: {lowend:.2e} to {highend:.2e} Hz')
+                ax[iplt].fill_between(bandpass_range, wholeSED(bandpass_range, nu_o, temp_array[zi], A_array[zi]), 
+                                        color=colorsalpha[iplt], edgecolors='none', label=f'Bandpass: {lowend:.2e} to {highend:.2e} Hz')
 
 
             #Marking nu_obs at sed frame on the graph
@@ -205,7 +211,10 @@ def capitalSigma(M, logM_eff, sigma2):
     return M/np.sqrt(2*np.pi*sigma2) * np.exp(- (np.log10(M)-logM_eff)**2 / (2*sigma2))
 
 def luminosity(z, M, Nks, v_obs, a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff=12.3, var = 0.3, L_o=1):  
-    """Luminosity of CIB galaxies. It depends only on mass and redshift, but the luminosity is on a grid of [z, M, k/r].
+    """Luminosity of CIB galaxies. It depends only on mass and redshift, but is broadcasted onto a grid of [z, M, k/r]. The fit parameter values are from Herschel.
+
+    To Do:
+    1.) Check HERSCHEL gamma value.
     
     Arguments:
         M [1darray]: galaxy's masses
@@ -239,6 +248,7 @@ def luminosity(z, M, Nks, v_obs, a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff
     return L_o * L
 
 #Testing
-nu_obs = np.array([857.0e9])
+lamdarange = np.array([8.0e-6, 1000.0e-6])
+nurange = 3.0e8 / lamdarange
 redshifts = np.linspace(0.01, 5, 500)
-sed = capitalTheta(nu_obs, redshifts, alpha=0.2, beta=1.6, gamma=1.7, T_o=20.7, plot=True)
+sed = capitalTheta(nurange, redshifts, alpha=0.2, beta=1.6, gamma=1.7, T_o=20.7, plot=True)

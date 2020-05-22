@@ -406,4 +406,7 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis,dcdzflag=False):
         if dcdzflag:
             integrand[:, i] = interpolated * prefactor
 
-    return Cells, integrand
+    if dcdzflag:
+        return Cells, integrand
+    else:
+        return Cells
