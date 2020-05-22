@@ -248,7 +248,7 @@ def luminosity(z, M, Nks, v_obs, a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff
     return L_o * L
 
 #Testing
-lamdarange = np.array([8.0e-6, 1000.0e-6])
-nurange = 3.0e8 / lamdarange
-redshifts = np.linspace(0.01, 5, 500)
-sed = capitalTheta(nurange, redshifts, alpha=0.2, beta=1.6, gamma=1.7, T_o=20.7, plot=True)
+# lamdarange = np.array([8.0e-6, 1000.0e-6])
+# nurange = 3.0e8 / lamdarange
+# redshifts = np.linspace(0.01, 5, 500)
+# sed = capitalTheta(nurange, redshifts, alpha=0.2, beta=1.6, gamma=1.7, T_o=20.7, plot=True)
