@@ -7,6 +7,8 @@ from camb import model
 import numpy as np
 from . import tinker,utils
 from .cosmology import Cosmology
+
+import scipy.constants as constants
 from .params import default_params, battaglia_defaults
 from .fft import generic_profile_fft
 import scipy
@@ -46,7 +48,22 @@ Limitations:
 1. Tinker 2010 option and Sheth-Torman have only been coded up for M200m and mvir
 respectively.
 
-"""
+ In Fisher calculations, I want to calculate power spectra at a fiducial parameter set      
+ and at perturbed parameters (partial derivatives). The usual flowdown for a power      
+ spectrum calculation is:       
+ C1. initialize background cosmology and linear matter power        
+ C2. calculate mass function        
+ C3. calculate profiles and HODs        
+ with each step depending on the previous. This means if I change a parameter associated        
+ with C3, I don't need to recalculate C1 and C2. So a Fisher calculation with n-point derivatives       
+ should be      
+ done based on a parameter set p = {p1,p2,p3} for each of the above as follows:     
+ 1. Calculate power spectra for fiducial p (1 C1,C2,C3 call each)       
+ 2. Calculate power spectra for perturbed p3 (n C3 calls for each p3 parameter)     
+ 3. Calculate power spectra for perturbed p2 (n C2,C3 calls for each p2 parameter)      
+ 2. Calculate power spectra for perturbed p1 (n C1,C2,C3 calls for each p1 parameter)       
+        
+ """
     
 
 def Wkr_taylor(kR):
@@ -67,7 +84,7 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     return A*((h*m/2.e12)**alpha)*(1+z)**beta
     
 class HaloModel(Cosmology):
-    def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
+    def __init__(self,zs,ks,ms=None,params=None,mass_function="sheth-torman",
                  halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
         self.zs = np.asarray(zs)
         self.ks = ks
@@ -84,6 +101,7 @@ class HaloModel(Cosmology):
         
         # Profiles
         self.uk_profiles = {}
+        self.pk_profiles = {}
         if not(skip_nfw): self.add_nfw_profile("nfw",numeric=nfw_numeric)
 
     def _init_cosmology(self,params,halofit):
@@ -91,22 +109,6 @@ class HaloModel(Cosmology):
         self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
         if halofit is not None: self.nPzk = self._get_matter_power(self.zs,self.ks,nonlinear=True)
 
-    def update_param(self,param,value,halofit=None):
-        raise NotImplementedError # work in progress
-        cosmo_params = ['omch2','ombh2','H0','ns','As','mnu','w0','tau','nnu','wa','num_massive_neutrinos']
-        self.p[param] = value
-        if param in cosmo_params:
-            self._init_cosmology(self.p,halofit)
-            self._init_mass_function()
-            # update profiles
-            pass
-        elif param in profile_params:
-            # update profiles
-            pass
-        elif param in mass_function_params:
-            self._init_mass_function()
-        else:
-            raise ValueError
         
     def deltav(self,z): # Duffy virial actually uses this from Bryan and Norman 1997
         # return 178. * self.omz(z)**(0.45) # Eke et al 1998
@@ -198,11 +200,14 @@ class HaloModel(Cosmology):
         return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2. 
 
     
-    def add_battaglia_profile(self,name,family=None,param_override={},
+    def add_battaglia_profile(self,name,family=None,param_override=None,
                               nxs=None,
-                              xmax=None):
-        assert name not in self.uk_profiles.keys(), "Profile name already exists."
+                              xmax=None,ignore_existing=False):
+        if not(ignore_existing): assert name not in self.uk_profiles.keys(), "Profile name already exists."
         assert name!='nfw', "Name nfw is reserved."
+        if nxs is None: nxs = self.p['electron_density_profile_integral_numxs']
+        if xmax is None: xmax = self.p['electron_density_profile_integral_xmax']
+
         
         # Set default parameters
         if family is None: family = self.p['battaglia_gas_family'] # AGN or SH?
@@ -211,13 +216,15 @@ class HaloModel(Cosmology):
         pparams.update(battaglia_defaults[family])
 
         # Update with overrides
-        for key in param_override:
-            if key=='battaglia_gas_gamma':
-                pparams[key] = param_override[key]
-            elif key in battaglia_defaults[family]:
-                pparams[key] = param_override[key]
-            else:
-                raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
+        if param_override is not None:
+            for key in param_override.keys():
+                if key=='battaglia_gas_gamma':
+                    pparams[key] = param_override[key]
+                elif key in battaglia_defaults[family]:
+                    pparams[key] = param_override[key]
+                else:
+                    #raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
+                    pass
 
         # Convert masses to m200critz
         rhocritz = self.rho_critical_z(self.zs)
@@ -256,11 +263,75 @@ class HaloModel(Cosmology):
         ks,ukouts = generic_profile_fft(rhofunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs)
         self.uk_profiles[name] = ukouts.copy()
 
+    def add_battaglia_pres_profile(self,name,family=None,param_override=None,
+                              nxs=None,
+                              xmax=None,ignore_existing=False):
+        if not(ignore_existing): assert name not in self.pk_profiles.keys(), "Profile name already exists."
+        assert name!='nfw', "Name nfw is reserved."
+        if nxs is None: nxs = self.p['electron_pressure_profile_integral_numxs']
+        if xmax is None: xmax = self.p['electron_pressure_profile_integral_xmax']
         
-                        
+        # Set default parameters
+        if family is None: family = self.p['battaglia_pres_family'] # AGN or SH?
+        pparams = {}
+        pparams['battaglia_pres_gamma'] = self.p['battaglia_pres_gamma']
+        pparams['battaglia_pres_alpha'] = self.p['battaglia_pres_alpha']
+        pparams.update(battaglia_defaults[family])
+
+        # Update with overrides
+        if param_override is not None:
+            for key in param_override.keys():
+                if key in ['battaglia_pres_gamma','battaglia_pres_alpha']:
+                    pparams[key] = param_override[key]
+                elif key in battaglia_defaults[family]:
+                    pparams[key] = param_override[key]
+                else:
+                    #raise ValueError # param in param_override doesn't seem to be a Battaglia parameter
+                    pass
+
+        # Convert masses to m200critz
+        rhocritz = self.rho_critical_z(self.zs)
+        if self.mdef=='vir':
+            delta_rhos1 = rhocritz*self.deltav(self.zs)
+        elif self.mdef=='mean':
+            delta_rhos1 = self.rho_matter_z(self.zs)*200.
+        rvirs = self.rvir(self.ms[None,:],self.zs[:,None])
+        cs = self.concentration()
+        delta_rhos2 = 200.*self.rho_critical_z(self.zs)
+        m200critz = mdelta_from_mdelta(self.ms,cs,delta_rhos1,delta_rhos2)
+        r200critz = R_from_M(m200critz,self.rho_critical_z(self.zs)[:,None],delta=200.)
+
+        # Generate profiles
+        """
+        The physical profile is rho(r) = f(2r/R200)
+        We rescale this to f(x), so x = r/(R200/2) = r/rgs
+        So rgs = R200/2 is the equivalent of rss in the NFW profile
+        """
+        omb = self.p['ombh2'] / self.h**2.
+        omm = self.om0
+        presFunc = lambda x: P_e_generic_x(x,m200critz[...,None],r200critz[...,None],self.zs[:,None,None],omb,omm,rhocritz[...,None,None],
+                                    alpha=pparams['battaglia_pres_alpha'],
+                                    gamma=pparams['battaglia_pres_gamma'],
+                                    P0_A0=pparams['P0_A0'],
+                                    P0_alpham=pparams['P0_alpham'],
+                                    P0_alphaz=pparams['P0_alphaz'],
+                                    xc_A0=pparams['xc_A0'],
+                                    xc_alpham=pparams['xc_alpham'],
+                                    xc_alphaz=pparams['xc_alphaz'],
+                                    beta_A0=pparams['beta_A0'],
+                                    beta_alpham=pparams['beta_alpham'],
+                                    beta_alphaz=pparams['beta_alphaz'])
+
+        rgs = r200critz
+        cgs = rvirs/rgs
+        sigmaT=constants.physical_constants['Thomson cross section'][0] # units m^2
+        mElect=constants.physical_constants['electron mass'][0] / default_params['mSun']# units kg
+        ks,pkouts = generic_profile_fft(presFunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs,do_mass_norm=False)
+        self.pk_profiles[name] = pkouts.copy()*4*np.pi*(sigmaT/(mElect*constants.c**2))*(r200critz**3*((1+self.zs)**2/self.h_of_z(self.zs))[...,None])[...,None]            
+
     def add_nfw_profile(self,name,numeric=False,
                         nxs=None,
-                        xmax=None):
+                        xmax=None,ignore_existing=False):
 
         """
         xmax should be thought of in "concentration units", i.e.,
@@ -276,7 +347,7 @@ class HaloModel(Cosmology):
         nxs decides accuracy on small scales
         
         """
-        assert name not in self.uk_profiles.keys(), "Profile name already exists."
+        if not(ignore_existing): assert name not in self.uk_profiles.keys(), "Profile name already exists."
         if nxs is None: nxs = self.p['nfw_integral_numxs']
         if xmax is None: xmax = self.p['nfw_integral_xmax']
         cs = self.concentration()
@@ -299,51 +370,94 @@ class HaloModel(Cosmology):
 
     def add_hod(self,name,mthresh=None,ngal=None,corr="max",
                 satellite_profile_name='nfw',
-                central_profile_name=None):
+                central_profile_name=None,ignore_existing=False,param_override=None):
         """
         Specify an HOD.
         This requires either a stellar mass threshold mthresh (nz,)
         or a number density ngal (nz,) from which mthresh is identified iteratively.
         You can either specify a corr="max" maximally correlated central-satellite 
         model or a corr="min" minimally correlated model.
-
         Miscentering could be included through central_profile_name (default uk=1 for default name of None).
-
         """
-        assert name not in self.uk_profiles.keys(), \
-            "HOD name already used by profile."
+        if not(ignore_existing): 
+            assert name not in self.uk_profiles.keys(), \
+                "HOD name already used by profile."
         assert satellite_profile_name in self.uk_profiles.keys(), \
             "No matter profile by that name exists."
         if central_profile_name is not None:
             assert central_profile_name in self.uk_profiles.keys(), \
                 "No matter profile by that name exists."
-        assert name not in self.hods.keys(), "HOD with that name already exists."
+        if not(ignore_existing): 
+            assert name not in self.hods.keys(), "HOD with that name already exists."
+
+        hod_params = ['hod_sig_log_mstellar','hod_bisection_search_min_log10mthresh',
+                   'hod_bisection_search_max_log10mthresh','hod_bisection_search_rtol',
+                   'hod_bisection_search_warn_iter','hod_alphasat','hod_Bsat',
+                      'hod_betasat','hod_Bcut','hod_betacut','hod_A_log10mthresh']
+        # Set default parameters
+        pparams = {}
+        for ip in hod_params:
+            pparams[ip] = self.p[ip]
+
+        # Update with overrides
+        if param_override is not None:
+            for key in param_override.keys():
+                if key in hod_params:
+                    pparams[key] = param_override[key]
+                else:
+                    raise ValueError # param in param_override doesn't seem to be an HOD parameter
+        
+        
         self.hods[name] = {}
         if ngal is not None:
-            assert ngal.size == self.zs.size
+            try: assert ngal.size == self.zs.size
+            except:
+                raise ValueError("ngal has to be a vector of size self.zs")
             assert mthresh is None
+
+            try:
+                Msat_override = pparams['hod_Msat_override']
+            except:
+                Msat_override = None
+            try:
+                Mcut_override = pparams['hod_Mcut_override']
+            except:
+                Mcut_override = None
 
             nfunc = lambda ilog10mthresh: ngal_from_mthresh(ilog10mthresh,
                                                             self.zs,
                                                             self.nzm,
                                                             self.ms,
-                                                            sig_log_mstellar=self.p['hod_sig_log_mstellar'])
+                                                            sig_log_mstellar=pparams['hod_sig_log_mstellar'],
+                                                            alphasat=pparams['hod_alphasat'],
+                                                            Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
+                                                            Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
+                                                            Msat_override=Msat_override,
+                                                            Mcut_override=Mcut_override)
 
             log10mthresh = utils.vectorized_bisection_search(ngal,nfunc,
-                                                             [self.p['hod_bisection_search_min_log10mthresh'],
-                                                              self.p['hod_bisection_search_max_log10mthresh']],
+                                                             [pparams['hod_bisection_search_min_log10mthresh'],
+                                                              pparams['hod_bisection_search_max_log10mthresh']],
                                                              "decreasing",
-                                                             rtol=self.p['hod_bisection_search_rtol'],
+                                                             rtol=pparams['hod_bisection_search_rtol'],
                                                              verbose=True,
-                                                             hang_check_num_iter=self.p['hod_bisection_search_warn_iter'])
-            mthresh = 10**log10mthresh
+                                                             hang_check_num_iter=pparams['hod_bisection_search_warn_iter'])
+            mthresh = 10**(log10mthresh*pparams['hod_A_log10mthresh'])
             
-        assert mthresh.size == self.zs.size
+        try: assert mthresh.size == self.zs.size
+        except:
+            raise ValueError("mthresh has to be a vector of size self.zs")
 
         log10mhalo = np.log10(self.ms[None,:])
         log10mstellar_thresh = np.log10(mthresh[:,None])
-        Ncs = avg_Nc(log10mhalo,self.zs[:,None],log10mstellar_thresh,sig_log_mstellar=self.p['hod_sig_log_mstellar'])
-        Nss = avg_Ns(log10mhalo,self.zs[:,None],log10mstellar_thresh,Nc=Ncs,sig_log_mstellar=self.p['hod_sig_log_mstellar'])
+        Ncs = avg_Nc(log10mhalo,self.zs[:,None],log10mstellar_thresh,sig_log_mstellar=pparams['hod_sig_log_mstellar'])
+        Nss = avg_Ns(log10mhalo,self.zs[:,None],log10mstellar_thresh,Nc=Ncs,
+                     sig_log_mstellar=pparams['hod_sig_log_mstellar'],
+                     alphasat=pparams['hod_alphasat'],
+                     Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
+                     Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
+                     Msat_override=Msat_override,
+                     Mcut_override=Mcut_override)
         NsNsm1 = avg_NsNsm1(Ncs,Nss,corr)
         NcNs = avg_NcNs(Ncs,Nss,corr)
         
@@ -355,6 +469,7 @@ class HaloModel(Cosmology):
         self.hods[name]['bg'] = self.get_bg(Ncs,Nss,self.hods[name]['ngal'])
         self.hods[name]['satellite_profile'] = satellite_profile_name
         self.hods[name]['central_profile'] = central_profile_name
+        self.hods[name]['log10mthresh'] = np.log10(mthresh[:,None])
         
     def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
 
@@ -388,6 +503,12 @@ class HaloModel(Cosmology):
         if lowklim: uk = 1
         return ms*uk/self.rho_matter_z(0)
 
+    def _get_pressure(self,name,lowklim=False):
+        pk = self.pk_profiles[name].copy()
+        if lowklim: pk[:,:,:] = pk[:,:,0][...,None]
+        return pk
+
+
     def get_power(self,name,name2=None,verbose=True):
         if name2 is None: name2 = name
         return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose)
@@ -397,15 +518,24 @@ class HaloModel(Cosmology):
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
         hnames = self.hods.keys()
-        
-        if (name in mnames) and (name2 in mnames): square_term = self._get_matter(name)*self._get_matter(name2)
-        elif (name in hnames) and (name2 in hnames): square_term = self._get_hod_square(name)
-        elif (name in hnames) and (name2 in mnames): square_term = self._get_hod(name)*self._get_matter(name2)
-        elif (name2 in hnames) and (name in mnames): square_term = self._get_hod(name2)*self._get_matter(name)
-        else: raise ValueError
+        pnames =self.pk_profiles.keys()
+        if (name in hnames) and (name2 in hnames): 
+            square_term = self._get_hod_square(name)
+        elif (name in pnames) and (name2 in pnames): 
+            square_term = self._get_pressure(name)**2
+        else:
+            square_term=1.
+            for nm in [name,name2]:
+                if nm in hnames:
+                    square_term *= self._get_hod(nm)
+                elif nm in mnames:
+                    square_term *= self._get_matter(nm)
+                elif nm in pnames:
+                    square_term *= self._get_pressure(nm)
+                else: raise ValueError
         
         integrand = self.nzm[...,None] * square_term
-        return np.trapz(integrand,ms,axis=-2)*(1.-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
+        return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
     
     def get_power_2halo(self,name="nfw",name2=None,verbose=False):
         name2 = name if name2 is None else name2
@@ -420,6 +550,11 @@ class HaloModel(Cosmology):
                 rterm1 = self._get_matter(iname)
                 rterm01 = self._get_matter(iname,lowklim=True)
                 b = 1
+            elif iname in self.pk_profiles.keys():
+                rterm1 = self._get_pressure(iname)
+                rterm01 = self._get_pressure(iname,lowklim=True)
+                print ('Check the consistency relation for tSZ')
+                b = rterm01 =0
             elif iname in self.hods.keys():
                 rterm1 = self._get_hod(iname)
                 rterm01 = self._get_hod(iname,lowklim=True)
@@ -440,8 +575,8 @@ class HaloModel(Cosmology):
         consistency1 = _2haloint(iterm01)
         consistency2 = _2haloint(iterm02)
         if verbose:
-            print("Two-halo consistency1: " , consistency1)
-            print("Two-halo consistency2: " , consistency2)
+            print("Two-halo consistency1: " , consistency1,integral)
+            print("Two-halo consistency2: " , consistency2,integral2)
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
     def sigma_1h_profiles(self,thetas,Ms,concs,sig_theta=None,delta=200,rho='critical',rho_at_z=True):
@@ -563,25 +698,26 @@ def Mhalo_stellar(z,log10mstellar):
     return output
 
 
-def avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar=default_params['hod_sig_log_mstellar']):
+def avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar):
     """<Nc(m)>"""
     log10mstar = Mstellar_halo(z,log10mhalo)
     num = log10mstellar_thresh - log10mstar
     denom = np.sqrt(2.) * sig_log_mstellar
     return 0.5*(1. - erf(num/denom))
 
-def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None,sig_log_mstellar=default_params['hod_sig_log_mstellar']):
-    Bsat=9.04
-    betasat=0.74
-    alphasat=1.
-    Bcut=1.65
-    betacut=0.59
+
+def hod_default_mfunc(mthresh,Bamp,Bind): return (10.**(12.))*Bamp*10**((mthresh-12)*Bind)
+
+def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None,sig_log_mstellar=None,
+           alphasat=None,Bsat=None,betasat=None,Bcut=None,betacut=None,
+           Msat_override=None,Mcut_override=None):
     mthresh = Mhalo_stellar(z,log10mstellar_thresh)
-    Msat=(10.**(12.))*Bsat*10**((mthresh-12)*betasat)
-    Mcut=(10.**(12.))*Bcut*10**((mthresh-12)*betacut)
+    Msat = Msat_override if Msat_override is not None else hod_default_mfunc(mthresh,Bsat,betasat)
+    Mcut = Mcut_override if Mcut_override is not None else hod_default_mfunc(mthresh,Bcut,betacut)
     Nc = avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar=sig_log_mstellar) if Nc is None else Nc
     masses = 10**log10mhalo
     return Nc*((masses/Msat)**alphasat)*np.exp(-Mcut/(masses))    
+   
 
 def avg_NsNsm1(Nc,Ns,corr="max"):
     if corr=='max':
@@ -723,21 +859,102 @@ def rho_gas_generic_x(x,m200critz,z,omb,omm,rhocritz,
     rho0 = battaglia_gas_fit(m200critz,z,rho0_A0,rho0_alpham,rho0_alphaz)
     alpha = battaglia_gas_fit(m200critz,z,alpha_A0,alpha_alpham,alpha_alphaz)
     beta = battaglia_gas_fit(m200critz,z,beta_A0,beta_alpham,beta_alphaz)
-    return (omb/omm) * rhocritz * rho0 * (x)**gamma * (1.+x**alpha)**(-(beta+gamma)/alpha)
+    # Note the sign difference in the second gamma. Battaglia 2016 had a typo here.
+    return (omb/omm) * rhocritz * rho0 * (x**gamma) * (1.+x**alpha)**(-(beta+gamma)/alpha)
+
+
+   
+def P_e(r,m200critz,z,omb,omm,rhocritz,
+            alpha=default_params['battaglia_pres_alpha'],
+            gamma=default_params['battaglia_pres_gamma'],
+            profile="pres"):
+    return P_e_generic(r,m200critz,z,omb,omm,rhocritz,
+                           alpha=alpha,
+                           gamma=gamma,
+                           P0_A0=battaglia_defaults[profile]['P0_A0'],
+                           P0_alpham=battaglia_defaults[profile]['P0_alpham'],
+                           P0_alphaz=battaglia_defaults[profile]['P0_alphaz'],
+                           xc_A0=battaglia_defaults[profile]['xc_A0'],
+                           xc_alpham=battaglia_defaults[profile]['xc_alpham'],
+                           xc_alphaz=battaglia_defaults[profile]['xc_alphaz'],
+                           beta_A0=battaglia_defaults[profile]['beta_A0'],
+                           beta_alpham=battaglia_defaults[profile]['beta_alpham'],
+                           beta_alphaz=battaglia_defaults[profile]['beta_alphaz'])
+
+def P_e_generic(r,m200critz,z,omb,omm,rhocritz,
+                        alpha=default_params['battaglia_pres_alpha'],
+                        gamma=default_params['battaglia_pres_gamma'],
+                           P0_A0=battaglia_defaults[default_params['battaglia_pres_family']]['P0_A0'],
+                           P0_alpham=battaglia_defaults[default_params['battaglia_pres_family']]['P0_alpham'],
+                           P0_alphaz=battaglia_defaults[default_params['battaglia_pres_family']]['P0_alphaz'],
+                           xc_A0=battaglia_defaults[default_params['battaglia_pres_family']]['xc_A0'],
+                           xc_alpham=battaglia_defaults[default_params['battaglia_pres_family']]['xc_alpham'],
+                           xc_alphaz=battaglia_defaults[default_params['battaglia_pres_family']]['xc_alphaz'],
+                           beta_A0=battaglia_defaults[default_params['battaglia_pres_family']]['beta_A0'],
+                           beta_alpham=battaglia_defaults[default_params['battaglia_pres_family']]['beta_alpham'],
+                           beta_alphaz=battaglia_defaults[default_params['battaglia_pres_family']]['beta_alphaz']):
+    """
+    AGN and SH Battaglia 2016 profiles
+    r: physical distance
+    m200critz: M200_critical_z
+
+    """
+    R200 = R_from_M(m200critz,rhocritz,delta=200)
+    x = r/R200
+    return P_e_generic_x(x,m200critz,R200,z,omb,omm,rhocritz,alpha,gamma,
+                             P0_A0,P0_alpham,P0_alphaz,
+                             xc_A0,xc_alpham,xc_alphaz,
+                             beta_A0,beta_alpham,beta_alphaz)
+
+def P_e_generic_x(x,m200critz,R200critz,z,omb,omm,rhocritz,
+                  alpha=default_params['battaglia_pres_alpha'],
+                  gamma=default_params['battaglia_pres_gamma'],
+                  P0_A0=battaglia_defaults['pres']['P0_A0'],
+                  P0_alpham=battaglia_defaults['pres']['P0_alpham'],
+                  P0_alphaz=battaglia_defaults['pres']['P0_alphaz'],
+                  xc_A0=battaglia_defaults['pres']['xc_A0'],
+                  xc_alpham=battaglia_defaults['pres']['xc_alpham'],
+                  xc_alphaz=battaglia_defaults['pres']['xc_alphaz'],
+                  beta_A0=battaglia_defaults['pres']['beta_A0'],
+                  beta_alpham=battaglia_defaults['pres']['beta_alpham'],
+                  beta_alphaz=battaglia_defaults['pres']['beta_alphaz']):
+    P0 = battaglia_gas_fit(m200critz,z,P0_A0,P0_alpham,P0_alphaz)
+    xc = battaglia_gas_fit(m200critz,z,xc_A0,xc_alpham,xc_alphaz)
+    beta = battaglia_gas_fit(m200critz,z,beta_A0,beta_alpham,beta_alphaz)
+    # to convert to p_e
+    XH=.76
+    eFrac=2.0*(XH+1.0)/(5.0*XH+3.0)
+    # print (gamma,alpha,beta[0,0],xc[0,0],P0[0,0])
+    # print (gamma,alpha,beta[0,50],xc[0,50],P0[0,50],(P0 *(x/xc)**gamma * (1.+(x/xc)**alpha)**(-beta))[0,50,-350])
+    G_newt = constants.G/(default_params['parsec']*1e6)**3*default_params['mSun']
+    return eFrac*(omb/omm)*200*m200critz*G_newt* rhocritz/(2*R200critz) * P0 * (x/xc)**gamma * (1.+(x/xc)**alpha)**(-beta)
+
+
+
 
 
 def a2z(a): return (1.0/a)-1.0
 
 
-def ngal_from_mthresh(log10mthresh=None,zs=None,nzm=None,ms=None,sig_log_mstellar=None,Ncs=None,Nss=None):
+def ngal_from_mthresh(log10mthresh=None,zs=None,nzm=None,ms=None,
+                      sig_log_mstellar=None,Ncs=None,Nss=None,
+                      alphasat=None,Bsat=None,betasat=None,
+                      Bcut=None,betacut=None,
+                      Msat_override=None,
+                      Mcut_override=None):
     if (Ncs is None) and (Nss is None):
         log10mstellar_thresh = log10mthresh[:,None]
         log10mhalo = np.log10(ms[None,:])    
         Ncs = avg_Nc(log10mhalo,zs[:,None],log10mstellar_thresh,sig_log_mstellar)
-        Nss = avg_Ns(log10mhalo,zs[:,None],log10mstellar_thresh,Ncs,sig_log_mstellar)
+        Nss = avg_Ns(log10mhalo,zs[:,None],log10mstellar_thresh,Ncs,
+                     sig_log_mstellar,alphasat,
+                     Bsat,betasat,
+                     Bcut,betacut,
+                     Msat_override=Msat_override,
+                     Mcut_override=Mcut_override)
     else:
         assert log10mthresh is None
         assert zs is None
         assert sig_log_mstellar is None
     integrand = nzm * (Ncs+Nss)
-    return np.trapz(integrand,ms,axis=-1)        
+    return np.trapz(integrand,ms,axis=-1)   

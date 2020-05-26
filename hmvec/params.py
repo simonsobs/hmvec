@@ -24,6 +24,19 @@ battaglia_defaults['SH'] = {
 }
     
 
+battaglia_defaults['pres'] = {
+    'P0_A0':18.1,
+    'P0_alpham':0.154,
+    'P0_alphaz':-0.758,
+    'xc_A0':0.497,
+    'xc_alpham':-0.00865,
+    'xc_alphaz':0.731,
+    'beta_A0':4.35,
+    'beta_alpham':0.0393,
+    'beta_alphaz':0.415
+}
+    
+
 default_params = {
     
     # Mass function
@@ -45,9 +58,16 @@ default_params = {
     'duffy_beta_mean':-1.01,
     'nfw_integral_numxs':40000, # not sufficient
     'nfw_integral_xmax':200,
+    'electron_density_profile_integral_numxs':5000,
+    'electron_density_profile_integral_xmax':20,
+    'electron_pressure_profile_integral_numxs':5000,
+    'electron_pressure_profile_integral_xmax':20,
     'battaglia_gas_gamma':-0.2,
     'battaglia_gas_family': 'AGN',
 
+    'battaglia_pres_gamma' : -0.3,
+    'battaglia_pres_alpha' : 1.,
+    'battaglia_pres_family' : 'pres',
     # Power spectra
     'kstar_damping':0.01,
     'default_halofit':'mead',
@@ -64,9 +84,21 @@ default_params = {
     'nnu':3.046,
     'wa': 0.,
     'num_massive_neutrinos':3,
+    'T_CMB':2.7255e6,
+    'parsec': 3.08567758e16,
+    'mSun': 1.989e30,
+    'thompson_SI': 6.6524e-29,
+    'meterToMegaparsec': 3.241e-23,
+    'Yp': 0.24,
 
     # HOD
+    'hod_A_log10mthresh': 1.0, # This parameter is used to vary log10mthresh
     'hod_sig_log_mstellar': 0.2,
+    'hod_alphasat': 1.0,
+    'hod_Bsat':9.04,
+    'hod_betasat':0.74,
+    'hod_Bcut':1.65,
+    'hod_betacut':0.59,
     'hod_bisection_search_min_log10mthresh': 7.,
     'hod_bisection_search_max_log10mthresh': 14.,
     'hod_bisection_search_rtol': 1e-4,

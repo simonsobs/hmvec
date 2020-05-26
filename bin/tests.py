@@ -429,8 +429,167 @@ def test_lensing():
     pl.add(ells,ckk)
     pl.add(ells,theory.gCl('kk',ells),ls='--')
     pl.done()
+
+def test_pee():
+
+    import halomodel as mmhm
+    from orphics import cosmology
+    cc = cosmology.Cosmology(hmvec.default_params,skipCls=True,low_acc=False)
+    mmhmod = mmhm.HaloModel(cc)
     
-test_lensing()
+    
+    zs = np.array([0.,1.,2.])
+    ms = np.geomspace(1e8,1e16,1000)
+    ks = np.geomspace(1e-4,100,1001)
+    # ks,pks = np.loadtxt("mm_k_pk.txt",unpack=True)  # !!!
+
+
+    eeP = mmhmod.P_ee_2h(ks,zs,'AGN') + mmhmod.P_ee_1h(ks,zs,'AGN')
+    meP = mmhmod.P_me_2h(ks,zs,'AGN') + mmhmod.P_me_1h(ks,zs,'AGN')
+    mmP = mmhmod.P_mm_2h(ks,zs) + mmhmod.P_mm_1h(ks,zs)
+
+    # eeP = mmhmod.P_ee_1h(ks,zs,'AGN')
+    # meP = mmhmod.P_me_1h(ks,zs,'AGN')
+    # mmP = mmhmod.P_mm_1h(ks,zs)
+    
+    hcos = hmvec.HaloModel(zs,ks,ms=ms,halofit=None,mdef='vir',nfw_numeric=False)
+    
+    hcos.add_battaglia_profile("electron",family="AGN",xmax=100,nxs=60000)
+
+    pme_1h = hcos.get_power_1halo(name="electron",name2="nfw")
+    pme_2h = hcos.get_power_2halo(name="electron",name2="nfw")
+    pmm_1h = hcos.get_power_1halo("nfw")
+    pmm_2h = hcos.get_power_2halo("nfw")
+    pee_1h = hcos.get_power_1halo("electron")
+    pee_2h = hcos.get_power_2halo("electron")
+    
+    for i in range(zs.size):
+        pl = io.Plotter(xyscale='loglin',xlabel='$k$',ylabel='$P$')
+        pl.add(ks,(pme_2h[i]+pme_1h[i])/meP[i],ls="--",color="C%d" % i)
+        pl.add(ks,(pmm_2h[i]+pmm_1h[i])/mmP[i],ls="-",color="C%d" % i)
+        pl.add(ks,(pee_2h[i]+pee_1h[i])/eeP[i],ls=":",color="C%d" % i)
+        pl.vline(x=10.)
+        pl.hline(y=1.)
+        pl._ax.set_ylim(0.8,1.3)
+        pl.done("peenonlincomp_rat_z_%d.png" % i)
+        
+    
+def test_pgm():
+
+    import halomodel as mmhm
+    from orphics import cosmology
+    cc = cosmology.Cosmology(hmvec.default_params,skipCls=True,low_acc=False)
+    mmhmod = mmhm.HaloModel(cc)
+    
+    mthresh = np.array([10.5])
+    zs = np.array([0.,1.,2.,3.])
+    ms = np.geomspace(1e8,1e16,1000)
+    ks = np.geomspace(1e-4,100,1001)
+    # ks,pks = np.loadtxt("mm_k_pk.txt",unpack=True)  # !!!
+
+
+    eeP = mmhmod.P_gg_2h(ks,zs,mthreshHOD=mthresh) + mmhmod.P_gg_1h(ks,zs,mthreshHOD=mthresh)
+    meP = mmhmod.P_mg_2h(ks,zs,mthreshHOD=mthresh) + mmhmod.P_mg_1h(ks,zs,mthreshHOD=mthresh)
+    mmP = mmhmod.P_mm_2h(ks,zs) + mmhmod.P_mm_1h(ks,zs)
+
+    hcos = hmvec.HaloModel(zs,ks,ms=ms,halofit=None,mdef='vir',nfw_numeric=False)
+    
+    hcos.add_hod("g",mthresh=(10**mthresh[0])+zs*0.,corr="max")
+    # hcos.add_battaglia_profile("electron",family="AGN",xmax=100,nxs=60000)
+
+    pme_1h = hcos.get_power_1halo(name="g",name2="nfw")
+    pme_2h = hcos.get_power_2halo(name="g",name2="nfw")
+    pmm_1h = hcos.get_power_1halo("nfw")
+    pmm_2h = hcos.get_power_2halo("nfw")
+    pee_1h = hcos.get_power_1halo("g")
+    pee_2h = hcos.get_power_2halo("g")
+    
+    for i in range(zs.size):
+        pl = io.Plotter(xyscale='loglin',xlabel='$k$',ylabel='$P$')
+        pl.add(ks,(pme_2h[i]+pme_1h[i])/meP[i],ls="--",color="C%d" % i)
+        pl.add(ks,(pmm_2h[i]+pmm_1h[i])/mmP[i],ls="-",color="C%d" % i)
+        pl.add(ks,(pee_2h[i]+pee_1h[i])/eeP[i],ls=":",color="C%d" % i)
+        pl.vline(x=10.)
+        pl.hline(y=1.)
+        pl._ax.set_ylim(0.8,1.3)
+        pl.done("pgcomp_rat_z_%d.png" % i)
+        
+def test_illustris():
+    
+    zs = np.linspace(0.,3.,4)[:1]
+    ms = np.geomspace(1e8,1e16,1000)
+    ks = np.geomspace(1e-2,30,1001)
+
+    hcos = hmvec.HaloModel(zs,ks,ms=ms,halofit=None,mdef='vir',nfw_numeric=False)
+    hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=30000)
+    pee = hcos.get_power("electron")
+    pnn = hcos.get_power("nfw")
+    pne = hcos.get_power("nfw","electron")
+
+    p1 = hcos.total_matter_power_spectrum(pnn,pne,pee)
+    p0 = pnn
+
+    
+
+    h = hcos.h
+    from matplotlib import cm
+    pl = io.Plotter(xyscale='loglin',xlabel='$k$ (h/Mpc)',ylabel='$\\Delta P / P$')
+    for i in range(zs.size):
+        pl.add(ks/h,p1[i]/p0[i],color=cm.Reds(np.linspace(0.3,0.95,zs.size)[::-1][i]),label='hmvec + Battaglia')
+    ok,od = np.loadtxt("data/schneider_horizon_agn.csv",delimiter=',',unpack=True)
+    pl.add(ok,od,lw=2,color='k',label='Horizon AGN')
+    ok,od = np.loadtxt("data/schneider_owls.csv",delimiter=',',unpack=True)
+    pl.add(ok,od,lw=2,color='k',ls='--',label='OWLS')
+    pl.vline(x=10.)
+    pl.hline(y=1.)
+    pl._ax.set_ylim(0.68,1.04)
+    pl._ax.set_xlim(0.08,25)
+    pl.done("illustris_comp.png")
+
+def test_limber():
+
+    zs = np.geomspace(0.1,10.,40)
+    ks = np.geomspace(1e-4,10,100)
+    ms = np.geomspace(1e8,1e16,30)
+    hcos = hmvec.HaloModel(zs,ks,ms,nfw_numeric=False)
+    pmm_1h = hcos.get_power_1halo(name="nfw")
+    pmm_2h = hcos.get_power_2halo(name="nfw")
+
+    Wk = hcos.lensing_window(zs,zs=1100.)
+    
+    Pmm = pmm_1h + pmm_2h
+    ells = np.linspace(100,1000,20)
+    ckk = hcos.C_kk(ells,zs,ks,Pmm,lwindow1=Wk,lwindow2=Wk)
+    theory = cosmology.default_theory()
+    
+    pl = io.Plotter(xyscale='linlog')
+    pl.add(ells,ckk)
+    pl.add(ells,theory.gCl('kk',ells),ls='--')
+    pl.done('ckk_comp.png')
+
+    bias = 2.
+    nzs = np.exp(-(zs-1.0)**2./0.3**2.)
+    ckg = hcos.C_kg(ells,zs,ks,Pmm*bias,lwindow=Wk,gzs=zs,gdndz=nzs)
+    cgg = hcos.C_gg(ells,zs,ks,Pmm*bias**2,gzs=zs,gdndz=nzs)
+    lc = cosmology.LimberCosmology(skipCls=True,low_acc=True)
+    lc.addNz('g',zs,nzs,bias=bias)
+    lc.generateCls(ells)
+    ckg2 = lc.getCl('cmb','g')
+    cgg2 = lc.getCl('g','g')
+    
+    pl = io.Plotter(xyscale='linlog')
+    pl.add(ells,ckg)
+    pl.add(ells,ckg2,ls='--')
+    pl.done('ckg_comp.png')
+
+    pl = io.Plotter(xyscale='linlog')
+    pl.add(ells,cgg)
+    pl.add(ells,cgg2,ls='--')
+    pl.done('cgg_comp.png')
+    
+test_limber()
+        
+#test_lensing()
 #test_hod_bisection()
 #test_hod()
 #test_gas_fft()
@@ -438,6 +597,9 @@ test_lensing()
 #test_battaglia()
 #test_massfn()
 #test_fft_transform()    
-#test_pmm()    
+#test_pmm()
+#test_pee()
+#test_illustris()
+#test_pgm()
 # test_fft_integral()
 #test_cosmology()

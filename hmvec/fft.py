@@ -52,7 +52,7 @@ def fft_integral(x,y,axis=-1):
 def analytic_fft_integral(ks): return np.sqrt(np.pi/2.)*np.exp(-ks**2./2.)*ks
 
 
-def generic_profile_fft(rhofunc_x,cmaxs,rss,zs,ks,xmax,nxs):
+def generic_profile_fft(rhofunc_x,cmaxs,rss,zs,ks,xmax,nxs,do_mass_norm=True):
     """
     Generic profile FFTing
     rhofunc_x: function that accepts vector spanning linspace(0,xmax,nxs)
@@ -81,6 +81,9 @@ def generic_profile_fft(rhofunc_x,cmaxs,rss,zs,ks,xmax,nxs):
     # m
     integrand = theta * rhos * xs**2.
     mnorm = np.trapz(integrand,xs) # mass but off by norm same as rho is off by
+    if not(do_mass_norm):
+        mnorm *= 0
+        mnorm +=1
     # u(kt)
     integrand = rhos*theta
     kts,ukts = fft_integral(xs,integrand)
