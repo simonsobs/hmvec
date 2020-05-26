@@ -75,11 +75,12 @@ class HaloModel(Cosmology):
         
         self.mdef = mdef
         self.mode = mass_function
-        self.ms = ms
         self.hods = {}
 
         # Mass function
-        if ms is not None: self.init_mass_function(ms)
+        if ms is not None: 
+            self.ms = np.asarray(ms)
+            self.init_mass_function(self.ms)
         
         # Profiles
         self.uk_profiles = {}
@@ -443,7 +444,51 @@ class HaloModel(Cosmology):
             print("Two-halo consistency2: " , consistency2)
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
+    def sigma_1h_profiles(self,thetas,Ms,concs,sig_theta=None,delta=200,rho='critical',rho_at_z=True):
+        import cluster-lensing as cl
+        zs = self.zs
+        chis = self.comoving_radial_distance(zs)
+        rbins = chis * thetas
+        offsets = chis * sig_theta if sig_theta is not None else None
+        if rho=='critical': rhofunc = self.rho_critical_z 
+        elif rho=='mean': rhofunc = self.rho_matter_z
+        rhoz = zs if rho_at_z else zs * 0
+        Rdeltas = R_from_M(Ms,rhofunc(rhoz)[:,None],delta=delta)
+        rs = Rdeltas / concs
+        rhocrits = self.rho_critical_z(zs)
+        delta_c =  Ms / 4 / np.pi / rs**3 / rhocrits / Fcon(concs)
+        smd = cl.nfw.SurfaceMassDensity(rs, delta_c, rho_crit,rbins=rbins,offsets=offsets)
+        sigma = smd.sigma_nfw()
+        return sigma
+
+    def sigma_crit(self,zsource):
+        zlens = self.zs
+        Gval = 4.517e-48 # Newton G in Mpc,seconds,Msun units
+        cval = 9.716e-15 # speed of light in Mpc,second units
+        Dd = self.comoving_radial_distance(zlens)
+        Ds = self.comoving_radial_distance(zsource)
+        Dds = Ds - Dd
+        return cval**2 * Ds / 4 / np.pi / Gval / Dd / Dds
         
+    def kappa_1h_profiles(self,thetas,Ms,concs,zsource,sig_theta=None,delta=200,rho='critical',rho_at_z=True):
+        sigma = self.sigma_1h_profiles(thetas,Ms,concs,sig_theta=sig_theta,delta=delta,rho=rho,rho_at_z=rho_at_z)
+        sigmac = self.sigma_crit(zsource)
+        return sigma / sigmac
+
+    def kappa_2h_profiles(self,thetas,Ms,concs,zsource,delta=200,rho='critical',rho_at_z=True,lmin=2,lmax=10000):
+        from scipy.special import j0
+        zlens = self.zs
+        sigmac = self.sigma_crit(zsource)
+        rhomz = self.rho_matter_z(zlens)
+        chis = self.comoving_radial_distance(zlens)
+        ells = self.ks*chis
+        sel = np.logical_and(ells>lmin,ells<lmax)
+        ells = ells[sel]
+        #Array indexing is as follows:
+        #[z,M,k/r]
+        Ps = self.Pzk[:,sel]
+        integrand = rhomz * self.bh * Ps / (1+zlens)**3. / sigmac / DAz**2 * j0(ells*thetas) * ells / 2./ np.pi
+        return np.trapz(integrand,ells)
 
 """
 Mass function
