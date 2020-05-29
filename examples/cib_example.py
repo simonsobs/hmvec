@@ -7,7 +7,7 @@ Nz = 600                                 # num of redshifts
 Nm = 500                                 # num of masses
 Nk = 1000                                # num of wavenumbers
 redshifts = np.linspace(0.01, 4.5, Nz)             # redshifts
-masses = np.geomspace(1e11, 1e15, Nm)           # masses
+masses = np.geomspace(1e10, 1e15, Nm)           # masses
 ks = np.geomspace(1e-3, 100, Nk)               # wavenumbers
 frequencies = np.array([545.])
 
@@ -15,7 +15,7 @@ frequencies = np.array([545.])
 hcos = hm.HaloModel(redshifts, ks, ms=masses)
 
 #Get 3D Power Spectra
-Pjj_2h = hcos.get_power_2halo("cib", "cib", nu_obs=frequencies[0])  # P(z,k)
+Pjj_2h = hcos.get_power_2halo("cib", "cib", nu_obs=frequencies)  # P(z,k)
 
 #Limber Integrals
 Nl = 1000

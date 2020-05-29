@@ -567,15 +567,17 @@ class HaloModel(Cosmology):
             print("Two-halo consistency2: " , consistency2,integral2)
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
-    def get_sfrd(self, freq_range, model='Herschel'):
+    def get_sfrd(self, freq_range, model='vierro'):
         kennicutt = 1.7e-10
 
-        if model.lower()=='planck':
-            sfr = kennicutt * luminosity(self.zs, self.ms, len(self.ks), freq_range, 
+        if model.lower()=='planck':             # Planck 2013
+            sfr = kennicutt * luminosity(self.zs, self.ms, len(self.ks), freq_range, nuframe='rest',
                                          a=0.36, b=1.75, g=1.7, d=3.6, Td_o=24.4, logM_eff=12.6, var=0.5, L_o=0.02)
-        else:
+        elif model.lower() == 'vierro':
             sfr = kennicutt * luminosity(self.zs, self.ms, len(self.ks), freq_range)
-
+        else:
+            raise ValueError('Need a valid set of parameters')
+        
         return np.trapz(self.nzm * sfr[:,:,0], self.ms, axis=-1)
         
 

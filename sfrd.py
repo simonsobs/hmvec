@@ -7,7 +7,7 @@ import astropy.constants as const
 Nz = 600                                 # num of redshifts
 Nm = 500                                 # num of masses
 Nk = 100                                # num of wavenumbers
-redshifts = np.linspace(0.01, 3, Nz)             # redshifts
+redshifts = np.linspace(0.01, 6, Nz)             # redshifts
 masses = np.geomspace(1e10, 1e16, Nm)           # masses
 ks = np.geomspace(1e-3, 100, Nk)               # wavenumbers
 

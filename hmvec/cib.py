@@ -45,7 +45,7 @@ def sysEquations(var, *constants):
 
     return np.concatenate((eq1, eq2))
     
-def capitalTheta(nu_obs, z, alpha, beta, gamma, T_o, plot=False):
+def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
     """ Rest frame SED """
 
     # Everything with the "_array" suffix is a Nz x M array, where Nz is the number of redshifts
@@ -59,18 +59,27 @@ def capitalTheta(nu_obs, z, alpha, beta, gamma, T_o, plot=False):
         return np.where(x < splitpoint, lowSED(x, T), highSED(x, A))
         
     #Is there a bandpass or just 1 frequency?
-    bandpassflag = False if len(nu_obs) == 1 else True
+    bandpassflag = False if len(nu_sample) == 1 else True
 
     #Put Bandpasss Ends in Order
     if bandpassflag:
-        if nu_obs[0] > nu_obs[1]:
-            nu_obs = nu_obs[::-1]
+        if nu_sample[0] > nu_sample[1]:
+            nu_sample = nu_sample[::-1]
 
     #Undoing Redshift: from Observing to Original
-    if bandpassflag:
-        freq_array = np.outer((1+z), nu_obs)
+    if nuframe.lower() == 'obs':
+        if bandpassflag:
+            freq_array = np.outer((1+z), nu_sample)
+        else:
+            freq_array = (1+z) * nu_sample
+    #Rest Frame
+    elif nuframe.lower() == 'rest':
+        if bandpassflag:
+            freq_array = np.outer(np.ones(z.shape), nu_sample)
+        else:
+            freq_array = np.ones(z.shape) * nu_sample
     else:
-        freq_array = (1+z) * nu_obs
+        raise ValueError('Need a valid reference frame to view the SEDs in.')
     temp_array = T_o * (1+z)**alpha
     
     #Get nu_o and proportionality constant A
@@ -175,7 +184,7 @@ def capitalTheta(nu_obs, z, alpha, beta, gamma, T_o, plot=False):
                                         color=colorsalpha[iplt], edgecolors='none', label=f'Bandpass: {lowend:.2e} to {highend:.2e} Hz')
 
 
-            #Marking nu_obs at sed frame on the graph
+            #Marking nu_sample at sed frame on the graph
             else:
                 ax[iplt].axvline(x = freq_array[zi], color=colors[iplt], lw=0.4, label=rf'$\nu_{{obs}} = {freq_array[zi]:0.2e}$ Hz in rest frame')
 
@@ -210,17 +219,15 @@ def capitalSigma(M, logM_eff, sigma2):
 
     return M/np.sqrt(2*np.pi*sigma2) * np.exp(- (np.log10(M)-logM_eff)**2 / (2*sigma2))
 
-def luminosity(z, M, Nks, v_obs, a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff=12.3, var = 0.3, L_o=1):  
-    """Luminosity of CIB galaxies. It depends only on mass and redshift, but is broadcasted onto a grid of [z, M, k/r]. The fit parameter values are from Herschel.
+def luminosity(z, M, Nks, nu, nuframe='obs', a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff=12.3, var = 0.3, L_o=1):  
+    """Luminosity of CIB galaxies. It depends only on mass and redshift, but is broadcasted onto a grid of [z, M, k/r]. Most of the fit parameter values are from Viero using Herschel data; the exception is gamma, which wasn't part of the Viero model and therefore is obtained from Planck2013.
 
-    To Do:
-    1.) Check HERSCHEL gamma value.
-    
     Arguments:
         M [1darray]: galaxy's masses
         z [1darray]: redshifts
         Nks [int]: number of k's
-        v_obs [1darray]: either single observing frequency or the endpoints of a bandpass
+        nu [1darray]: either single frequency or the endpoints of a bandpass
+        nuframe [str:'obs'|'rest']: frame that the nu is given in
     
     Keyword Arguments:
         a [float]: fit parameter - alpha (default = 0.2)
@@ -237,7 +244,7 @@ def luminosity(z, M, Nks, v_obs, a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff
     """     
     
     #Calculate the z and M Dependence
-    Lz = capitalPhi(z, d) * capitalTheta(v_obs, z, a, b, g, Td_o)
+    Lz = capitalPhi(z, d) * capitalTheta(nu, nuframe, z, a, b, g, Td_o)
     Lm = capitalSigma(M, logM_eff, var)
     
     #Put Luminosity on Grid
