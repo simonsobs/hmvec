@@ -15,6 +15,7 @@ from .params import default_params, battaglia_defaults
 from .fft import generic_profile_fft
 import scipy
 from scipy.integrate import simps
+from scipy.integrate import quad
 
 """
 
@@ -96,6 +97,7 @@ class HaloModel(Cosmology):
         self.mode = mass_function
         self.ms = ms
         self.hods = {}
+        self.cib_params = {}
 
         # Mass function
         if ms is not None: self.init_mass_function(ms)
@@ -450,6 +452,42 @@ class HaloModel(Cosmology):
         self.hods[name]['central_profile'] = central_profile_name
         self.hods[name]['log10mthresh'] = np.log10(mthresh[:,None])
 
+    def set_cibParams(self, name, **params):
+        """
+        Keyword Parameters:
+        alpha : SED - z evolution of dust temperature 
+        beta : SED - emissivity index at low frequency  
+        gamma : SED - frequency power law index at high frequency 
+        Td_o : SED - dust temp at z = 0 
+        delta : z evolution of normalization of L-M relation 
+        logM_eff : log(M_eff) in L-M relation 
+        var : variance of Gaussian part of L-M relation 
+        L_o : normalization constant for total luminosity
+        """
+        #Set up the Parameter Set
+        if name.lower() == 'planck':        # Planck 2013
+            self.cib_params['alpha'] = 0.36
+            self.cib_params['beta'] = 1.75
+            self.cib_params['gamma'] = 1.7
+            self.cib_params['delta'] = 3.6
+            self.cib_params['Td_o'] = 24.4
+            self.cib_params['logM_eff'] = 12.6
+            self.cib_params['var'] = 0.5
+        elif name.lower() == 'vierro':      # Vierro et al
+            self.cib_params['alpha'] = 0.2
+            self.cib_params['beta'] = 1.6
+            self.cib_params['gamma'] = 1.7
+            self.cib_params['delta'] = 2.4
+            self.cib_params['Td_o'] = 20.7
+            self.cib_params['logM_eff'] = 12.3
+            self.cib_params['var'] = 0.3
+        else:
+            assert len(params) == 8, "New sets of parameters require exactly 8 parameters"
+
+        #Add Specific Parameters
+        for key in params:
+            self.cib_params[key] = params[key]
+
     def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
 
     def get_bg(self,Nc,Ns,ngal):
@@ -487,15 +525,42 @@ class HaloModel(Cosmology):
         if lowklim: pk[:,:,:] = pk[:,:,0][...,None]
         return pk
 
-    def _get_cib(self, nu):
+    """
+    CIB Stuff
+    """
+    def _get_fcen(self, nu):
+        return luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
+
+    def _get_fsat(self, freq):
+        fsat = np.zeros((len(self.ms), len(self.zs)))
+
+        #Integrate Subhalo Masses
+        for Mi, M in enumerate(self.ms):
+            fsat[i,j] = quad(fsat_integrand, np.log10(self.ms[0]), np.log10(M), arg=(M, self.zs, self.ks, freq, ))
+
+        return fsat / (4.0*np.pi)
+
+    def _get_cib(self, freq):
         uhalo = self.uk_profiles['nfw']
-        fcen = luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
+        fcen = _get_fcen(freq)
+
+
         return uhalo*fcen
         
+    """
+    Power Stuff
+    """
 
-    def get_power(self,name,name2=None,verbose=True):
-        if name2 is None: name2 = name
-        return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose)
+    def get_power(self,name1,name2=None,verbose=True):
+        if name2 is None: name2 = name1
+
+        #Add Necessary CIB Models
+        for name in [name1, name2]:
+            name = name.lower()
+            #if name in self.cib_models
+
+        
+        return self.get_power_1halo(name1,name2) + self.get_power_2halo(name1,name2,verbose)
 
     def get_power_1halo(self,name="nfw",name2=None):
         name2 = name if name2 is None else name2
@@ -572,14 +637,39 @@ class HaloModel(Cosmology):
 
         if model.lower()=='planck':             # Planck 2013
             sfr = kennicutt * luminosity(self.zs, self.ms, len(self.ks), freq_range, nuframe='rest',
-                                         a=0.36, b=1.75, g=1.7, d=3.6, Td_o=24.4, logM_eff=12.6, var=0.5, L_o=0.02)
+                                         a=0.36, b=1.75, g=1.7, d=3.6, Td_o=24.4, logM_eff=12.6, var=0.5)
         elif model.lower() == 'vierro':
             sfr = kennicutt * luminosity(self.zs, self.ms, len(self.ks), freq_range)
         else:
             raise ValueError('Need a valid set of parameters')
-        
+
         return np.trapz(self.nzm * sfr[:,:,0], self.ms, axis=-1)
-        
+
+
+def sdndm(msat, mcen):
+        ''' Satellite halo mass function '''
+
+        #Parameters
+        gamma_1    = 0.13
+        alpha_1    = -0.83
+        gamma_2    = 1.33
+        alpha_2    = -0.02
+        beta_2     = 5.67
+        zeta       = 1.19
+
+        #Calculation
+        dndm = (((gamma_1 * ((msat/mcen)**alpha_1)) +
+            (gamma_2 * ((msat/mcen)**alpha_2))) *
+            (np.exp(-(beta_2) * ((msat / mcen)**zeta))))
+
+        return dndm
+
+def fsat_integrand(msat, zs, mcen, ks, nu):
+    Lsat = luminosity(zs, msat, len(ks), nu)
+    dndm = sdndm(10**msat, mcen)
+    integ_array = Lsat[:,:,0] * dndm[None, :]
+
+    return 
 
 
 """
