@@ -579,7 +579,7 @@ class HaloModel(Cosmology):
         fquad = np.zeros(len(self.ms))
         quaderr = np.zeros(len(self.ms))
         for i, centralM in enumerate(self.ms):
-            fquad[i], quaderr[i] = quad(gaussinteg, np.log10(self.ms[0]), np.log10(centralM), args=(centralM,))
+            fquad[i], quaderr[i] = quad(gaussinteg, np.log10(self.ms[0]), np.log10(centralM), args=(np.log10(centralM),))
         end = time.time()
 
         print(f'Gaussian Quadrature 2 time (s): {end-start}')
