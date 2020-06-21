@@ -8,15 +8,17 @@ import numpy as np
 import astropy.constants as const
 from . import tinker,utils
 from .cosmology import Cosmology
-from .cib import luminosity
+from .cib import luminosity, capitalSigma
 
 import scipy.constants as constants
 from .params import default_params, battaglia_defaults
 from .fft import generic_profile_fft
 import scipy
+
 from scipy.integrate import simps
 from scipy.integrate import quad
-
+import time
+from matplotlib import pyplot as plt
 """
 
 General vectorized FFT-based halo model implementation
@@ -454,6 +456,9 @@ class HaloModel(Cosmology):
 
     def set_cibParams(self, name, **params):
         """
+        Required Parameters:
+        name [string] : Name of parameter set. Presets: 'planck' and 'vierro'
+
         Keyword Parameters:
         alpha : SED - z evolution of dust temperature 
         beta : SED - emissivity index at low frequency  
@@ -547,6 +552,70 @@ class HaloModel(Cosmology):
 
         return uhalo*fcen
         
+    def testingCIB(self):
+        def integ(m, M):
+            return sdndm(m, M) * capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
+        def quadinteg(Marray):
+            import pdb; pdb.set_trace()
+            Mcen = Marray[0][0]
+
+            integral, err = quad(integ, np.log10(self.ms[0]), np.log10(Mcen), args=Mcen)
+            
+            return [integral, err]
+
+        start = time.time()
+        #Gaussian Quadrature
+        fquad = np.zeros(len(self.ms))
+        cenms = self.ms.reshape((len(self.ms), 1))
+        fgausstable = np.apply_along_axis(quadinteg, 1, cenms)
+        end = time.time()
+
+        print(f'Gaussian Quadrature time (s): {end-start}')
+
+        start = time.time()
+        #Trapezoidal
+        Nsubm = 500
+        satms = np.geomspace(self.ms[0], self.ms, num=Nsubm, axis=-1)
+        ftrap = np.trapz(integ(satms, self.ms[...,None]), satms, axis=-1)
+        end = time.time()
+        
+        print(f'Trapezoidal time (s): {end-start}')
+        
+        start = time.time()
+        #Simpson
+        Nsubm = 500
+        satms = np.geomspace(self.ms[0], self.ms, num=Nsubm, axis=-1)
+        fsimps = simps(integ(satms, self.ms[...,None]), satms, axis=-1)
+        end = time.time()
+        
+        print(f'Simpson time (s): {end-start}')
+
+        import pdb; pdb.set_trace()
+
+        #Gauss Error
+        fgauss = fgausstable[:, 0, 0]
+        gausserr = np.abs(fgausstable[:, 1, 0])
+
+        #Trap Error
+        traperr = np.abs(fgauss - ftrap) + np.abs(gausserr)
+
+        #Simpson Error
+        simpserr = np.abs(fgauss - fsimps) + np.abs(gausserr)
+
+        #Plot error
+        plt.plot(self.ms, gausserr, label='Gaussian Quadrature')
+        plt.plot(self.ms, traperr, label='Trapezoidal')
+        plt.plot(self.ms, simpserr, label='Simpson')
+
+        #Gravy
+        plt.title('Errors')
+        plt.xlabel('log')
+        plt.legend()
+        plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
+        plt.show()
+        
+
+
     """
     Power Stuff
     """
