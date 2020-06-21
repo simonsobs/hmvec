@@ -586,9 +586,7 @@ class HaloModel(Cosmology):
         #Trapezoidal
         Nsubm = 500
         satms = np.geomspace(self.ms[0], self.ms, num=Nsubm, axis=-1)
-        ftrap = np.zeros(len(self.ms))
-        for i, centralM in enumerate(self.ms):
-            ftrap[i] = np.trapz(integ(satms[i,:], centralM), satms[i,:], axis=-1)
+        fsimps = trapz(integ(satms, self.ms[...,None]), satms, axis=-1)
         end = time.time()
         
         timestring += f'Trapezoidal time (s): {end-start} \n'
@@ -615,7 +613,7 @@ class HaloModel(Cosmology):
         simpserr = np.abs(fgauss - fsimps) + np.abs(gausserr)
 
         #Plot error
-        #plt.plot(self.ms, gausserr, label='Gaussian Quadrature')
+        plt.plot(self.ms, gausserr, label='Gaussian Quadrature')
         plt.plot(self.ms, traperr, label='Trapezoidal')
         plt.plot(self.ms, simpserr, label='Simpson')
         
