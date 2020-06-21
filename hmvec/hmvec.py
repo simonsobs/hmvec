@@ -553,14 +553,16 @@ class HaloModel(Cosmology):
         return uhalo*fcen
         
     def testingCIB(self):
-        def integ(m, M):
+        def gaussinteg(m, M):
             m = 10**m
             M = 10**M
+            return sdndm(m, M) * capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
+        def integ(m, M):
             return sdndm(m, M) * capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
         def quadinteg(Marray):
             Mcen = Marray[0]
 
-            integral, err = quad(integ, np.log10(self.ms[0]), np.log10(Mcen), args=Mcen)
+            integral, err = quad(gaussinteg, np.log10(self.ms[0]), np.log10(Mcen), args=np.log10(Mcen))
             
             return [integral, err]
 
@@ -605,7 +607,6 @@ class HaloModel(Cosmology):
         plt.plot(self.ms, gausserr, label='Gaussian Quadrature')
         plt.plot(self.ms, traperr, label='Trapezoidal')
         plt.plot(self.ms, simpserr, label='Simpson')
-        import pdb; pdb.set_trace()
         
         #Gravy
         plt.ylabel('Errors')
