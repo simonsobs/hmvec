@@ -589,8 +589,6 @@ class HaloModel(Cosmology):
         
         print(f'Simpson time (s): {end-start}')
 
-        import pdb; pdb.set_trace()
-
         #Gauss Error
         fgauss = fgausstable[:, 0]
         gausserr = np.abs(fgausstable[:, 1])
