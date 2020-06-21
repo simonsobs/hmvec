@@ -20,6 +20,7 @@ end = time.time()
 print(f'Setting up the cosmology took {end-start:0.7f} seconds')
 
 #Set CIB Parameters
+import pdb; pdb.set_trace()
 hcos.set_cibParams('planck')
 
 #Testing
