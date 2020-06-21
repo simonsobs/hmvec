@@ -556,8 +556,7 @@ class HaloModel(Cosmology):
         def integ(m, M):
             return sdndm(m, M) * capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
         def quadinteg(Marray):
-            import pdb; pdb.set_trace()
-            Mcen = Marray[0][0]
+            Mcen = Marray[0]
 
             integral, err = quad(integ, np.log10(self.ms[0]), np.log10(Mcen), args=Mcen)
             
