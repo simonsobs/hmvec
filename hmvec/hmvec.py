@@ -553,16 +553,12 @@ class HaloModel(Cosmology):
         return uhalo*fcen
         
     def testingCIB(self):
-        def gaussinteg(m, M):
-            m = 10**m
-            M = 10**M
-            return sdndm(m, M) * capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
         def integ(m, M):
             return sdndm(m, M) * capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
         def quadinteg(Marray):
             Mcen = Marray[0]
 
-            integral, err = quad(gaussinteg, np.log10(self.ms[0]), np.log10(Mcen), args=np.log10(Mcen))
+            integral, err = quad(integ, self.ms[0], centralM, args=(centralM,))
             
             return [integral, err]
 
