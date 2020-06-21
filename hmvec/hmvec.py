@@ -616,9 +616,9 @@ class HaloModel(Cosmology):
         ax[1].loglog(self.ms, simpserr, label='Simpson')
         
         #Gravy
-        ax[0].ylabel('Errors')
-        ax[1].ylabel('Errors')
-        ax[1].xlabel(r'Central Masses ($M_\odot$)')
+        ax[0].set_ylabel('Errors')
+        ax[1].set_ylabel('Errors')
+        ax[1].set_xlabel(r'Central Masses ($M_\odot$)')
         ax[0].legend()
         ax[1].legend()
         plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
