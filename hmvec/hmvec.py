@@ -625,9 +625,10 @@ class HaloModel(Cosmology):
         plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
         plt.show()
         
+        import pdb; pdb.set_trace()
+
         print(timestring)
         
-        import pdb;pdb.set_trace()
 
     """
     Power Stuff
