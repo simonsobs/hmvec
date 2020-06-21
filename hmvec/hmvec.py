@@ -603,10 +603,11 @@ class HaloModel(Cosmology):
         plt.plot(self.ms, gausserr, label='Gaussian Quadrature')
         plt.plot(self.ms, traperr, label='Trapezoidal')
         plt.plot(self.ms, simpserr, label='Simpson')
-
+        import pdb; pdb.set_trace()
+        
         #Gravy
         plt.ylabel('Errors')
-        plt.xlabel(r'Central Masses ($M_\odot$')
+        plt.xlabel(r'Central Masses ($M_\odot$)')
         plt.xscale('log')
         plt.legend()
         plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
