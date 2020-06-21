@@ -626,25 +626,14 @@ class HaloModel(Cosmology):
         plt.loglog(self.ms, traperr, label='Trapezoidal')
         plt.loglog(self.ms, simpserr, label='Simpson')
         plt.loglog(self.ms, gausserr, label='Gaussian Quadrature')
+        plt.loglog(self.ms, ftrap, '--',label='Integral')
         
         #Gravy
         plt.ylabel('Errors')
         plt.xlabel(r'Central Masses ($M_\odot$)')
         plt.legend()
         plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
-        plt.clf()
         
-        #Plot Integrals
-        plt.loglog(self.ms, ftrap, label='Trapezoidal')
-        plt.loglog(self.ms, fsimps, label='Simpson')
-        plt.loglog(self.ms, fgauss, label='Simpson')
-
-        #Gravy
-        plt.ylabel('Integral')
-        plt.xlabel(r'Central Masses ($M_\odot$)')
-        plt.legend()
-        plt.savefig('int_methods.pdf', dpi=900, bbox_inches='tight')
-
         print(timestring)
 
         
