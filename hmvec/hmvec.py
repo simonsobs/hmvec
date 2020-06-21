@@ -592,8 +592,8 @@ class HaloModel(Cosmology):
         import pdb; pdb.set_trace()
 
         #Gauss Error
-        fgauss = fgausstable[:, 0, 0]
-        gausserr = np.abs(fgausstable[:, 1, 0])
+        fgauss = fgausstable[:, 0]
+        gausserr = np.abs(fgausstable[:, 1])
 
         #Trap Error
         traperr = np.abs(fgauss - ftrap) + np.abs(gausserr)
