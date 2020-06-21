@@ -568,12 +568,22 @@ class HaloModel(Cosmology):
 
         start = time.time()
         #Gaussian Quadrature
-        fquad = np.zeros(len(self.ms))
         cenms = self.ms.reshape((len(self.ms), 1))
         fgausstable = np.apply_along_axis(quadinteg, 1, cenms)
         end = time.time()
 
-        print(f'Gaussian Quadrature time (s): {end-start}')
+        print(f'Gaussian Quadrature 1 time (s): {end-start}')
+        
+        start = time.time()
+        #Gaussian Quadrature
+        fquad = np.zeros(len(self.ms))
+        quaderr = np.zeros(len(self.ms))
+        for i, centralM in enumerate(self.ms):
+            fquad[i], quaderr[i] = quad(gaussinteg, np.log10(self.ms[0]), np.log10(centralM), args=(centralM,))
+        end = time.time()
+
+        print(f'Gaussian Quadrature 2 time (s): {end-start}')
+
 
         start = time.time()
         #Trapezoidal
@@ -594,8 +604,10 @@ class HaloModel(Cosmology):
         print(f'Simpson time (s): {end-start}')
 
         #Gauss Error
-        fgauss = fgausstable[:, 0]
-        gausserr = np.abs(fgausstable[:, 1])
+        # fgauss = fgausstable[:, 0]
+        # gausserr = np.abs(fgausstable[:, 1])
+        fgauss = fquad
+        gausserr = quaderr
 
         #Trap Error
         traperr = np.abs(fgauss - ftrap) + np.abs(gausserr)
