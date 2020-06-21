@@ -609,18 +609,18 @@ class HaloModel(Cosmology):
         #Plot
         fig, ax = plt.subplots(2, 1, sharey=True, figsize=(10,20))
         #Trap vs Simps
-        ax[1].loglog(self.ms, traperr, label='Trapezoidal')
-        ax[1].loglog(self.ms, simpserr, label='Simpson')
+        ax[0].loglog(self.ms, simpserr, label='Simpson')
+        ax[0].loglog(self.ms, traperr, label='Trapezoidal')
         #Gauss vs Simps Error
-        ax[2].loglog(self.ms, gausserr, label='Gaussian Quadrature')
-        ax[2].loglog(self.ms, simpserr, label='Simpson')
+        ax[1].loglog(self.ms, gausserr, label='Gaussian Quadrature')
+        ax[1].loglog(self.ms, simpserr, label='Simpson')
         
         #Gravy
+        ax[0].ylabel('Errors')
         ax[1].ylabel('Errors')
-        ax[2].ylabel('Errors')
-        ax[2].xlabel(r'Central Masses ($M_\odot$)')
+        ax[1].xlabel(r'Central Masses ($M_\odot$)')
+        ax[0].legend()
         ax[1].legend()
-        ax[2].legend()
         plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
         
         print(timestring)
