@@ -3,7 +3,6 @@ import hmvec as hm
 import matplotlib.pyplot as plt
 import time
 
-start = time.time()
 #Grid for Integration
 Nz = 600                                 # num of redshifts
 Nm = 500                                 # num of masses
@@ -16,11 +15,7 @@ frequencies = np.array([545.])
 #Initialize Halo Model 
 hcos = hm.HaloModel(redshifts, ks, ms=masses)
 
-end = time.time()
-print(f'Setting up the cosmology took {end-start:0.7f} seconds')
-
 #Set CIB Parameters
-import pdb; pdb.set_trace()
 hcos.set_cibParams('planck')
 
 #Testing

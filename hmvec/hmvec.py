@@ -606,7 +606,7 @@ class HaloModel(Cosmology):
         #Plot error
         plt.plot(self.ms, gausserr, label='Gaussian Quadrature')
         plt.plot(self.ms, traperr, label='Trapezoidal')
-        plt.plot(self.ms, simpserr, label='Simpson')
+        #plt.plot(self.ms, simpserr, label='Simpson')
         
         #Gravy
         plt.ylabel('Errors')
@@ -616,7 +616,7 @@ class HaloModel(Cosmology):
         plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
         plt.show()
         
-
+        import pdb;pdb.set_trace()
 
     """
     Power Stuff
