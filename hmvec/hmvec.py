@@ -558,7 +558,7 @@ class HaloModel(Cosmology):
         def quadinteg(Marray):
             Mcen = Marray[0]
 
-            integral, err = quad(integ, self.ms[0], centralM, args=(centralM,))
+            integral, err = quad(integ, self.ms[0], Mcen, args=(Mcen,))
             
             return [integral, err]
 
