@@ -606,21 +606,32 @@ class HaloModel(Cosmology):
         traperr = np.abs(fgauss - ftrap) + np.abs(gausserr)
         simpserr = np.abs(fgauss - fsimps) + np.abs(gausserr)
 
+        # #Plot
+        # fig, ax = plt.subplots(2, 1, sharey=True, figsize=(10,20))
+        # #Trap vs Simps
+        # ax[0].loglog(self.ms, simpserr, label='Simpson')
+        # ax[0].loglog(self.ms, traperr, label='Trapezoidal')
+        # #Gauss vs Simps Error
+        # ax[1].loglog(self.ms, gausserr, label='Gaussian Quadrature')
+        # ax[1].loglog(self.ms, simpserr, label='Simpson')
+        
+        # #Gravy
+        # ax[0].set_ylabel('Errors')
+        # ax[1].set_ylabel('Errors')
+        # ax[1].set_xlabel(r'Central Masses ($M_\odot$)')
+        # ax[0].legend()
+        # ax[1].legend()
+        
         #Plot
-        fig, ax = plt.subplots(2, 1, sharey=True, figsize=(10,20))
-        #Trap vs Simps
-        ax[0].loglog(self.ms, simpserr, label='Simpson')
-        ax[0].loglog(self.ms, traperr, label='Trapezoidal')
-        #Gauss vs Simps Error
-        ax[1].loglog(self.ms, gausserr, label='Gaussian Quadrature')
-        ax[1].loglog(self.ms, simpserr, label='Simpson')
+        plt.loglog(self.ms, simpserr, label='Simpson')
+        plt.loglog(self.ms, traperr, label='Trapezoidal')
+        plt.loglog(self.ms, gausserr, label='Gaussian Quadrature')
         
         #Gravy
-        ax[0].set_ylabel('Errors')
-        ax[1].set_ylabel('Errors')
-        ax[1].set_xlabel(r'Central Masses ($M_\odot$)')
-        ax[0].legend()
-        ax[1].legend()
+        plt.ylabel('Errors')
+        plt.xlabel(r'Central Masses ($M_\odot$)')
+        plt.legend()
+
         plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
         
         print(timestring)
