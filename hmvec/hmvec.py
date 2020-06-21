@@ -584,7 +584,7 @@ class HaloModel(Cosmology):
             fquad[i], quaderr[i] = quad(gaussinteg, np.log10(self.ms[0]), np.log10(centralM), args=(np.log10(centralM),))
         end = time.time()
 
-        timestring += f'Gaussian Quadrature 2 time (s): {end-start} \n')
+        timestring += f'Gaussian Quadrature 2 time (s): {end-start} \n'
 
         start = time.time()
         #Trapezoidal
@@ -595,7 +595,7 @@ class HaloModel(Cosmology):
             ftrap[i] = np.trapz(integ(satms[i,:], centralM), satms[i,:], axis=-1)
         end = time.time()
         
-        timestring += f'Trapezoidal time (s): {end-start} \n')
+        timestring += f'Trapezoidal time (s): {end-start} \n'
         
         start = time.time()
         #Simpson
@@ -604,7 +604,7 @@ class HaloModel(Cosmology):
         fsimps = simps(integ(satms, self.ms[...,None]), satms, axis=-1)
         end = time.time()
         
-        timestring += f'Simpson time (s): {end-start} \n')
+        timestring += f'Simpson time (s): {end-start} \n'
 
         #Gauss Error
         # fgauss = fgausstable[:, 0]
@@ -619,9 +619,9 @@ class HaloModel(Cosmology):
         simpserr = np.abs(fgauss - fsimps) + np.abs(gausserr)
 
         #Plot error
-        plt.plot(self.ms, gausserr, label='Gaussian Quadrature')
+        #plt.plot(self.ms, gausserr, label='Gaussian Quadrature')
         plt.plot(self.ms, traperr, label='Trapezoidal')
-        #plt.plot(self.ms, simpserr, label='Simpson')
+        plt.plot(self.ms, simpserr, label='Simpson')
         
         #Gravy
         plt.ylabel('Errors')
