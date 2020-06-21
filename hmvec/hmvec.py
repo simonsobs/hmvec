@@ -566,13 +566,15 @@ class HaloModel(Cosmology):
             
             return [integral, err]
 
+        timestring = f''
+
         start = time.time()
         #Gaussian Quadrature
         cenms = self.ms.reshape((len(self.ms), 1))
         fgausstable = np.apply_along_axis(quadinteg, 1, cenms)
         end = time.time()
 
-        print(f'Gaussian Quadrature 1 time (s): {end-start}')
+        timestring += f'Gaussian Quadrature 1 time (s): {end-start} \n'
         
         start = time.time()
         #Gaussian Quadrature
@@ -582,8 +584,7 @@ class HaloModel(Cosmology):
             fquad[i], quaderr[i] = quad(gaussinteg, np.log10(self.ms[0]), np.log10(centralM), args=(np.log10(centralM),))
         end = time.time()
 
-        print(f'Gaussian Quadrature 2 time (s): {end-start}')
-
+        timestring += f'Gaussian Quadrature 2 time (s): {end-start} \n')
 
         start = time.time()
         #Trapezoidal
@@ -594,7 +595,7 @@ class HaloModel(Cosmology):
             ftrap[i] = np.trapz(integ(satms[i,:], centralM), satms[i,:], axis=-1)
         end = time.time()
         
-        print(f'Trapezoidal time (s): {end-start}')
+        timestring += f'Trapezoidal time (s): {end-start} \n')
         
         start = time.time()
         #Simpson
@@ -603,7 +604,7 @@ class HaloModel(Cosmology):
         fsimps = simps(integ(satms, self.ms[...,None]), satms, axis=-1)
         end = time.time()
         
-        print(f'Simpson time (s): {end-start}')
+        timestring += f'Simpson time (s): {end-start} \n')
 
         #Gauss Error
         # fgauss = fgausstable[:, 0]
@@ -629,6 +630,8 @@ class HaloModel(Cosmology):
         plt.legend()
         plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
         plt.show()
+        
+        print(timestring)
         
         import pdb;pdb.set_trace()
 
