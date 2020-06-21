@@ -8,7 +8,7 @@ import numpy as np
 import astropy.constants as const
 from . import tinker,utils
 from .cosmology import Cosmology
-from .cib import luminosity, capitalSigma
+from . import cib
 
 import scipy.constants as constants
 from .params import default_params, battaglia_defaults
@@ -478,6 +478,7 @@ class HaloModel(Cosmology):
             self.cib_params['Td_o'] = 24.4
             self.cib_params['logM_eff'] = 12.6
             self.cib_params['var'] = 0.5
+            self.cib_params['L_o'] = 1.0
         elif name.lower() == 'vierro':      # Vierro et al
             self.cib_params['alpha'] = 0.2
             self.cib_params['beta'] = 1.6
@@ -486,6 +487,7 @@ class HaloModel(Cosmology):
             self.cib_params['Td_o'] = 20.7
             self.cib_params['logM_eff'] = 12.3
             self.cib_params['var'] = 0.3
+            self.cib_params['L_o'] = 1.0
         else:
             assert len(params) == 8, "New sets of parameters require exactly 8 parameters"
 
@@ -534,27 +536,62 @@ class HaloModel(Cosmology):
     CIB Stuff
     """
     def _get_fcen(self, nu):
-        return luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
+        '''Function of M and z, but defined over whole z,M,k grid'''
+        return cib.luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
 
     def _get_fsat(self, freq):
-        fsat = np.zeros((len(self.ms), len(self.zs)))
+        '''Function of M and z, but defined over whole z,M,k grid'''
+
+        def integ(m, M):
+            return sdndm(m, M) * cib.capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
 
         #Integrate Subhalo Masses
-        for Mi, M in enumerate(self.ms):
-            fsat[i,j] = quad(fsat_integrand, np.log10(self.ms[0]), np.log10(M), arg=(M, self.zs, self.ks, freq, ))
+        Nsatm = len(self.ms)
+        satms = np.geomspace(self.ms[0], self.ms, num=Nsatm, axis=-1)
+        fsat_m = np.trapz(integ(satms, self.ms[...,None]), satms, axis=-1)
+
+        #Get Redshift Dependencies
+        a = self.cib_params['alpha']
+        b = self.cib_params['beta']
+        d = self.cib_params['delta']
+        g = self.cib_params['gamma']
+        T = self.cib_params['Td_o']
+        Lo = self.cib_params['L_o']
+        fsat_z = Lo * cib.capitalPhi(self.zs, d) * cib.capitalTheta(freq, 'obs', self.zs, a, b, g, T)
+
+        #Calculate fsat on Entire Grid
+        fsat_k = np.ones(len(self.ks))
+        fsat_zz, fsat_mm, _ = np.meshgrid(fsat_z, fsat_m, fsat_k, indexing='ij')
+        fsat = fsat_zz * fsat_mm
 
         return fsat / (4.0*np.pi)
 
-    def _get_cib(self, freq):
+    def _get_cib(self, freq, satflag=True):
+        '''Assumes NFW mass profile for the centrals'''
         uhalo = self.uk_profiles['nfw']
-        fcen = _get_fcen(freq)
+        fcen = self._get_fcen(freq)
+        if satflag:
+            fsat = self._get_fsat(freq)
+        else:
+            fsat = 0.
+        return uhalo * (fcen+fsat)
+    
+    def _get_cib_square(self, freq1, freq2, satflag=True):
+        '''Assumes NFW mass profile for the centrals'''
+        if satflag:
+            uhalo = self.uk_profiles['nfw']
+            fcen1 = self._get_fcen(freq1)
+            fcen2 = self._get_fcen(freq2)
+            fsat1 = self._get_fsat(freq1)
+            fsat2 = self._get_fsat(freq2)
 
+            return (fcen1*fsat2*uhalo) + (fcen2*fsat1*uhalo) + (fsat1*fsat2*uhalo**2)
+        else:
+            return 0.
 
-        return uhalo*fcen
-        
     def testingCIB(self):
         def integ(m, M):
-            return sdndm(m, M) * capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
+            return sdndm(m, M) * cib.capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
         def quadinteg(Marray):
             Mcen = Marray[0]
 
@@ -636,25 +673,26 @@ class HaloModel(Cosmology):
         
         print(timestring)
 
-        
 
     """
     Power Stuff
     """
 
-    def get_power(self,name1,name2=None,verbose=True):
+    def get_power(self,name1,name2=None,freq=None,verbose=True, subhalos=True):
+        '''"freq" must be an array'''
         if name2 is None: name2 = name1
 
-        #Add Necessary CIB Models
-        for name in [name1, name2]:
-            name = name.lower()
-            #if name in self.cib_models
+        if name1.lower() == 'cib' or name2.lower() == 'cib':
+            return self.get_power_1halo(name1,name2, freq, subhalos) + self.get_power_2halo(name1,name2,verbose, freq, subhalos)
+        else:
+            return self.get_power_1halo(name1,name2) + self.get_power_2halo(name1,name2,verbose)
 
-        
-        return self.get_power_1halo(name1,name2) + self.get_power_2halo(name1,name2,verbose)
-
-    def get_power_1halo(self,name="nfw",name2=None):
+    def get_power_1halo(self,name="nfw",name2=None, nu_obs=None, subhalos=True):
+        '''"nu_obs" must be an array'''
         name2 = name if name2 is None else name2
+        nu1 = nu_obs[0]
+        if len(nu_obs) == 2:
+            nu2 = nu_obs[1]
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
         hnames = self.hods.keys()
@@ -663,6 +701,8 @@ class HaloModel(Cosmology):
             square_term = self._get_hod_square(name)
         elif (name in pnames) and (name2 in pnames):
             square_term = self._get_pressure(name)**2
+        elif (name.lower()=='cib') and (name2.lower()=='cib'):
+            square_term = self._get_cib_square(nu1, nu2, subhalos)
         else:
             square_term=1.
             for nm in [name,name2]:
@@ -677,15 +717,19 @@ class HaloModel(Cosmology):
         integrand = self.nzm[...,None] * square_term
         return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
 
-    def get_power_2halo(self,name="nfw",name2=None,verbose=False,nu_obs=None):
+    def get_power_2halo(self,name="nfw",name2=None,verbose=False,nu_obs=None, subhalos=True):
+        '''"nu_obs" must be an array'''
         name2 = name if name2 is None else name2
+        nu1 = nu_obs[0]
+        if len(nu_obs) == 2:
+            nu2 = nu_obs[1]
 
         def _2haloint(iterm):
             integrand = self.nzm[...,None] * iterm * self.bh[...,None]
             integral = np.trapz(integrand,ms,axis=-2)
             return integral
 
-        def _get_term(iname):
+        def _get_term(iname, inu):
             if iname in self.uk_profiles.keys():
                 rterm1 = self._get_matter(iname)
                 rterm01 = self._get_matter(iname,lowklim=True)
@@ -700,7 +744,7 @@ class HaloModel(Cosmology):
                 rterm01 = self._get_hod(iname,lowklim=True)
                 b = self.get_bg(self.hods[iname]['Nc'],self.hods[iname]['Ns'],self.hods[iname]['ngal'])[:,None]
             elif iname.lower()=='cib':
-                rterm1 = self._get_cib(nu_obs)
+                rterm1 = self._get_cib(inu)
                 rterm01 = 0
                 b = 0
             else: raise ValueError
@@ -709,8 +753,8 @@ class HaloModel(Cosmology):
 
         ms = self.ms[...,None]
 
-        iterm1,iterm01,b1 = _get_term(name)
-        iterm2,iterm02,b2 = _get_term(name2)
+        iterm1,iterm01,b1 = _get_term(name, nu1)
+        iterm2,iterm02,b2 = _get_term(name2, nu2)
 
         integral = _2haloint(iterm1)
         integral2 = _2haloint(iterm2)
@@ -723,16 +767,10 @@ class HaloModel(Cosmology):
             print("Two-halo consistency2: " , consistency2,integral2)
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
-    def get_sfrd(self, freq_range, model='vierro'):
+    def get_sfrd(self, freq_range):
         kennicutt = 1.7e-10
 
-        if model.lower()=='planck':             # Planck 2013
-            sfr = kennicutt * luminosity(self.zs, self.ms, len(self.ks), freq_range, nuframe='rest',
-                                         a=0.36, b=1.75, g=1.7, d=3.6, Td_o=24.4, logM_eff=12.6, var=0.5)
-        elif model.lower() == 'vierro':
-            sfr = kennicutt * luminosity(self.zs, self.ms, len(self.ks), freq_range)
-        else:
-            raise ValueError('Need a valid set of parameters')
+        sfr = kennicutt * cib.luminosity(self.zs, self.ms, len(self.ks), freq_range, 'rest', **self.cib_params)
 
         return np.trapz(self.nzm * sfr[:,:,0], self.ms, axis=-1)
 
@@ -754,13 +792,6 @@ def sdndm(msat, mcen):
             (np.exp(-(beta_2) * ((msat / mcen)**zeta))))
 
         return dndm
-
-def fsat_integrand(msat, zs, mcen, ks, nu):
-    Lsat = luminosity(zs, msat, len(ks), nu)
-    dndm = sdndm(10**msat, mcen)
-    integ_array = Lsat[:,:,0] * dndm[None, :]
-
-    return 
 
 
 """
