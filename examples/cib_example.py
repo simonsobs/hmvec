@@ -13,7 +13,7 @@ masses = np.geomspace(1e10, 1e15, Nm)           # masses
 ks = np.geomspace(1e-3, 100, Nk)               # wavenumbers
 frequencies = np.array([545.])
 
-#Initialize Halo Model
+#Initialize Halo Model 
 hcos = hm.HaloModel(redshifts, ks, ms=masses)
 
 end = time.time()

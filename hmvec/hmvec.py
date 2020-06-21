@@ -554,6 +554,8 @@ class HaloModel(Cosmology):
         
     def testingCIB(self):
         def integ(m, M):
+            m = 10**m
+            M = 10**M
             return sdndm(m, M) * capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
         def quadinteg(Marray):
             Mcen = Marray[0]
