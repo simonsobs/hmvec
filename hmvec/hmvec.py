@@ -565,21 +565,21 @@ class HaloModel(Cosmology):
         timestring = f''
 
         start = time.time()
-        #Gaussian Quadrature
+        #Gaussian Quadrature 1
         cenms = self.ms.reshape((len(self.ms), 1))
         fgausstable = np.apply_along_axis(quadinteg, 1, cenms)
-        end = time.time()
 
+        end = time.time()
         timestring += f'Gaussian Quadrature 1 time (s): {end-start} \n'
         
         start = time.time()
-        #Gaussian Quadrature
+        #Gaussian Quadrature 2
         fquad = np.zeros(len(self.ms))
         quaderr = np.zeros(len(self.ms))
         for i, centralM in enumerate(self.ms):
             fquad[i], quaderr[i] = quad(integ, self.ms[0], centralM, args=(centralM,))
+  
         end = time.time()
-
         timestring += f'Gaussian Quadrature 2 time (s): {end-start} \n'
 
         start = time.time()
@@ -587,8 +587,8 @@ class HaloModel(Cosmology):
         Nsubm = 500
         satms = np.geomspace(self.ms[0], self.ms, num=Nsubm, axis=-1)
         ftrap = np.trapz(integ(satms, self.ms[...,None]), satms, axis=-1)
+
         end = time.time()
-        
         timestring += f'Trapezoidal time (s): {end-start} \n'
         
         start = time.time()
@@ -596,38 +596,35 @@ class HaloModel(Cosmology):
         Nsubm = 500
         satms = np.geomspace(self.ms[0], self.ms, num=Nsubm, axis=-1)
         fsimps = simps(integ(satms, self.ms[...,None]), satms, axis=-1)
+
         end = time.time()
-        
         timestring += f'Simpson time (s): {end-start} \n'
 
-        #Gauss Error
-        # fgauss = fgausstable[:, 0]
-        # gausserr = np.abs(fgausstable[:, 1])
+        #Error
         fgauss = fquad
         gausserr = quaderr
-
-        #Trap Error
         traperr = np.abs(fgauss - ftrap) + np.abs(gausserr)
-
-        #Simpson Error
         simpserr = np.abs(fgauss - fsimps) + np.abs(gausserr)
 
-        #Plot error
-        plt.plot(self.ms, gausserr, label='Gaussian Quadrature')
-        plt.plot(self.ms, traperr, label='Trapezoidal')
-        plt.plot(self.ms, simpserr, label='Simpson')
+        #Plot
+        fig, ax = plt.subplots(2, 1, sharey=True, figsize=(10,20))
+        #Trap vs Simps
+        ax[1].loglog(self.ms, traperr, label='Trapezoidal')
+        ax[1].loglog(self.ms, simpserr, label='Simpson')
+        #Gauss vs Simps Error
+        ax[2].loglog(self.ms, gausserr, label='Gaussian Quadrature')
+        ax[2].loglog(self.ms, simpserr, label='Simpson')
         
         #Gravy
-        plt.ylabel('Errors')
-        plt.xlabel(r'Central Masses ($M_\odot$)')
-        plt.xscale('log')
-        plt.legend()
+        ax[1].ylabel('Errors')
+        ax[2].ylabel('Errors')
+        ax[2].xlabel(r'Central Masses ($M_\odot$)')
+        ax[1].legend()
+        ax[2].legend()
         plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
-        plt.show()
         
-        import pdb; pdb.set_trace()
-
         print(timestring)
+
         
 
     """
