@@ -632,7 +632,8 @@ class HaloModel(Cosmology):
         plt.xlabel(r'Central Masses ($M_\odot$)')
         plt.legend()
         plt.savefig('int_errs.pdf', dpi=900, bbox_inches='tight')
-
+        plt.clf()
+        
         #Plot Integrals
         plt.loglog(self.ms, ftrap, label='Trapezoidal')
         plt.loglog(self.ms, fsimps, label='Simpson')
