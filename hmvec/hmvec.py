@@ -586,7 +586,7 @@ class HaloModel(Cosmology):
         #Trapezoidal
         Nsubm = 500
         satms = np.geomspace(self.ms[0], self.ms, num=Nsubm, axis=-1)
-        fsimps = trapz(integ(satms, self.ms[...,None]), satms, axis=-1)
+        ftrap = np.trapz(integ(satms, self.ms[...,None]), satms, axis=-1)
         end = time.time()
         
         timestring += f'Trapezoidal time (s): {end-start} \n'
