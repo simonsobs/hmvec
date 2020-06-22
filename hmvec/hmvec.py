@@ -539,7 +539,7 @@ class HaloModel(Cosmology):
         '''Function of M and z, but defined over whole z,M,k grid'''
         return cib.luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
 
-    def _get_fsat(self, freq):
+    def _get_fsat(self, freq, cibinteg='trap'):
         '''Function of M and z, but defined over whole z,M,k grid'''
 
         def integ(m, M):
@@ -548,7 +548,11 @@ class HaloModel(Cosmology):
         #Integrate Subhalo Masses
         Nsatm = len(self.ms)
         satms = np.geomspace(self.ms[0], self.ms, num=Nsatm, axis=-1)
-        fsat_m = np.trapz(integ(satms, self.ms[...,None]), satms, axis=-1)
+        if cibinteg.lower() == 'trap':
+            fsat_m = np.trapz(integ(satms, self.ms[...,None]), satms, axis=-1)
+        elif cibinteg.lower() == 'simps':
+            fsat_m = np.simps(integ(satms, self.ms[...,None]), satms, axis=-1)
+        else: raise ValueError('Invalid cibinteg')
 
         #Get Redshift Dependencies
         a = self.cib_params['alpha']
@@ -566,24 +570,24 @@ class HaloModel(Cosmology):
 
         return fsat / (4.0*np.pi)
 
-    def _get_cib(self, freq, satflag=True):
+    def _get_cib(self, freq, satflag=True, cibinteg='trap'):
         '''Assumes NFW mass profile for the centrals'''
         uhalo = self.uk_profiles['nfw']
-        fcen = self._get_fcen(freq)
+        fcen = self._get_fcen(freq, cibinteg)
         if satflag:
-            fsat = self._get_fsat(freq)
+            fsat = self._get_fsat(freq, cibinteg)
         else:
             fsat = 0.
         return uhalo * (fcen+fsat)
     
-    def _get_cib_square(self, freq1, freq2, satflag=True):
+    def _get_cib_square(self, freq1, freq2, satflag=True, cibinteg='trap'):
         '''Assumes NFW mass profile for the centrals'''
         if satflag:
             uhalo = self.uk_profiles['nfw']
             fcen1 = self._get_fcen(freq1)
             fcen2 = self._get_fcen(freq2)
-            fsat1 = self._get_fsat(freq1)
-            fsat2 = self._get_fsat(freq2)
+            fsat1 = self._get_fsat(freq1, cibinteg)
+            fsat2 = self._get_fsat(freq2, cibinteg)
 
             return (fcen1*fsat2*uhalo) + (fcen2*fsat1*uhalo) + (fsat1*fsat2*uhalo**2)
         else:
@@ -678,21 +682,34 @@ class HaloModel(Cosmology):
     Power Stuff
     """
 
-    def get_power(self,name1,name2=None,freq=None,verbose=True, subhalos=True):
-        '''"freq" must be an array'''
+    def get_power(self,name1,name2=None,nu_obs=None,verbose=True, subhalos=True, cibinteg='trap'):
+        '''
+        Keyword Arguments:
+        nu_obs [1darray] : cib frequencies to be cross correlated (at most 2 freq's)
+        subhalos [bool]  : flag to add satellite galaxies
+        cibinteg [str]   : integration method for subhalo masses for cib; either "trap" or "simps"
+        '''
         if name2 is None: name2 = name1
 
         if name1.lower() == 'cib' or name2.lower() == 'cib':
-            return self.get_power_1halo(name1,name2, freq, subhalos) + self.get_power_2halo(name1,name2,verbose, freq, subhalos)
+            return self.get_power_1halo(name1,name2, nu_obs, subhalos, cibinteg) + self.get_power_2halo(name1,name2,verbose, nu_obs, subhalos, cibinteg)
         else:
             return self.get_power_1halo(name1,name2) + self.get_power_2halo(name1,name2,verbose)
 
-    def get_power_1halo(self,name="nfw",name2=None, nu_obs=None, subhalos=True):
-        '''"nu_obs" must be an array'''
+    def get_power_1halo(self,name="nfw",name2=None, nu_obs=None, subhalos=True, cibinteg='trap'):
+        '''
+        Keyword Arguments:
+        nu_obs [1darray] : cib frequencies to be cross correlated (at most 2 freq's)
+        subhalos [bool]  : flag to add satellite galaxies
+        cibinteg [str]   : integration method for subhalo masses for cib; either "trap" or "simps"
+        '''
         name2 = name if name2 is None else name2
         nu1 = nu_obs[0]
         if len(nu_obs) == 2:
             nu2 = nu_obs[1]
+        elif len(nu_obs) == 1:
+            nu2 = nu1
+        else: raise ValueError('Frequency array must have at most 2 elements')
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
         hnames = self.hods.keys()
@@ -702,7 +719,7 @@ class HaloModel(Cosmology):
         elif (name in pnames) and (name2 in pnames):
             square_term = self._get_pressure(name)**2
         elif (name.lower()=='cib') and (name2.lower()=='cib'):
-            square_term = self._get_cib_square(nu1, nu2, subhalos)
+            square_term = self._get_cib_square(nu1, nu2, subhalos, cibinteg)
         else:
             square_term=1.
             for nm in [name,name2]:
@@ -717,12 +734,21 @@ class HaloModel(Cosmology):
         integrand = self.nzm[...,None] * square_term
         return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
 
-    def get_power_2halo(self,name="nfw",name2=None,verbose=False,nu_obs=None, subhalos=True):
-        '''"nu_obs" must be an array'''
+    def get_power_2halo(self,name="nfw",name2=None,verbose=False,nu_obs=None, subhalos=True, cibinteg='trap'):
+        '''
+        Keyword Arguments:
+        nu_obs [1darray] : cib frequencies to be cross correlated (at most 2 freq's)
+        subhalos [bool]  : flag to add satellite galaxies
+        cibinteg [str]   : integration method for subhalo masses for cib; either "trap" or "simps"
+        '''
         name2 = name if name2 is None else name2
         nu1 = nu_obs[0]
         if len(nu_obs) == 2:
             nu2 = nu_obs[1]
+        elif len(nu_obs) == 1:
+            nu2 = nu1
+        else: raise ValueError('Frequency array must have at most 2 elements')
+            
 
         def _2haloint(iterm):
             integrand = self.nzm[...,None] * iterm * self.bh[...,None]
@@ -744,7 +770,7 @@ class HaloModel(Cosmology):
                 rterm01 = self._get_hod(iname,lowklim=True)
                 b = self.get_bg(self.hods[iname]['Nc'],self.hods[iname]['Ns'],self.hods[iname]['ngal'])[:,None]
             elif iname.lower()=='cib':
-                rterm1 = self._get_cib(inu)
+                rterm1 = self._get_cib(inu, subhalos, cibinteg)
                 rterm01 = 0
                 b = 0
             else: raise ValueError
