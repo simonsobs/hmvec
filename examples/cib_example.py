@@ -4,10 +4,10 @@ import matplotlib.pyplot as plt
 # import time
 
 #Grid for Integration
-Nz = 600                                 # num of redshifts
+Nz = 700                                 # num of redshifts
 Nm = 500                                 # num of masses
 Nk = 1000                                # num of wavenumbers
-redshifts = np.linspace(0.01, 4.5, Nz)             # redshifts
+redshifts = np.linspace(0.01, 7, Nz)             # redshifts
 masses = np.geomspace(1e10, 1e15, Nm)           # masses
 ks = np.geomspace(1e-3, 100, Nk)               # wavenumbers
 frequencies = np.array([[545.]])                  #Ghz
@@ -37,7 +37,7 @@ C_cen, dcdz_cen = hcos.C_ii(ells, redshifts, ks, Pjj_cen, dcdzflag=True)
 
 
 #Plot Total C
-plt.loglog(ells, C_tot, label='total')
+plt.loglog(ells[4:], C_tot, label='total')
 plt.xlabel(r'$\ell$')
 plt.ylabel(rf'$C^{{ {frequencies[0,0]:0.0f} \;x\; {frequencies[0,0]:0.0f} }}_\ell$');
 plt.legend()
