@@ -580,14 +580,14 @@ class HaloModel(Cosmology):
             fsat = 0.
         return uhalo * (fcen+fsat)
     
-    def _get_cib_square(self, freq1, freq2, satflag=True, cibinteg='trap'):
+    def _get_cib_square(self, freq, satflag=True, cibinteg='trap'):
         '''Assumes NFW mass profile for the centrals'''
         if satflag:
             uhalo = self.uk_profiles['nfw']
-            fcen1 = self._get_fcen(freq1)
-            fcen2 = self._get_fcen(freq2)
-            fsat1 = self._get_fsat(freq1, cibinteg)
-            fsat2 = self._get_fsat(freq2, cibinteg)
+            fcen1 = self._get_fcen(freq[0])
+            fcen2 = self._get_fcen(freq[1])
+            fsat1 = self._get_fsat(freq[0], cibinteg)
+            fsat2 = self._get_fsat(freq[1], cibinteg)
 
             return (fcen1*fsat2*uhalo) + (fcen2*fsat1*uhalo) + (fsat1*fsat2*uhalo**2)
         else:
@@ -684,15 +684,21 @@ class HaloModel(Cosmology):
 
     def get_power(self,name1,name2=None,nu_obs=None,verbose=True, subhalos=True, cibinteg='trap'):
         '''
-        Keyword Arguments:
-        nu_obs [1darray] : cib frequencies to be cross correlated (at most 2 freq's)
+        CIB Keyword Arguments:
+        nu_obs [2darray] : 1st axis - freq's to be cross correlated. 2nd axis - bandpass
         subhalos [bool]  : flag to add satellite galaxies
         cibinteg [str]   : integration method for subhalo masses for cib; either "trap" or "simps"
         '''
         if name2 is None: name2 = name1
 
         if name1.lower() == 'cib' or name2.lower() == 'cib':
-            return self.get_power_1halo(name1,name2, nu_obs, subhalos, cibinteg) + self.get_power_2halo(name1,name2,verbose, nu_obs, subhalos, cibinteg)
+            if len(nu_obs) > 2: 
+                raise ValueError('Frequency array must have at most 2 elements')
+            elif len(nu_obs) == 1:
+                nu_obs_array = np.array([nu_obs[0], nu_obs[0]])
+            elif nu_obs.ndim != 2:
+                raise ValueError('Need a 2D array for the frequency')
+            return self.get_power_1halo(name1,name2, nu_obs_array, subhalos, cibinteg) + self.get_power_2halo(name1,name2,verbose, nu_obs_array, subhalos, cibinteg)
         else:
             return self.get_power_1halo(name1,name2) + self.get_power_2halo(name1,name2,verbose)
 
@@ -704,12 +710,14 @@ class HaloModel(Cosmology):
         cibinteg [str]   : integration method for subhalo masses for cib; either "trap" or "simps"
         '''
         name2 = name if name2 is None else name2
-        nu1 = nu_obs[0]
-        if len(nu_obs) == 2:
-            nu2 = nu_obs[1]
-        elif len(nu_obs) == 1:
-            nu2 = nu1
-        else: raise ValueError('Frequency array must have at most 2 elements')
+        if name.lower() == 'cib' or name2.lower() == 'cib':
+            if len(nu_obs) > 2: 
+                raise ValueError('Frequency array must have at most 2 elements')
+            elif len(nu_obs) == 1:
+                nu_obs_array = np.array([nu_obs[0], nu_obs[0]])
+            elif nu_obs.ndim != 2:
+                raise ValueError('Need a 2D array for the frequency')
+
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
         hnames = self.hods.keys()
@@ -719,7 +727,7 @@ class HaloModel(Cosmology):
         elif (name in pnames) and (name2 in pnames):
             square_term = self._get_pressure(name)**2
         elif (name.lower()=='cib') and (name2.lower()=='cib'):
-            square_term = self._get_cib_square(nu1, nu2, subhalos, cibinteg)
+            square_term = self._get_cib_square(freq, subhalos, cibinteg)
         else:
             square_term=1.
             for nm in [name,name2]:
@@ -742,12 +750,13 @@ class HaloModel(Cosmology):
         cibinteg [str]   : integration method for subhalo masses for cib; either "trap" or "simps"
         '''
         name2 = name if name2 is None else name2
-        nu1 = nu_obs[0]
-        if len(nu_obs) == 2:
-            nu2 = nu_obs[1]
-        elif len(nu_obs) == 1:
-            nu2 = nu1
-        else: raise ValueError('Frequency array must have at most 2 elements')
+        if name.lower() == 'cib' or name2.lower() == 'cib':
+            if len(nu_obs) > 2: 
+                raise ValueError('Frequency array must have at most 2 elements')
+            elif len(nu_obs) == 1:
+                nu_obs_array = np.array([nu_obs[0], nu_obs[0]])
+            elif nu_obs.ndim != 2:
+                raise ValueError('Need a 2D array for the frequency')
             
 
         def _2haloint(iterm):
@@ -779,8 +788,8 @@ class HaloModel(Cosmology):
 
         ms = self.ms[...,None]
 
-        iterm1,iterm01,b1 = _get_term(name, nu1)
-        iterm2,iterm02,b2 = _get_term(name2, nu2)
+        iterm1,iterm01,b1 = _get_term(name, nu_obs[0])
+        iterm2,iterm02,b2 = _get_term(name2, nu_obs[1])
 
         integral = _2haloint(iterm1)
         integral2 = _2haloint(iterm2)
