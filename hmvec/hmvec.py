@@ -714,7 +714,7 @@ class HaloModel(Cosmology):
             if len(nu_obs) > 2: 
                 raise ValueError('Frequency array must have at most 2 elements')
             elif len(nu_obs) == 1:
-                nu_obs_array = np.array([nu_obs[0], nu_obs[0]])
+                nu_obs = np.array([nu_obs[0], nu_obs[0]])
             elif nu_obs.ndim != 2:
                 raise ValueError('Need a 2D array for the frequency')
 
@@ -727,7 +727,7 @@ class HaloModel(Cosmology):
         elif (name in pnames) and (name2 in pnames):
             square_term = self._get_pressure(name)**2
         elif (name.lower()=='cib') and (name2.lower()=='cib'):
-            square_term = self._get_cib_square(freq, subhalos, cibinteg)
+            square_term = self._get_cib_square(nu_obs, subhalos, cibinteg)
         else:
             square_term=1.
             for nm in [name,name2]:
@@ -754,7 +754,7 @@ class HaloModel(Cosmology):
             if len(nu_obs) > 2: 
                 raise ValueError('Frequency array must have at most 2 elements')
             elif len(nu_obs) == 1:
-                nu_obs_array = np.array([nu_obs[0], nu_obs[0]])
+                nu_obs = np.array([nu_obs[0], nu_obs[0]])
             elif nu_obs.ndim != 2:
                 raise ValueError('Need a 2D array for the frequency')
             
