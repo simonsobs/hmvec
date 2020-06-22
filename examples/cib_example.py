@@ -25,6 +25,7 @@ hcos.set_cibParams('planck')
 Pjj_tot = hcos.get_power_1halo("cib", "cib", nu_obs=frequencies)  # P(z,k)
 Pjj_1h = hcos.get_power_1halo("cib", "cib", nu_obs=frequencies)  # P(z,k)
 Pjj_2h = hcos.get_power_2halo("cib", "cib", nu_obs=frequencies)  # P(z,k)
+Pjj_cen = hcos.get_power_2halo("cib", "cib", nu_obs=frequencies, subhalos=False)  # P(z,k)
 
 #Limber Integrals
 Nl = 1000
@@ -32,15 +33,23 @@ ells = np.arange(Nl)
 C_tot, dcdz_tot = hcos.C_ii(ells, redshifts, ks, Pjj_tot, dcdzflag=True)
 C_1h, dcdz_1h = hcos.C_ii(ells, redshifts, ks, Pjj_1h, dcdzflag=True)
 C_2h, dcdz_2h = hcos.C_ii(ells, redshifts, ks, Pjj_2h, dcdzflag=True)
+C_cen, dcdz_cen = hcos.C_ii(ells, redshifts, ks, Pjj_cen, dcdzflag=True)
 
 
-#Plot C_ell
+#Plot Total C's
 plt.loglog(ells, C_tot, label='total')
 plt.loglog(ells, C_1h, label='1 halo term')
 plt.loglog(ells, C_2h, label='2 halo term')
 plt.xlabel(r'$\ell$')
-plt.ylabel(rf'$C^{{ {frequencies[0]:0.0f} \;x\; {frequencies[0]:0.0f} }}_\ell$');
+plt.ylabel(rf'$C^{{ {frequencies[0,0]:0.0f} \;x\; {frequencies[0,0]:0.0f} }}_\ell$');
 plt.savefig('cii_tot.pdf', dpi=500, bbox_inches='tight')
+
+#Plot Centrals' C's
+plt.clf()
+plt.loglog(ells, C_cen, label='total')
+plt.xlabel(r'$\ell$')
+plt.ylabel(rf'$C^{{ {frequencies[0,0]:0.0f} \;x\; {frequencies[0,0]:0.0f} }}_\ell$');
+plt.savefig('cii_tot_cen.pdf', dpi=500, bbox_inches='tight')
 
 #Plot dC/dz (z)
 test_ells = np.array([100, 300, 500, 1000])
@@ -50,12 +59,13 @@ for ell in test_ells:
     i = np.where(abs(ell - ells) <= 1)[0][0]
 
     #Spectra
-    plt.semilogy(redshifts, dcdz_tot[:, i], label=rf"$\ell = {ells[i]:0.0f}$")
+    plt.semilogy(redshifts, dcdz_tot[:, i], label=rf"$\ell = {ells[i]}$")
+    plt.semilogy(redshifts, dcdz_cen[:, i], label=rf"$\ell = {ells[i]}$")
 
     #Gravy
     plt.xlabel(r'$z$')
     plt.ylabel(r'$dC_{II} / dz$')
-    plt.title(rf'$\nu$ = {frequencies[0]}')
+    plt.title(rf'$\nu$ = {frequencies[0,0]}')
     plt.legend()
 plt.savefig('dCdz_ii_tot.pdf', dpi=500, bbox_inches='tight');
 
