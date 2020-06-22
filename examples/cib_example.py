@@ -59,8 +59,8 @@ for ell in test_ells:
     i = np.where(abs(ell - ells) <= 1)[0][0]
 
     #Spectra
-    plt.semilogy(redshifts, dcdz_tot[:, i], label=rf"$\ell = {ells[i]}$")
-    plt.semilogy(redshifts, dcdz_cen[:, i], label=rf"$\ell = {ells[i]}$")
+    plt.semilogy(redshifts, dcdz_tot[:, i], label=rf"$\ell = {ells[i]}$, with satellites")
+    plt.semilogy(redshifts, dcdz_cen[:, i], label=rf"$\ell = {ells[i]}$, without satellites")
 
     #Gravy
     plt.xlabel(r'$z$')
