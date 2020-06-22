@@ -42,13 +42,15 @@ plt.loglog(ells, C_1h, label='1 halo term')
 plt.loglog(ells, C_2h, label='2 halo term')
 plt.xlabel(r'$\ell$')
 plt.ylabel(rf'$C^{{ {frequencies[0,0]:0.0f} \;x\; {frequencies[0,0]:0.0f} }}_\ell$');
+plt.legend()
 plt.savefig('cii_tot.pdf', dpi=500, bbox_inches='tight')
 
 #Plot Centrals' C's
 plt.clf()
 plt.loglog(ells, C_cen, label='total')
 plt.xlabel(r'$\ell$')
-plt.ylabel(rf'$C^{{ {frequencies[0,0]:0.0f} \;x\; {frequencies[0,0]:0.0f} }}_\ell$');
+plt.ylabel(rf'$C^{{ {frequencies[0,0]:0.0f} \;x\; {frequencies[0,0]:0.0f} }}_\ell$')
+plt.legend()
 plt.savefig('cii_tot_cen.pdf', dpi=500, bbox_inches='tight')
 
 #Plot dC/dz (z)
