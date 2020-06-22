@@ -22,7 +22,7 @@ hcos.set_cibParams('planck')
 # hcos.testingCIB()
 
 #Get 3D Power Spectra
-Pjj_tot = hcos.get_power_1halo("cib", "cib", nu_obs=frequencies)  # P(z,k)
+Pjj_tot = hcos.get_power("cib", "cib", nu_obs=frequencies)  # P(z,k)
 Pjj_1h = hcos.get_power_1halo("cib", "cib", nu_obs=frequencies)  # P(z,k)
 Pjj_2h = hcos.get_power_2halo("cib", "cib", nu_obs=frequencies)  # P(z,k)
 Pjj_cen = hcos.get_power_2halo("cib", "cib", nu_obs=frequencies, subhalos=False)  # P(z,k)
