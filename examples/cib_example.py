@@ -37,15 +37,15 @@ C_cen, dcdz_cen = hcos.C_ii(ells, redshifts, ks, Pjj_cen, dcdzflag=True)
 
 
 #Plot Total C
-plt.loglog(ells[4:], C_tot, label='total')
+plt.loglog(ells[4:], C_tot[4:], label='total')
 plt.xlabel(r'$\ell$')
 plt.ylabel(rf'$C^{{ {frequencies[0,0]:0.0f} \;x\; {frequencies[0,0]:0.0f} }}_\ell$');
 plt.legend()
 plt.savefig('cii_tot.pdf', dpi=500, bbox_inches='tight')
 
 #Plot 1h and 2h C's
-plt.loglog(ells, C_1h, label='1 halo term')
-plt.loglog(ells, C_2h, label='2 halo term')
+plt.loglog(ells[4:], C_1h[4:], label='1 halo term')
+plt.loglog(ells[4:], C_2h[4:], label='2 halo term')
 plt.xlabel(r'$\ell$')
 plt.ylabel(rf'$C^{{ {frequencies[0,0]:0.0f} \;x\; {frequencies[0,0]:0.0f} }}_\ell$');
 plt.legend()
