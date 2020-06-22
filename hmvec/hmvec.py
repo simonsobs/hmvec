@@ -573,7 +573,7 @@ class HaloModel(Cosmology):
     def _get_cib(self, freq, satflag=True, cibinteg='trap'):
         '''Assumes NFW mass profile for the centrals'''
         uhalo = self.uk_profiles['nfw']
-        fcen = self._get_fcen(freq, cibinteg)
+        fcen = self._get_fcen(freq)
         if satflag:
             fsat = self._get_fsat(freq, cibinteg)
         else:
