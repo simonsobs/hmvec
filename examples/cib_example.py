@@ -28,7 +28,7 @@ Pjj_2h = hcos.get_power_2halo("cib", "cib", nu_obs=frequencies)  # P(z,k)
 
 #Limber Integrals
 Nl = 1000
-ells = np.arange(1000, num=Nl)
+ells = np.arange(Nl)
 C_tot, dcdz_tot = hcos.C_ii(ells, redshifts, ks, Pjj_tot, dcdzflag=True)
 C_1h, dcdz_1h = hcos.C_ii(ells, redshifts, ks, Pjj_1h, dcdzflag=True)
 C_2h, dcdz_2h = hcos.C_ii(ells, redshifts, ks, Pjj_2h, dcdzflag=True)
