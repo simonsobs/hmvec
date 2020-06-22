@@ -10,7 +10,7 @@ Nk = 1000                                # num of wavenumbers
 redshifts = np.linspace(0.01, 4.5, Nz)             # redshifts
 masses = np.geomspace(1e10, 1e15, Nm)           # masses
 ks = np.geomspace(1e-3, 100, Nk)               # wavenumbers
-frequencies = np.array([545.])                  #Ghz
+frequencies = np.array([[545.]])                  #Ghz
 
 #Initialize Halo Model 
 hcos = hm.HaloModel(redshifts, ks, ms=masses)
