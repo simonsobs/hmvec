@@ -40,7 +40,6 @@ C_cen, dcdz_cen = hcos.C_ii(ells, redshifts, ks, Pjj_cen, dcdzflag=True)
 plt.loglog(ells[4:], C_tot[4:], label='total')
 plt.xlabel(r'$\ell$')
 plt.ylabel(rf'$C^{{ {frequencies[0,0]:0.0f} \;x\; {frequencies[0,0]:0.0f} }}_\ell$');
-plt.legend()
 plt.savefig('cii_tot.pdf', dpi=500, bbox_inches='tight')
 
 #Plot 1h and 2h C's
@@ -53,10 +52,9 @@ plt.savefig('cii_1h2h.pdf', dpi=500, bbox_inches='tight')
 
 #Plot C without Satellites
 plt.clf()
-plt.loglog(ells, C_cen, label='total')
+plt.loglog(ells[4:], C_cen[4:])
 plt.xlabel(r'$\ell$')
 plt.ylabel(rf'$C^{{ {frequencies[0,0]:0.0f} \;x\; {frequencies[0,0]:0.0f} }}_\ell$')
-plt.legend()
 plt.savefig('cii_tot_cen.pdf', dpi=500, bbox_inches='tight')
 
 #Plot dC/dz With Satellites
@@ -76,7 +74,7 @@ for ell in test_ells:
     plt.legend()
 plt.savefig('dCdz_ii_tot.pdf', dpi=500, bbox_inches='tight');
 
-#Plot dC/dz With Satellites
+#Plot dC/dz Without Satellites
 test_ells = np.array([100, 300, 500, 1000])
 plt.figure(figsize=(10,7))
 for ell in test_ells:
