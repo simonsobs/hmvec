@@ -698,6 +698,8 @@ class HaloModel(Cosmology):
                 nu_obs_array = np.array([nu_obs[0], nu_obs[0]])
             elif nu_obs.ndim != 2:
                 raise ValueError('Need a 2D array for the frequency')
+            if nu_obs.shape != (1, 2):
+                raise ValueError('Only 1 pair of frequencies at a time')
             return self.get_power_1halo(name1,name2, nu_obs_array, subhalos, cibinteg) + self.get_power_2halo(name1,name2,verbose, nu_obs_array, subhalos, cibinteg)
         else:
             return self.get_power_1halo(name1,name2) + self.get_power_2halo(name1,name2,verbose)

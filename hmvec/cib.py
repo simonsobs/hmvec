@@ -97,7 +97,7 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
         splitsed = np.array([])
 
         #Expand T's and A's over Frequency Range
-        Nf = 50     # num of frequencies in integrating range
+        Nf = 100     # num of frequencies in integrating range
         tempf_array = np.outer(temp_array, np.ones(Nf))
         Af_array = np.outer(A_array, np.ones(Nf))
 
