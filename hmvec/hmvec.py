@@ -781,17 +781,19 @@ class HaloModel(Cosmology):
                 rterm01 = self._get_hod(iname,lowklim=True)
                 b = self.get_bg(self.hods[iname]['Nc'],self.hods[iname]['Ns'],self.hods[iname]['ngal'])[:,None]
             elif iname.lower()=='cib':
-                rterm1 = self._get_cib(inu, subhalos, cibinteg)
+                rterm1 = self._get_cib(nu_obs[inu], subhalos, cibinteg)
                 rterm01 = 0
                 b = 0
+                inu+=1
             else: raise ValueError
 
             return rterm1,rterm01,b
 
         ms = self.ms[...,None]
+        freqctr = 0
 
-        iterm1,iterm01,b1 = _get_term(name, nu_obs[0])
-        iterm2,iterm02,b2 = _get_term(name2, nu_obs[1])
+        iterm1,iterm01,b1 = _get_term(name, freqctr)
+        iterm2,iterm02,b2 = _get_term(name2, freqctr)
 
         integral = _2haloint(iterm1)
         integral2 = _2haloint(iterm2)
