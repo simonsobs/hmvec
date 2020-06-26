@@ -692,6 +692,7 @@ class HaloModel(Cosmology):
         if name2 is None: name2 = name1
 
         if name1.lower() == 'cib' or name2.lower() == 'cib':
+            import pdb; pdb.set_trace()
             if len(nu_obs) > 2: 
                 raise ValueError('Frequency array must have at most 2 elements')
             elif len(nu_obs) == 1:
