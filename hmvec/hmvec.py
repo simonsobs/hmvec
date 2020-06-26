@@ -692,14 +692,13 @@ class HaloModel(Cosmology):
         if name2 is None: name2 = name1
 
         if name1.lower() == 'cib' or name2.lower() == 'cib':
-            import pdb; pdb.set_trace()
             if len(nu_obs) > 2: 
                 raise ValueError('Frequency array must have at most 2 elements')
             elif len(nu_obs) == 1:
                 nu_obs = np.array([nu_obs[0], nu_obs[0]])
             elif nu_obs.ndim != 2:
                 raise ValueError('Need a 2D array for the frequency')
-            if nu_obs.shape != (1, 2):
+            if nu_obs.shape != (2, 1):
                 raise ValueError('Only 1 pair of frequencies at a time')
             return self.get_power_1halo(name1,name2, nu_obs, subhalos, cibinteg) + self.get_power_2halo(name1,name2,verbose, nu_obs, subhalos, cibinteg)
         else:
