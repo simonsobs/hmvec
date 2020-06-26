@@ -23,6 +23,7 @@ hcos.set_cibParams('planck')
 # #Testing
 # hcos.testingCIB()
 
+#Autocorrelation Spectra
 for freqpair in frequencies:
     freqpair = np.array([freqpair])
     #Get 3D Power Spectra
@@ -38,14 +39,14 @@ for freqpair in frequencies:
     C_cen, dcdz_cen = hcos.C_ii(ells, redshifts, ks, Pjj_cen, dcdzflag=True)
 
     #Save data
-    np.save('pjj_tot_' + str(freqpair[0]) + 'X' + str(freqpair[1]), Pjj_tot)
-    np.save('pjj_1h_' + str(freqpair[0]) + 'X' + str(freqpair[1]), Pjj_1h)
-    np.save('pjj_2h_' + str(freqpair[0]) + 'X' + str(freqpair[1]), Pjj_2h)
-    np.save('pjj_cen_' + str(freqpair[0]) + 'X' + str(freqpair[1]), Pjj_cen)
-    np.save('C_tot_' + str(freqpair[0]) + 'X' + str(freqpair[1]), C_tot)
-    np.save('C_1h_' + str(freqpair[0]) + 'X' + str(freqpair[1]), C_1h)
-    np.save('C_2h_' + str(freqpair[0]) + 'X' + str(freqpair[1]), C_2h)
-    np.save('C_cen_' + str(freqpair[0]) + 'X' + str(freqpair[1]), C_cen)
+    np.save('pjj_tot_' + str(freqpair[0]) + 'X' + str(freqpair[0]), Pjj_tot)
+    np.save('pjj_1h_' + str(freqpair[0]) + 'X' + str(freqpair[0]), Pjj_1h)
+    np.save('pjj_2h_' + str(freqpair[0]) + 'X' + str(freqpair[0]), Pjj_2h)
+    np.save('pjj_cen_' + str(freqpair[0]) + 'X' + str(freqpair[0]), Pjj_cen)
+    np.save('C_tot_' + str(freqpair[0]) + 'X' + str(freqpair[0]), C_tot)
+    np.save('C_1h_' + str(freqpair[0]) + 'X' + str(freqpair[0]), C_1h)
+    np.save('C_2h_' + str(freqpair[0]) + 'X' + str(freqpair[0]), C_2h)
+    np.save('C_cen_' + str(freqpair[0]) + 'X' + str(freqpair[0]), C_cen)
 
 """
 Plots for a Single Frequency
