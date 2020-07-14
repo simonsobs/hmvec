@@ -763,6 +763,7 @@ class HaloModel(Cosmology):
 
         def _2haloint(iterm):
             integrand = self.nzm[...,None] * iterm * self.bh[...,None]
+            import pdb; pdb.set_trace()
             integral = np.trapz(integrand,ms,axis=-2)
             return integral
 

@@ -1,18 +1,26 @@
 import numpy as np
 import hmvec as hm
 import matplotlib.pyplot as plt
+from astropy.cosmology import Planck15
+cosmo = Planck15
 # import time
 
 #Setup Grid
-Nz = 700                                 # num of redshifts
-Nm = 500                                 # num of masses
+Nz = 210                                 # num of redshifts
+Nm = 91                                 # num of masses
 Nk = 1000                                # num of wavenumbers
-redshifts = np.linspace(0.01, 7, Nz)             # redshifts
-masses = np.geomspace(1e10, 1e15, Nm)           # masses
-ks = np.geomspace(1e-3, 100, Nk)               # wavenumbers
+redshifts = np.linspace(0.012, 10.22, Nz)             # redshifts
+logmass = np.arange(6,15.005,0.1)
+masses = 10**logmass           # masses
+ells = np.linspace(150., 2000., 20)
+ks = np.array([])
+chis = cosmo.comoving_distance(redshifts).value
+for ell in ells:
+    ks = np.append(ks, ell/chis) 
+# ks = np.geomspace(0.0155, 37, Nk)               # wavenumbers
+# Nl = 20
+# ells = np.arange(150, 2000, Nl)
 frequencies = np.array([[143],[217],[353],[545],[857],[3000]], dtype=np.double)     #Ghz
-Nl = 1000
-ells = np.arange(Nl)
 
 #Initialize Halo Model 
 hcos = hm.HaloModel(redshifts, ks, ms=masses)
@@ -20,8 +28,8 @@ hcos = hm.HaloModel(redshifts, ks, ms=masses)
 #Set CIB Parameters
 hcos.set_cibParams('planck')
 
-# #Testing
-# hcos.testingCIB()
+#Testing
+hcos.get_power_2halo('cib', nu_obs=[545])
 
 #Autocorrelation Spectra
 for freqpair in frequencies:
