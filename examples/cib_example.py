@@ -17,6 +17,7 @@ ks = np.array([])
 chis = cosmo.comoving_distance(redshifts).value
 for ell in ells:
     ks = np.append(ks, ell/chis) 
+ks = np.sort(ks)
 # ks = np.geomspace(0.0155, 37, Nk)               # wavenumbers
 # Nl = 20
 # ells = np.arange(150, 2000, Nl)
