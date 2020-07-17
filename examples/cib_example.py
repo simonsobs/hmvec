@@ -30,7 +30,7 @@ hcos = hm.HaloModel(redshifts, ks, ms=masses)
 hcos.set_cibParams('planck')
 
 #Testing
-hcos.get_power_2halo('cib', nu_obs=[545])
+hcos.get_power_2halo('cib', nu_obs=[[545]])
 
 #Autocorrelation Spectra
 for freqpair in frequencies:
