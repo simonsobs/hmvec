@@ -494,7 +494,7 @@ class HaloModel(Cosmology):
             self.cib_params['L_o'] = 1.0
         else:
             assert len(params) == 8, "New sets of parameters require exactly 8 parameters"
-        
+
         #Add Specific Parameters
         for key in params:
             if key not in paramslist:
@@ -702,10 +702,10 @@ class HaloModel(Cosmology):
             if len(nu_obs) > 2: 
                 raise ValueError('Frequency array must have at most 2 elements')
             elif len(nu_obs) == 1:
-                nu_obs = np.array([nu_obs[0], nu_obs[0]])
+                nu_obs = np.array([nu_obs, nu_obs])
             elif nu_obs.ndim != 2:
                 raise ValueError('Need a 2D array for the frequency')
-            if nu_obs.shape != (2, 1):
+            elif nu_obs.shape[0] > 2:
                 raise ValueError('Only 1 pair of frequencies at a time')
             return self.get_power_1halo(name1,name2, nu_obs, subhalos, cibinteg) + self.get_power_2halo(name1,name2,verbose, nu_obs, subhalos, cibinteg)
         else:
@@ -714,7 +714,7 @@ class HaloModel(Cosmology):
     def get_power_1halo(self,name="nfw",name2=None, nu_obs=None, subhalos=True, cibinteg='trap'):
         '''
         Keyword Arguments:
-        nu_obs [1darray] : cib frequencies to be cross correlated (at most 2 freq's)
+        nu_obs [2darray] : 1st axis - freq's to be cross correlated. 2nd axis - bandpass
         subhalos [bool]  : flag to add satellite galaxies
         cibinteg [str]   : integration method for subhalo masses for cib; either "trap" or "simps"
         '''
@@ -723,9 +723,11 @@ class HaloModel(Cosmology):
             if len(nu_obs) > 2: 
                 raise ValueError('Frequency array must have at most 2 elements')
             elif len(nu_obs) == 1:
-                nu_obs = np.array([nu_obs[0], nu_obs[0]])
+                nu_obs = np.array([nu_obs, nu_obs])
             elif nu_obs.ndim != 2:
                 raise ValueError('Need a 2D array for the frequency')
+            elif nu_obs.shape[0] > 2:
+                raise ValueError('Only 1 pair of frequencies at a time')
 
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
@@ -736,7 +738,10 @@ class HaloModel(Cosmology):
         elif (name in pnames) and (name2 in pnames):
             square_term = self._get_pressure(name)**2
         elif (name.lower()=='cib') and (name2.lower()=='cib'):
-            square_term = self._get_cib_square(nu_obs, subhalos, cibinteg)
+            if subhalos:
+                square_term = self._get_cib_square(nu_obs, subhalos, cibinteg)
+            else:
+                square_term = 0.
         else:
             square_term=1.
             for nm in [name,name2]:
@@ -754,18 +759,20 @@ class HaloModel(Cosmology):
     def get_power_2halo(self,name="nfw",name2=None,verbose=False,nu_obs=None, subhalos=True, cibinteg='trap'):
         '''
         Keyword Arguments:
-        nu_obs [1darray] : cib frequencies to be cross correlated (at most 2 freq's)
+        nu_obs [2darray] : 1st axis - freq's to be cross correlated. 2nd axis - bandpass
         subhalos [bool]  : flag to add satellite galaxies
         cibinteg [str]   : integration method for subhalo masses for cib; either "trap" or "simps"
         '''
         name2 = name if name2 is None else name2
         if name.lower() == 'cib' or name2.lower() == 'cib':
-            if len(nu_obs) > 2: 
-                raise ValueError('Frequency array must have at most 2 elements')
-            elif len(nu_obs) == 1:
+            if len(nu_obs) == 1:
                 nu_obs = np.array([nu_obs, nu_obs])
+            elif len(nu_obs) > 2: 
+                raise ValueError('Frequency array must have at most 2 elements')
             elif nu_obs.ndim != 2:
                 raise ValueError('Need a 2D array for the frequency')
+            elif nu_obs.shape[0] > 2:
+                raise ValueError('Only 1 pair of frequencies at a time')
             
 
         def _2haloint(iterm):
