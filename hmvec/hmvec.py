@@ -456,19 +456,23 @@ class HaloModel(Cosmology):
 
     def set_cibParams(self, name, **params):
         """
-        Required Parameters:
+        Values for parameters of CIB model. You can use a pre-existing set of parameters, slightly tweaked pre-existing set, or completely newly defined set of parameters.
+        
+        Required Arguments:
         name [string] : Name of parameter set. Presets: 'planck' and 'vierro'
 
-        Keyword Parameters:
-        alpha : SED - z evolution of dust temperature 
-        beta : SED - emissivity index at low frequency  
-        gamma : SED - frequency power law index at high frequency 
-        Td_o : SED - dust temp at z = 0 
-        delta : z evolution of normalization of L-M relation 
-        logM_eff : log(M_eff) in L-M relation 
-        var : variance of Gaussian part of L-M relation 
-        L_o : normalization constant for total luminosity
+        Keyword Arguments:
+        alpha [float] : SED - z evolution of dust temperature 
+        beta [float] : SED - emissivity index at low frequency  
+        gamma [float] : SED - frequency power law index at high frequency 
+        Td_o [float] : SED - dust temp at z = 0 
+        delta [float] : z evolution of normalization of L-M relation 
+        logM_eff [float] : log(M_eff) in L-M relation 
+        var [float] : variance of Gaussian part of L-M relation 
+        L_o [float] : normalization constant for total luminosity
         """
+        paramslist = ['alpha', 'beta', 'gamma', 'delta', 'Td_o', 'logM_eff', 'var', 'L_o']
+
         #Set up the Parameter Set
         if name.lower() == 'planck':        # Planck 2013
             self.cib_params['alpha'] = 0.36
@@ -490,10 +494,13 @@ class HaloModel(Cosmology):
             self.cib_params['L_o'] = 1.0
         else:
             assert len(params) == 8, "New sets of parameters require exactly 8 parameters"
-
+        
         #Add Specific Parameters
         for key in params:
+            if key not in paramslist:
+                raise ValueError(f'"{key}" is not a valid CIB parameter. Parameter names are case sensitive') 
             self.cib_params[key] = params[key]
+
 
     def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
 
@@ -756,14 +763,14 @@ class HaloModel(Cosmology):
             if len(nu_obs) > 2: 
                 raise ValueError('Frequency array must have at most 2 elements')
             elif len(nu_obs) == 1:
-                nu_obs = np.array([nu_obs[0], nu_obs[0]])
+                nu_obs = np.array([nu_obs, nu_obs])
             elif nu_obs.ndim != 2:
                 raise ValueError('Need a 2D array for the frequency')
             
 
         def _2haloint(iterm):
             integrand = self.nzm[...,None] * iterm * self.bh[...,None]
-            import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
             integral = np.trapz(integrand,ms,axis=-2)
             return integral
 
