@@ -459,7 +459,7 @@ class HaloModel(Cosmology):
         Values for parameters of CIB model. You can use a pre-existing set of parameters, slightly tweaked pre-existing set, or completely newly defined set of parameters.
         
         Required Arguments:
-        name [string] : Name of parameter set. Presets: 'planck' and 'vierro'
+        name [string] : Name of parameter set. Presets: 'planck13' and 'vierro'
 
         Keyword Arguments:
         alpha [float] : SED - z evolution of dust temperature 
@@ -474,7 +474,7 @@ class HaloModel(Cosmology):
         paramslist = ['alpha', 'beta', 'gamma', 'delta', 'Td_o', 'logM_eff', 'var', 'L_o']
 
         #Set up the Parameter Set
-        if name.lower() == 'planck':        # Planck 2013
+        if name.lower() == 'planck13':        # Planck 2013
             self.cib_params['alpha'] = 0.36
             self.cib_params['beta'] = 1.75
             self.cib_params['gamma'] = 1.7

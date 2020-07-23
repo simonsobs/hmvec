@@ -6,10 +6,10 @@ cosmo = Planck15
 # import time
 
 #Setup Grid
-Nz = 210                                 # num of redshifts
-Nm = 91                                 # num of masses
+Nz = 500                                 # num of redshifts
+Nm = 500                                 # num of masses
 Nk = 1000                                # num of wavenumbers
-redshifts = np.linspace(0.012, 10.22, Nz)             # redshifts
+redshifts = np.linspace(0.01, 10, Nz)             # redshifts
 logmass = np.arange(6,15.005,0.1)
 masses = 10**logmass           # masses
 ells = np.linspace(150., 2000., 20)
@@ -27,7 +27,7 @@ frequencies = np.array([[143],[217],[353],[545],[857],[3000]], dtype=np.double) 
 hcos = hm.HaloModel(redshifts, ks, ms=masses)
 
 #Set CIB Parameters
-hcos.set_cibParams('planck')
+hcos.set_cibParams('planck13')
 
 #Testing
 hcos.get_power_2halo('cib', nu_obs=[[545]])
