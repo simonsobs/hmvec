@@ -322,7 +322,7 @@ class HaloModel(Cosmology):
         cgs = rvirs/rgs
         sigmaT=constants.physical_constants['Thomson cross section'][0] # units m^2
         mElect=constants.physical_constants['electron mass'][0] / default_params['mSun']# units kg
-        ks,pkouts = generic_profile_fft(presFunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs,doMassNorm=False)
+        ks,pkouts = generic_profile_fft(presFunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs,do_mass_norm=False)
         self.pk_profiles[name] = pkouts.copy()*4*np.pi*(sigmaT/(mElect*constants.c**2))*(r200critz**3*((1+self.zs)**2/self.h_of_z(self.zs))[...,None])[...,None]
 
     def add_nfw_profile(self,name,numeric=False,
@@ -554,11 +554,12 @@ class HaloModel(Cosmology):
 
         #Integrate Subhalo Masses
         Nsatm = len(self.ms)
-        satms = np.geomspace(self.ms[0], self.ms, num=Nsatm, axis=-1)
+        # satms = np.geomspace(self.ms[0], self.ms, num=Nsatm, axis=-1)
+        satms = np.geomspace(self.ms[0]*.01, self.ms, num=Nsatm, axis=-1)
         if cibinteg.lower() == 'trap':
             fsat_m = np.trapz(integ(satms, self.ms[...,None]), satms, axis=-1)
         elif cibinteg.lower() == 'simps':
-            fsat_m = np.simps(integ(satms, self.ms[...,None]), satms, axis=-1)
+            fsat_m = simps(integ(satms, self.ms[...,None]), satms, axis=-1)
         else: raise ValueError('Invalid cibinteg')
 
         #Get Redshift Dependencies
@@ -831,21 +832,37 @@ class HaloModel(Cosmology):
 
 def sdndm(msat, mcen):
         ''' Satellite halo mass function '''
-
+        # https://iopscience.iop.org/article/10.1088/0004-637X/719/1/88
+        # Extra factor of m as we need dndm not dndlnm
         #Parameters
-        gamma_1    = 0.13
-        alpha_1    = -0.83
-        gamma_2    = 1.33
-        alpha_2    = -0.02
-        beta_2     = 5.67
-        zeta       = 1.19
+        gamma    = 0.3
+        alpha    = -0.7
+        beta     = -9.9
+        zeta       = 2.5
 
         #Calculation
-        dndm = (((gamma_1 * ((msat/mcen)**alpha_1)) +
-            (gamma_2 * ((msat/mcen)**alpha_2))) *
-            (np.exp(-(beta_2) * ((msat / mcen)**zeta))))
+        dndm = 1/msat*((gamma * ((msat/mcen)**alpha))*
+            (np.exp((beta) * ((msat / mcen)**zeta))))
 
         return dndm
+
+# def sdndm(msat, mcen):
+#         ''' Satellite halo mass function '''
+
+#         #Parameters
+#         gamma_1    = 0.13
+#         alpha_1    = -0.83
+#         gamma_2    = 1.33
+#         alpha_2    = -0.02
+#         beta_2     = 5.67
+#         zeta       = 1.19
+
+#         #Calculation
+#         dndm = (((gamma_1 * ((msat/mcen)**alpha_1)) +
+#             (gamma_2 * ((msat/mcen)**alpha_2))) *
+#             (np.exp(-(beta_2) * ((msat / mcen)**zeta))))
+
+#         return dndm
 
 
 """
