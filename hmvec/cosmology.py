@@ -335,9 +335,9 @@ class Cosmology(object):
         return limber_integral(ells,zs,ks,Ppp,zs,1,1,hzs,chis)
 
     def C_ii(self,ells,zs,ks,Pjj,dcdzflag=False):
-        a = 1.0/(1.0+zs)        # scale factor
-        chis = self.comoving_radial_distance(zs) # Mpc
         hzs = self.h_of_z(zs)           # 1/Mpc
+        a = 1.0/(1.0+zs) /hzs       # scale factor
+        chis = self.comoving_radial_distance(zs) # Mpc
 
         return limber_integral(ells, zs, ks, Pjj, zs, a, a, hzs, chis, dcdzflag)
 
