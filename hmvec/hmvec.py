@@ -833,7 +833,7 @@ class HaloModel(Cosmology):
         return np.trapz(self.nzm * sfr[:,:,0], self.ms, axis=-1)
 
 
-def sdndm(msat, mcen, funcname=Tinker):
+def sdndm(msat, mcen, funcname='Tinker'):
         '''Satellite halo mass function 
         Tinker: https://iopscience.iop.org/article/10.1088/0004-637X/719/1/88
         Jiang: '''
