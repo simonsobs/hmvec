@@ -781,7 +781,7 @@ class HaloModel(Cosmology):
 
         def _2haloint(iterm):
             integrand = self.nzm[...,None] * iterm * self.bh[...,None]
-            # import pdb; pdb.set_trace()
+#             import pdb; pdb.set_trace()
             integral = np.trapz(integrand,ms,axis=-2)
             return integral
 
@@ -848,7 +848,7 @@ def sdndm(msat, mcen, funcname='Tinker'):
             zeta       = 1.19
 
             #Calculation
-            dndm = (((gamma_1 * ((msat/mcen)**alpha_1)) +
+            dndm = 1/msat * (((gamma_1 * ((msat/mcen)**alpha_1)) +
                 (gamma_2 * ((msat/mcen)**alpha_2))) *
                 (np.exp(-(beta_2) * ((msat / mcen)**zeta))))
 
