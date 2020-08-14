@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.interpolate import interp1d
+from os import path
 
 """
 Implements Tinker et al 2010 and Tinker et al 2008
@@ -59,7 +60,8 @@ def f_nu(nu,zs,delta=200.,norm_consistency=True,
     gamma = gamma0 * (1+zs)**(-0.01)
     unnormalized = (1. + (beta*nu)**(-2.*phi))*(nu**(2*eta))*np.exp(-gamma*nu**2./2.)
     if norm_consistency:
-        izs,ialphas = np.loadtxt("alpha_consistency.txt",unpack=True) # FIXME: hardcoded
+        file_path = path.join(path.dirname(__file__), '../data/alpha_consistency.txt')
+        izs,ialphas = np.loadtxt(file_path,unpack=True) # FIXME: hardcoded
         alpha = interp1d(izs,ialphas,bounds_error=True)(zs)
     return alpha * unnormalized 
 
