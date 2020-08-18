@@ -151,6 +151,12 @@ class Cosmology(object):
         plin = (pnorm/tnorm) * tk**2. * ks**(self.params['ns'])
         return (self.as8**2.) *plin
  
+    def P_lin_slow(self,ks,zs,kmax = 0.1):
+        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False, 
+                                                     hubble_units=False, k_hunit=False, kmax=kmax,
+                                                     zmax=zs.max()+1.)
+        plin = PK.P(zs, ks,grid=True)
+        return (self.as8**2.) * plin
 
     def Tk(self,ks,type ='eisenhu_osc'):
         """

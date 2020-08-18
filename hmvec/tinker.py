@@ -24,6 +24,7 @@ default_params = {
     }
 
 def bias(nu,delta=200.):
+    # Eq 6 of Tinker 2010
     deltac = constants['deltac']
     y = np.log10(delta)
     A = lambda y: 1. + 0.24*y*np.exp(-(4./y)**4.)
