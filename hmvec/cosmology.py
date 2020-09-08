@@ -336,10 +336,10 @@ class Cosmology(object):
 
     def C_ii(self,ells,zs,ks,Pjj,dcdzflag=False):
         hzs = self.h_of_z(zs)           # 1/Mpc
-        a = 1.0/(1.0+zs) /hzs       # scale factor
+        a = 1.0/(1.0+zs)              # scale factor
         chis = self.comoving_radial_distance(zs) # Mpc
 
-        return limber_integral(ells, zs, ks, Pjj, zs, a, a, hzs, chis, dcdzflag)
+        return limber_integral(ells, zs, ks, Pjj, zs, a/hzs, a/hzs, hzs, chis, dcdzflag)
 
     def total_matter_power_spectrum(self,Pnn,Pne,Pee):
         omtoth2 = self.p['omch2'] + self.p['ombh2']
