@@ -586,7 +586,7 @@ class HaloModel(Cosmology):
             fsat = self._get_fsat(freq, cibinteg, satmf)
         else:
             fsat = 0.
-        return uhalo * (fcen+fsat)
+        return fcen + uhalo*fsat
     
     def _get_cib_square(self, freq, satflag=True, cibinteg='trap', satmf='Tinker'):
         '''Assumes NFW mass profile for the centrals'''
@@ -754,6 +754,8 @@ class HaloModel(Cosmology):
                     square_term *= self._get_matter(nm)
                 elif nm in pnames:
                     square_term *= self._get_pressure(nm)
+                elif name.lower()=='cib':
+                    square_term *= self._get_cib(nu_obs[0], subhalos, cibinteg, satmf)
                 else: raise ValueError
 
         integrand = self.nzm[...,None] * square_term
