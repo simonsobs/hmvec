@@ -56,7 +56,7 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
     def highSED(nu, A):
         return A * nu**(-gamma)
     def wholeSED(x, splitpoint, T, A):
-        return np.where(x < splitpoint, lowSED(x, T), highSED(x, A))
+        return np.where(x < splitpoint, lowSED(x, T)/lowSED(splitpoint,T), highSED(x, A)/highSED(splitpoint,A))
         
     #Is there a bandpass or just 1 frequency?
     bandpassflag = False if len(nu_sample) == 1 else True
@@ -113,6 +113,9 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
             #Calculation
             lowranges = np.logspace(np.log10(freq_array[:isplit, 0]), np.log10(freq_array[:isplit, 1]), num=Nf, axis=-1)
             lowsed = np.trapz(lowSED(lowranges, tempf_array[:isplit, :]), x=lowranges, axis=-1)
+
+            #Normalization
+            lowsed /= lowSED(nu_o_array[:isplit], temp_array[:isplit])
         else:
             isplit = 0
 
@@ -123,6 +126,9 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
             #Calculation
             highranges = np.logspace(np.log10(freq_array[ihigh:,0]), np.log10(freq_array[ihigh:,1]), num=Nf, axis=-1)
             highsed = np.trapz(highSED(highranges, Af_array[ihigh:, :]), x=highranges, axis=-1)
+
+            #Normalization
+            highsed /= highSED(nu_o_array[ihigh:], A_array[ihigh:])
         else:
             ihigh = len(z)
 
@@ -133,6 +139,8 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
         #Calculation
         splitsed_low = np.trapz(lowSED(splitranges_low, tempf_array[isplit:ihigh, :]), x=splitranges_low, axis=-1)
         splitsed_high = np.trapz(highSED(splitranges_high, Af_array[isplit:ihigh, :]), x=splitranges_high, axis=-1)
+        splitsed_low /= lowSED(nu_o_array[isplit:ihigh], temp_array[isplit:ihigh])
+        splitsed_high /= highSED(nu_o_array[isplit:ihigh], A_array[isplit:ihigh])
         splitsed = splitsed_low + splitsed_high
 
         #Combine to get total SED
@@ -143,8 +151,8 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
 
     #Single Frequency
     else:            
-        sed = np.where(freq_array < nu_o_array, lowSED(freq_array, temp_array), highSED(freq_array, A_array))
-    
+        sed = np.where(freq_array < nu_o_array, lowSED(freq_array, temp_array)/lowSED(nu_o_array, temp_array), highSED(freq_array, A_array)/highSED(nu_o_array, A_array) )
+
 
     #Plot the whole spectrum
     if plot:
@@ -170,10 +178,10 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
             spectrum = wholeSED(nu_range, nu_o, temp_array[zi], A_array[zi])
             
             #Plot curves
-            ax[iplt].plot(nu_range, spectrum, color=colors[iplt], label=f'z = {z[zi]:0.2f}')
+            ax[iplt].plot(nu_range, spectrum, color=colors[iplt], label=f'z = {z[zi]}')
  
             #Marking v_o on the graph
-            ax[iplt].axvline(x = nu_o, ls=':', color='k', lw=0.4, label=rf'$\nu_o$ = {nu_o:0.2e}')
+            ax[iplt].axvline(x = nu_o, ls=':', color='k', lw=0.4, label=rf'$\nu_o$ = {nu_o/1e9:.2f} Ghz')
             
             #Marking bandpass on graph
             if bandpassflag:
@@ -181,12 +189,12 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
                 highend = freq_array[zi, 1]
                 bandpass_range = np.logspace(np.log10(lowend), np.log10(highend))
                 ax[iplt].fill_between(bandpass_range, wholeSED(bandpass_range, nu_o, temp_array[zi], A_array[zi]), 
-                                        color=colorsalpha[iplt], edgecolors='none', label=f'Bandpass: {lowend:.2e} to {highend:.2e} Hz')
+                                        color=colorsalpha[iplt], edgecolors='none', label=f'Bandpass: {lowend/1e9:.2f} to {highend/1e9:.2f} Ghz')
 
 
             #Marking nu_sample at sed frame on the graph
             else:
-                ax[iplt].axvline(x = freq_array[zi], color=colors[iplt], lw=0.4, label=rf'$\nu_{{obs}} = {freq_array[zi]:0.2e}$ Hz in rest frame')
+                ax[iplt].axvline(x = freq_array[zi], color=colors[iplt], lw=0.4, label=rf'$\nu_{{obs}} = {freq_array[zi]/1e9:.2f} Ghz in rest frame')
 
             #Plot Properties
             ax[iplt].set_xscale('log')
