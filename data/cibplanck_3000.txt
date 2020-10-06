@@ -1,0 +1,10 @@
+#ell freq1 error uplim freq2 error uplim ...
+187 5.69e5 5.69e5 True 1.12e5 0.85e5 False 3.94e4 3.88e4 False 8.92e3 12.4e3 False 5.59e2 26.7e2 False 0 0 False
+320 7.89e4 3.14e4 False 7.49e4 2.09e4 False 3.04e4 0.85e4 False 1.13e4 0.27e4 False 2.34e3 0.71e3 False 0 0 False
+502 3.46e4 1.15e4 False 3.10e4 0.79e4 False 1.23e4 0.33e4 False 4.49e3 1.15e3 False 1.18e3 0.34e3 False 0 0 False
+684 2.90e4 0.70e4 False 2.24e4 0.47e4 False 9.35e3 2.10e3 False 2.87e3 0.73e3 False 6.88e2 2.61e2 False 0 0 False
+890 1.87e4 0.47e4 False 1.62e4 0.30e4 False 6.61e3 1.34e3 False 1.99e3 0.45e3 False 2.34e2 1.66e2 False 0 0 False
+1158 1.43e4 0.40e4 False 1.17e4 0.22e4 False 4.71e3 0.93e3 False 1.25e3 0.31e3 False 3.55e2 1.43e2 False 0 0 False
+1505 1.09e4 0.41e4 False 8.30e3 1.85e3 False 3.12e3 0.76e3 False 1.14e3 0.30e3 False 2.41e2 1.07e2 False 0 0 False
+1956 1.05e4 0.58e4 False 8.04e3 2.39e3 False 3.16e3 1.00e3 False 9.67e2 3.44e2 False 2.58e2 1.14e2 False 0 0 False
+2649 1.06e4 1.04e4 False 6.47e3 3.27e3 False 2.61e3 1.38e3 False 0 0 False 0 0 False 0 0 False
