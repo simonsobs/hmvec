@@ -72,7 +72,7 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
             freq_array = np.outer((1+z), nu_sample)
         else:
             freq_array = (1+z) * nu_sample
-    #Rest Frame
+    #Already in Rest Frame
     elif nuframe.lower() == 'rest':
         if bandpassflag:
             freq_array = np.outer(np.ones(z.shape), nu_sample)
@@ -152,7 +152,7 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
     #Single Frequency
     else:            
         sed = np.where(freq_array < nu_o_array, lowSED(freq_array, temp_array)/lowSED(nu_o_array, temp_array), highSED(freq_array, A_array)/highSED(nu_o_array, A_array) )
-
+         
 
     #Plot the whole spectrum
     if plot:
@@ -164,52 +164,63 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
         #Setup
         nu_range = np.logspace(11, 14, 2000)
         iplt = 0
-        fig, ax = plt.subplots(len(sampleindices), 1, sharey=True, figsize=(10, 20))
+        # fig, ax = plt.subplots(len(sampleindices), 1, sharey=True, figsize=(10, 20))
         alphavalue = 0.2
         colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
         colorsalpha = c.to_rgba_array(colors, alphavalue)
 
         #Plot
-        for zi, nu_o in enumerate(nu_o_array):
-            if not (zi in sampleindices):
-                continue
-
+        for zi in sampleindices:
+            nu_o = nu_o_array[zi]
+            
             #Calculation
-            spectrum = wholeSED(nu_range, nu_o, temp_array[zi], A_array[zi])
+            spectrum = wholeSED(nu_range, nu_o_array[zi], temp_array[zi], A_array[zi])
             
-            #Plot curves
-            ax[iplt].plot(nu_range, spectrum, color=colors[iplt], label=f'z = {z[zi]}')
+            plt.plot(nu_range, spectrum, color=colors[iplt], label=fr'z = {z[zi]:0.2f}, $\nu_o$ = {nu_o/1e9:,.0f} Ghz')
+            
+            plt.xscale('log')
+            plt.yscale('log')
+            plt.xlabel(r'$\nu$ (Hz)')
+            plt.ylabel(r'$\Theta (\nu, z)$')
+            plt.legend()
+            plt.ylim(bottom=1e-4)
+
+            # #Plot curves
+            # ax[iplt].plot(nu_range, spectrum, color=colors[iplt], label=f'z = {z[zi]:0.2f}')
  
-            #Marking v_o on the graph
-            ax[iplt].axvline(x = nu_o, ls=':', color='k', lw=0.4, label=rf'$\nu_o$ = {nu_o/1e9:.2f} Ghz')
+            # #Marking v_o on the graph
+            # ax[iplt].axvline(x = nu_o, ls=':', color='k', lw=0.4, label=rf'$\nu_o$ = {nu_o/1e9:,.0f} Ghz')
             
-            #Marking bandpass on graph
-            if bandpassflag:
-                lowend = freq_array[zi, 0]
-                highend = freq_array[zi, 1]
-                bandpass_range = np.logspace(np.log10(lowend), np.log10(highend))
-                ax[iplt].fill_between(bandpass_range, wholeSED(bandpass_range, nu_o, temp_array[zi], A_array[zi]), 
-                                        color=colorsalpha[iplt], edgecolors='none', label=f'Bandpass: {lowend/1e9:.2f} to {highend/1e9:.2f} Ghz')
+
+            # #Marking bandpass on graph
+            # if bandpassflag:
+            #     lowend = freq_array[zi, 0]
+            #     highend = freq_array[zi, 1]
+            #     bandpass_range = np.logspace(np.log10(lowend), np.log10(highend))
+            #     ax[iplt].fill_between(bandpass_range, wholeSED(bandpass_range, nu_o, temp_array[zi], A_array[zi]), 
+            #                             color=colorsalpha[iplt], edgecolors='none', label=f'Bandpass: {lowend/1e9:,.0f} to {highend/1e9:,.0f} Ghz')
 
 
-            #Marking nu_sample at sed frame on the graph
-            else:
-                ax[iplt].axvline(x = freq_array[zi], color=colors[iplt], lw=0.4, label=rf'$\nu_{{obs}} = {freq_array[zi]/1e9:.2f} Ghz in rest frame')
+            # #Marking nu_sample at sed frame on the graph
+            # else:
+            #     ax[iplt].axvline(x = freq_array[zi], color=colors[iplt], lw=0.4, label=rf'$\nu_{{obs}}$ = {freq_array[zi]/1e9:,.0f} Ghz in rest frame')
 
-            #Plot Properties
-            ax[iplt].set_xscale('log')
-            ax[iplt].set_yscale('log')
-            ax[iplt].set_ylabel(r'$\Theta (\nu, z)$')
-            ax[iplt].set_xlabel(r'$\nu$ (Hz)')
-            ax[iplt].legend()
+            # #Plot Properties
+            # ax[iplt].set_xscale('log')
+            # ax[iplt].set_yscale('log')
+            # ax[iplt].set_xlabel(r'$\nu$ (Hz)')
+            # ax[iplt].set_ylabel(r'$\Theta (\nu, z)$')
+            # ax[iplt].legend()
 
             iplt += 1
         
+        plt.savefig('sed_norm_planck.pdf', dpi=900, bbox_inches='tight');
+
         #Save file
-        if bandpassflag:
-            plt.savefig('sed_range.pdf', dpi=900, bbox_inches='tight');
-        else:
-            plt.savefig('sed_1freq.pdf', dpi=900, bbox_inches='tight');
+        # if bandpassflag:
+        #     plt.savefig('sed_range.pdf', dpi=900, bbox_inches='tight');
+        # else:
+        #     plt.savefig('sed_1freq.pdf', dpi=900, bbox_inches='tight');
 
     return sed
 
@@ -262,10 +273,11 @@ def luminosity(z, M, Nks, nu, nuframe='obs', a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20
 
     return L_o * L
 
-# #Testing
+#Testing
 # lamdarange = np.array([8.0e-6, 1000.0e-6])
 # nurange = 3.0e8 / lamdarange
-# #redshifts = np.linspace(0.01, 5, 500)
-# redshifts = np.array([2.0])
-# sed = capitalTheta(nurange, 'obs', redshifts, alpha=0.2, beta=1.6, gamma=1.7, T_o=20.7, plot=False)
+# nurange = np.array([857.])*1e9
+# redshifts = np.linspace(0.01, 6, 200)
+# # redshifts = np.array([2.0])
+# sed = capitalTheta(nurange, 'obs', redshifts, alpha=0.36, beta=1.75, gamma=1.7, T_o=24.4, plot=True)
 # print(sed)
