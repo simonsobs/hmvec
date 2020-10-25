@@ -77,3 +77,14 @@ def simple_f_nu(nu,delta=200.):
     c = 1.19
     return A* (1.+((sigma/b)**(-a))) * np.exp(-c/sigma**2.)
 
+
+def NlnMsub(Msubs,Mhosts):
+    """
+    Eq 12 of the *published* version of J. L. Tinker and A. R. Wetzel, apj 719, 88 (2010),
+    0909.1325
+    Differs from arxiv in the 0.3 prefactor
+    Accepts 1d array of Msubs and Mhosts
+    and returns 2d array for (Msubs,Mhosts)
+    """
+    mrat = Msubs[:,None]/Mhosts[None,:]
+    return 0.3 * (mrat**(-0.7)) * np.exp(-9.9 * (mrat**2.5))
