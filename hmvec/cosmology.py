@@ -17,7 +17,7 @@ results. It could be a test-bed for converging towards that.
 
 class Cosmology(object):
 
-    def __init__(self,params,halofit=None,engine='camb'):
+    def __init__(self,params=None,halofit=None,engine='camb'):
         assert engine in ['camb','class']
         if engine=='class': raise NotImplementedError
         
@@ -29,6 +29,15 @@ class Cosmology(object):
         self._init_cosmology(self.p,halofit)
 
 
+    def sigma_crit(self,zlens,zsource):
+        Gval = 4.517e-48 # Newton G in Mpc,seconds,Msun units
+        cval = 9.716e-15 # speed of light in Mpc,second units
+        Dd = self.angular_diameter_distance(zlens)
+        Ds = self.angular_diameter_distance(zsource)
+        Dds = np.asarray([self.results.angular_diameter_distance2(zl,zsource) for zl in zlens])
+        return cval**2 * Ds / 4 / np.pi / Gval / Dd / Dds
+        
+
     def P_mm_linear(self,zs,ks):
         pass
 
@@ -37,6 +46,9 @@ class Cosmology(object):
 
     def comoving_radial_distance(self,z):
         return self.results.comoving_radial_distance(z)
+
+    def angular_diameter_distance(self,z):
+        return self.results.angular_diameter_distance(z)
 
     def hubble_parameter(self,z):
         # H(z) in km/s/Mpc
@@ -139,6 +151,12 @@ class Cosmology(object):
         plin = (pnorm/tnorm) * tk**2. * ks**(self.params['ns'])
         return (self.as8**2.) *plin
  
+    def P_lin_slow(self,ks,zs,kmax = 0.1):
+        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False, 
+                                                     hubble_units=False, k_hunit=False, kmax=kmax,
+                                                     zmax=zs.max()+1.)
+        plin = PK.P(zs, ks,grid=True)
+        return (self.as8**2.) * plin
 
     def Tk(self,ks,type ='eisenhu_osc'):
         """

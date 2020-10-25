@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.interpolate import interp1d
+import os
 
 """
 Implements Tinker et al 2010 and Tinker et al 2008
@@ -23,6 +24,7 @@ default_params = {
     }
 
 def bias(nu,delta=200.):
+    # Eq 6 of Tinker 2010
     deltac = constants['deltac']
     y = np.log10(delta)
     A = lambda y: 1. + 0.24*y*np.exp(-(4./y)**4.)
@@ -59,7 +61,8 @@ def f_nu(nu,zs,delta=200.,norm_consistency=True,
     gamma = gamma0 * (1+zs)**(-0.01)
     unnormalized = (1. + (beta*nu)**(-2.*phi))*(nu**(2*eta))*np.exp(-gamma*nu**2./2.)
     if norm_consistency:
-        izs,ialphas = np.loadtxt("alpha_consistency.txt",unpack=True) # FIXME: hardcoded
+        aroot = os.path.dirname(__file__)+"/../data/alpha_consistency.txt"
+        izs,ialphas = np.loadtxt(aroot,unpack=True) # FIXME: hardcoded
         alpha = interp1d(izs,ialphas,bounds_error=True)(zs)
     return alpha * unnormalized 
 
@@ -74,3 +77,14 @@ def simple_f_nu(nu,delta=200.):
     c = 1.19
     return A* (1.+((sigma/b)**(-a))) * np.exp(-c/sigma**2.)
 
+
+def NlnMsub(Msubs,Mhosts):
+    """
+    Eq 12 of the *published* version of J. L. Tinker and A. R. Wetzel, apj 719, 88 (2010),
+    0909.1325
+    Differs from arxiv in the 0.3 prefactor
+    Accepts 1d array of Msubs and Mhosts
+    and returns 2d array for (Msubs,Mhosts)
+    """
+    mrat = Msubs[:,None]/Mhosts[None,:]
+    return 0.3 * (mrat**(-0.7)) * np.exp(-9.9 * (mrat**2.5))

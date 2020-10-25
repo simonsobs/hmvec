@@ -85,18 +85,20 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     
 class HaloModel(Cosmology):
     def __init__(self,zs,ks,ms=None,params=None,mass_function="sheth-torman",
-                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
+                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accurate_sigma2=False):
         self.zs = np.asarray(zs)
         self.ks = ks
+        self.accurate_sigma2 = accurate_sigma2
         Cosmology.__init__(self,params,halofit)
         
         self.mdef = mdef
         self.mode = mass_function
-        self.ms = ms
         self.hods = {}
 
         # Mass function
-        if ms is not None: self.init_mass_function(ms)
+        if ms is not None: 
+            self.ms = np.asarray(ms)
+            self.init_mass_function(self.ms)
         
         # Profiles
         self.uk_profiles = {}
@@ -129,7 +131,10 @@ class HaloModel(Cosmology):
         kmax = self.p['sigma2_kmax']
         numks = self.p['sigma2_numks']
         self.ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
-        self.sPzk = self.P_lin(self.ks_sigma2,self.zs)
+        if self.accurate_sigma2:
+            self.sPzk = self.P_lin_slow(self.ks_sigma2,self.zs,kmax=kmax)
+        else:
+            self.sPzk = self.P_lin(self.ks_sigma2,self.zs)
         ks = self.ks_sigma2[None,None,:]
         R = self.R_of_m(ms)[None,:,None]
         W2 = Wkr(ks,R,self.p['Wkr_taylor_switch'])**2.
@@ -582,7 +587,55 @@ class HaloModel(Cosmology):
             print("Two-halo consistency2: " , consistency2,integral2)
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
-        
+    def sigma_1h_profiles(self,thetas,Ms,concs,sig_theta=None,delta=200,rho='mean',rho_at_z=True):
+        import clusterlensing as cl
+        zs = self.zs
+        Ms = np.asarray(Ms)
+        concs = np.asarray(concs)
+        chis = self.angular_diameter_distance(zs)
+        rbins = chis * thetas
+        offsets = chis * sig_theta if sig_theta is not None else None
+        if rho=='critical': rhofunc = self.rho_critical_z 
+        elif rho=='mean': rhofunc = self.rho_matter_z
+        rhoz = zs if rho_at_z else zs * 0
+        Rdeltas = R_from_M(Ms,rhofunc(rhoz),delta=delta)
+        rs = Rdeltas / concs
+        rhocrits = self.rho_critical_z(zs)
+        delta_c =  Ms / 4 / np.pi / rs**3 / rhocrits / Fcon(concs)
+        smd = cl.nfw.SurfaceMassDensity(rs, delta_c, rhocrits,rbins=rbins,offsets=offsets)
+        sigma = smd.sigma_nfw()
+        return sigma
+
+    def kappa_1h_profiles(self,thetas,Ms,concs,zsource,sig_theta=None,delta=200,rho='mean',rho_at_z=True):
+        sigma = self.sigma_1h_profiles(thetas,Ms,concs,sig_theta=sig_theta,delta=delta,rho=rho,rho_at_z=rho_at_z)
+        sigmac = self.sigma_crit(self.zs,zsource)
+        return sigma / sigmac
+
+    def kappa_2h_profiles(self,thetas,Ms,zsource,delta=200,rho='mean',rho_at_z=True,lmin=100,lmax=10000,verbose=True):
+        from scipy.special import j0
+        zlens = self.zs
+        sigmac = self.sigma_crit(zlens,zsource)
+        rhomz = self.rho_matter_z(zlens)
+        chis = self.comoving_radial_distance(zlens)
+        DAz = self.results.angular_diameter_distance(zlens)
+        ells = self.ks*chis
+        sel = np.logical_and(ells>lmin,ells<lmax)
+        ells = ells[sel]
+        #Array indexing is as follows:
+        #[z,M,k/r]
+        Ps = self.Pzk[:,sel]
+        bhs = []
+        for i in range(zlens.shape[0]): # vectorize this
+            bhs.append( interp1d(self.ms,self.bh[i])(Ms))
+        bhs = np.asarray(bhs)
+        if verbose:
+            print("bias ",bhs)
+            print("sigmacr ", sigmac)
+        ints = []
+        for theta in thetas: # vectorize
+            integrand = rhomz * bhs * Ps / (1+zlens)**3. / sigmac / DAz**2 * j0(ells*theta) * ells / 2./ np.pi
+            ints.append( np.trapz(integrand,ells) )
+        return np.asarray(ints)
 
 """
 Mass function
