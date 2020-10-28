@@ -33,18 +33,27 @@ def Ngg(ngalMpc3):
 def pgv(kls,):
     pass
 
-def pge_err(pgv_int,kstar,zstar,volume,kss,ks_bin_edges,pggtot,cltot):
+def pge_err_core(pgv_int,kstar,chistar,volume_gpc3,kss,ks_bin_edges,pggtot,Cls):
 
     """
     pgv_int: \int dkl kl^2 Pgv^2/Pggtot
-    kstar: kSZ radial weight function at zstar
-    zstar: mean redshift of galaxy survey
-    volume: volume in gpc3
+    kstar: kSZ radial weight function at chistar
+    chistar: comoving distance to galaxy survey
+    volume_gpc3: volume in gpc3
     kss: short wavelength k on which pggtot and cltot are defined
     
     
     """
-    pass
+    volume = volume_gpc3 * 1e9
+    ints = []
+    cltot = get_interpolated_cls(Cls,chistar,kss)
+    integrand = (kss/(pggtot * cltot))
+    for kleft,kright in zip(ks_bin_edges[:-1],ks_bin_edges[1:]):
+        sel = np.s_[np.logical_and(kss>kleft,kss<=kright)]
+        y = _sanitize(integrand[sel])
+        x = kss[sel]
+        ints.append(np.trapz(y,x))
+    return (volume * kstar**2 / 12 / np.pi**3 / chistar**2. * pgv_int * np.asarray(ints))**(-0.5)
 
 
 def get_kmin(volume_gpc3):
@@ -93,16 +102,16 @@ class kSZ(HaloModel):
                  electron_profile_nxs=None,electron_profile_xmax=None,
                  skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None,
                  mthreshs_override=None,
-                verbose=False,
-                b1=None,b2=None):
+                 verbose=False,
+                 b1=None,b2=None):
 
         if ms is None: ms = np.geomspace(defaults['min_mass'],defaults['max_mass'],defaults['num_mass'])
         volumes_gpc3 = np.atleast_1d(volumes_gpc3)
         assert len(zs)==len(volumes_gpc3)==len(ngals_mpc3)
         ngals_mpc3 = np.asarray(ngals_mpc3)
         ks = np.geomspace(kS_min,kS_max,num_kS_bins)
+        self.ks = ks
         self.mu = np.linspace(-1.,1.,num_mu_bins)
-        self.kLs = []
         if verbose: print('Defining HaloModel')
         HaloModel.__init__(self,zs,ks,ms=ms,params=params,mass_function=mass_function,
                  halofit=halofit,mdef=mdef,nfw_numeric=nfw_numeric,skip_nfw=skip_nfw)
@@ -132,58 +141,71 @@ class kSZ(HaloModel):
             self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=False,b1=b1,b2=b1) 
             self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=False,b1=b1) 
             
-        # SF: Mat's code used a different k_min for each z if the volumes are different, but
-        # for speed, I've changed it to use a single k_min for all z - this lets us evaluate
-        # all P_matter values we need in one shot
+        # Warn user that k_min is the same for all zs (thanks to Simon Foreman for speed-up here)
         if np.max(volumes_gpc3) != np.min(volumes_gpc3):
             warnings.warn('Using equal k_min at each z, despite different volumes at each z')
  
         # Define log-spaced array of k values, and get P_linear and f(z)
         # on grid in z and k
-        kL = np.geomspace(get_kmin(np.max(volumes_gpc3)),kL_max,num_kL_bins)
-        p = self._get_matter_power(self.zs,kL,nonlinear=False)
+        self.kLs = np.geomspace(get_kmin(np.max(volumes_gpc3)),kL_max,num_kL_bins)
+        p = self._get_matter_power(self.zs,self.kLs,nonlinear=False)
         growth = self.results.get_redshift_evolution(
-            kL, 
+            self.kLs, 
             self.zs, 
             ['growth']
         )[:,:,0]
-    
+
+        self.kstars = []
+        self.chistars = []
+        self.Vs = volumes_gpc3
+        self.vrec = []
+        self.sPggtot = []
+        self.sPge = []
         for zindex,volume_gpc3 in enumerate(volumes_gpc3):
-            self.kLs.append(kL.copy())
-            self.Pmms.append(np.resize(p[zindex],(self.mu.size,self.kLs[zindex].size)))
+            self.Pmms.append(np.resize(p[zindex],(self.mu.size,self.kLs.size)))
             self.fs.append(growth[:,zindex])
             z = self.zs[zindex]
             a = 1./(1.+z)
             H = self.results.h_of_z(z)
-            self.d2vs.append(  self.fs[zindex]*a*H / kL )
+            self.kstars.append(self.ksz_radial_function(zindex))
+            self.d2vs.append(  self.fs[zindex]*a*H / self.kLs )
             self.adotf.append(self.fs[zindex]*a*H)
 
+            self.chistars.append( self.results.comoving_radial_distance(z) )
 
-
-######## MAT'S VERSION - slow for many z's 
-#         for zindex,volume_gpc3 in enumerate(volumes_gpc3):
-#             if verbose: print('Getting properties for zindex %d' % zindex)
-#             kL = np.geomspace(get_kmin(volume_gpc3),kL_max,num_kL_bins)
-#             self.kLs.append(kL.copy())
-#             p = self._get_matter_power(self.zs[zindex],self.kLs[zindex],nonlinear=False)
-#             self.Pmms.append(np.resize(p,(self.mu.size,kL.size)))
-#             self.fs.append( self.results.get_redshift_evolution(self.kLs[zindex], self.zs[zindex], ['growth']).ravel() )
-#             z = self.zs[zindex]
-#             a = 1./(1.+z)
-#             H = self.results.h_of_z(z)
-#             self.d2vs.append(  self.fs[zindex]*a*H / kL )
-#             self.adotf.append(self.fs[zindex]*a*H)
-########    
-
-        # self.D = self.cc.D_growth(self.cc.z2a(self.z),"camb_anorm")
-        # self.T = lambda x: self.cc.transfer(x)
-        # self.alpha_func = lambda x: (2. * x**2. * self.T(x)) / (3.* self.cc.Omega_m * self.cc.results.h_of_z(0)**2.) * self.D
-        
-        # self.chi_star = self.cc.results.comoving_radial_distance(redshift)
+            # Compute P_gg + N_gg and P_gv for fiducial and "true" parameters, as functions of k_L
+            bg = self.hods['g']['bg'][zindex]
+            ngal = ngals_mpc3[zindex]
+            ngg = Ngg(ngal)
+            flPgg = self.lPgg(zindex,bg1=bg,bg2=bg)[0,:] + ngg
+            flPgv = self.lPgv(zindex,bg=bg)[0,:]
+            # Construct integrand (without prefactor) as function of tabulated k_L values,
+            # and integrate
+            kls = self.kLs
+            integrand = _sanitize((kls**2.)*(flPgv*flPgv)/flPgg)
+            vrec = np.trapz(integrand,kls)
+            self.vrec.append(vrec)
+            
+            print("Calculating small scale Pgg...")
+            Pgg = self.get_power('g','g')
+            Pggtot  = Pgg + ngg
+            self.sPggtot.append(Pggtot)
+            self.sPge.append(self.get_power('g','e'))
+            # self.D = self.cc.D_growth(self.cc.z2a(z),"camb_anorm")
+            # self.T = lambda x: self.cc.transfer(x)
+            # self.alpha_func = lambda x: (2. * x**2. * self.T(x)) / (3.* self.cc.Omega_m * self.cc.results.h_of_z(0)**2.) * self.D
         
         # # kr = mu * kL ; this is an array of krs of shape (num_mus,num_kLs)
-        # self.krs = self.mus.reshape((self.mus.size,1)) * self.kLs.reshape((1,self.kLs.size))
-            
+        self.krs = self.mu.reshape((self.mu.size,1)) * self.kLs.reshape((1,self.kLs.size))
+
+    def Pge_err(self,zindex,ks_bin_edges,Cls):
+        kstar = self.kstars[zindex]
+        chistar = self.chistars[zindex]
+        volume = self.Vs[zindex]
+        pgv_int  = self.vrec[zindex]
+        kss = self.ks
+        pggtot = self.sPggtot[zindex][0]
+        return pge_err_core(pgv_int,kstar,chistar,volume,kss,ks_bin_edges,pggtot,Cls)        
     
     def lPvv(self,zindex,bv1=1,bv2=1):
         """The long-wavelength power spectrum of vxv.
@@ -246,15 +268,8 @@ def Nvv_core_integral(chi_star,Fstar,mu,kL,ngalMpc3,kSs,Cls,Pge,Pgg,Pgg_photo=No
     prefact = amu**(-2.) * 2. * np.pi * chi_star**2. / Fstar**2.
     Pgg_tot = Pgg + Ngg(ngalMpc3)
 
-    ls = np.arange(Cls.size)
-    Cls[ls<2] = 0
-    def _Cls(ell):
-        if ell<=ls[-1]:
-            return Cls[ell]
-        else:
-            return np.inf
 
-    ClksTot = np.array([_Cls(chi_star*k) for k in kSs])
+    Clkstot = get_interpolated_cls(Cls,chi_star,kSs)
     integrand = _sanitize(kSs * ( Pge**2. / (Pgg_tot * ClksTot)))
 
     if robust_term:
@@ -346,7 +361,7 @@ def get_ksz_template_signal_snapshot(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=Non
     
     # Construct integrand (without prefactor) as function of tabulated k_L values,
     # and integrate
-    kls = fksz.kLs[0]
+    kls = fksz.kLs
     integrand = _sanitize((kls**2.)*(flPgv*plPgv)/flPgg)
     vrec = np.trapz(integrand,kls)
     
@@ -354,6 +369,16 @@ def get_ksz_template_signal_snapshot(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=Non
     return pref * Pks * vrec, fksz, pksz
 
 
+def get_interpolated_cls(Cls,chistar,kss):
+    ls = np.arange(Cls.size)
+    Cls[ls<2] = 0
+    def _Cls(ell):
+        if ell<=ls[-1]:
+            return Cls[int(ell)]
+        else:
+            return np.inf
+    # TODO: vectorize
+    return np.array([_Cls(chistar*k) for k in kss])
 
 
 
@@ -380,7 +405,7 @@ def get_ksz_snr(volume_gpc3,z,ngal_mpc3,bg,Cls,params=None,
     
     lPgg = fksz.lPgg(zindex=0,bg1=bg,bg2=bg)[0,:] + ngg
     lPgv = fksz.lPgv(zindex=0,bg=bg)[0,:]
-    kls = fksz.kLs[0]
+    kls = fksz.kLs
     integrand = _sanitize((kls**2.)*(lPgv**2)/lPgg)
     vrec = np.trapz(integrand,kls)
 
@@ -392,14 +417,9 @@ def get_ksz_snr(volume_gpc3,z,ngal_mpc3,bg,Cls,params=None,
     
     
     kss = fksz.kS
-    ls = np.arange(Cls.size)
-    Cls[ls<2] = 0
-    def _Cls(ell):
-        if ell<=ls[-1]:
-            return Cls[int(ell)]
-        else:
-            return np.inf
-    Clkstot = np.array([_Cls(chistar*k) for k in kss])
+
+    Clkstot = get_interpolated_cls(Cls,chistar,kss)
+
     integrand = _sanitize(kss * sPge**2. / sPgg / Clkstot)
     ksint = np.trapz(integrand,kss)
 
@@ -739,7 +759,7 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
     for zi,z in enumerate(zs):
         
         # Get P_gv^2 / P_gg^total or P_vv, and integrate in k
-        kls = pksz.kLs[0]
+        kls = pksz.kLs
         if template:
 #             integrand = _sanitize((kls**2.)*lPgv[zi]**2/lPgg[zi])
             integrand = _sanitize((kls**2.)*lPgv[zi]**2/sPgg_for_v[zi])

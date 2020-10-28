@@ -221,6 +221,7 @@ class HaloModel(Cosmology):
 
         # Update with overrides
         if param_override is not None:
+            print(param_override)
             for key in param_override.keys():
                 if key=='battaglia_gas_gamma':
                     pparams[key] = param_override[key]
