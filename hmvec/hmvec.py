@@ -484,7 +484,7 @@ class HaloModel(Cosmology):
             self.cib_params['var'] = 0.5
             self.cib_params['L_o'] = 1.0
         elif name.lower() == 'vierro':      # Vierro et al
-            self.cib_params['alpha'] = 0.2
+            self.cib_params['alpha'] >= 0.2
             self.cib_params['beta'] = 1.6
             self.cib_params['gamma'] = 1.7
             self.cib_params['delta'] = 2.4
@@ -833,6 +833,22 @@ class HaloModel(Cosmology):
         sfr = kennicutt * cib.luminosity(self.zs, self.ms, len(self.ks), freq_range, 'rest', **self.cib_params)
 
         return np.trapz(self.nzm * sfr[:,:,0], self.ms, axis=-1)
+
+    def get_flux(self, nu_obs, cenflag=True, satflag=True, satmf='Tinker'):
+        chis = self.comoving_radial_distance(self.zs)
+        Lcen = 0.0
+        Lsat = 0.0
+
+        #Luminosities
+        if cenflag:
+            Lcen = self._get_fcen(nu_obs)
+        if satflag:
+            Lsat = self._get_fsat(nu_obs, satmf=satmf)
+        assert cenflag=True or satflag=True, "Pick a flux source"
+
+        #Flux
+        return (Lcen + Lsat) / ((1+self.zs) * chis**2)
+        
 
 
 def sdndm(msat, mcen, funcname='Tinker'):
