@@ -482,23 +482,23 @@ class HaloModel(Cosmology):
             self.cib_params['Td_o'] = 24.4
             self.cib_params['logM_eff'] = 12.6
             self.cib_params['var'] = 0.5
-            self.cib_params['L_o'] = 1.0
+            self.cib_params['L_o'] = 3.0e-15
         elif name.lower() == 'vierro':      # Vierro et al
-            self.cib_params['alpha'] >= 0.2
+            self.cib_params['alpha'] = 0.2
             self.cib_params['beta'] = 1.6
             self.cib_params['gamma'] = 1.7
             self.cib_params['delta'] = 2.4
             self.cib_params['Td_o'] = 20.7
             self.cib_params['logM_eff'] = 12.3
             self.cib_params['var'] = 0.3
-            self.cib_params['L_o'] = 1.0
+            self.cib_params['L_o'] = 3.0e-15
         else:
             assert len(params) == 8, "New sets of parameters require exactly 8 parameters"
 
         #Add Specific Parameters
         for key in params:
             if key not in paramslist:
-                raise ValueError(f'"{key}" is not a valid CIB parameter. Parameter names are case sensitive') 
+                raise ValueError(f'"{key}" is not a valid CIB parameter. Note that parameter names are case sensitive') 
             self.cib_params[key] = params[key]
 
 
