@@ -515,7 +515,7 @@ class HaloModel(Cosmology):
         # print('NcNs= ',hod['NcNs'][...,None])
         # print('NsNsm1= ',hod['NsNsm1'][...,None])
         #return (np.sqrt((2.*us*hod['Ns'][...,None]+(hod['Ns'][...,None]*us)**2.))/hod['ngal'][...,None,None])**2. #BB: formula for 1-halo
-        return (np.sqrt((2.*us*hod['Ns'][...,None]+(hod['Ns'][...,None]*us)**2.))/hod['ngal'][...,None,None])**2. #BB: formula for 1-halo
+        return (np.sqrt((2.*us*hod['Nc'][...,None]+(hod['Nc'][...,None]*us)**2.))/hod['ngal'][...,None,None])**2. #BB: formula for 1-halo
         #return ((us*hod['Ns'][...,None])/hod['ngal'][...,None,None])**2. #BB: formula for 1-halo
 
     def _get_hod(self,name,lowklim=False):
