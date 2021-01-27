@@ -402,7 +402,7 @@ class HaloModel(Cosmology):
                    'hod_bisection_search_max_log10mthresh','hod_bisection_search_rtol',
                    'hod_bisection_search_warn_iter','hod_alphasat','hod_Bsat',
                       'hod_betasat','hod_Bcut','hod_betacut','hod_A_log10mthresh',
-                      'hod_Msat_override','hod_Mcut_override']
+                      'hod_Msat_override','hod_Mcut_override','sample_id']
         # Set default parameters
         pparams = {}
         #print(self.p) ## BB
@@ -461,30 +461,34 @@ class HaloModel(Cosmology):
 
         log10mhalo = np.log10(self.ms[None,:])
         log10mstellar_thresh = np.log10(mthresh[:,None])
-        Ncs = avg_Nc(log10mhalo,self.zs[:,None],log10mstellar_thresh,sig_log_mstellar=pparams['hod_sig_log_mstellar'])
-        Nss = avg_Ns(log10mhalo,self.zs[:,None],log10mstellar_thresh,Nc=Ncs,
+        Ncs = avg_Nc(log10mhalo,self.zs[:,None],log10mstellar_thresh,
+                    sig_log_mstellar=pparams['hod_sig_log_mstellar'],
+                    sample_id = pparams['sample_id'])
+        Nss = avg_Ns(log10mhalo,self.zs[:,None],
+                     log10mstellar_thresh,Nc=Ncs,
                      sig_log_mstellar=pparams['hod_sig_log_mstellar'],
                      alphasat=pparams['hod_alphasat'],
-                     Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
-                     Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
-                     Msat_override=pparams['hod_Msat_override'],
-                     Mcut_override=pparams['hod_Mcut_override'])
-        print('Ncs: ',Ncs)
-        print('Nss: ',Nss)
+                     # Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
+                     # Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
+                     # Msat_override=pparams['hod_Msat_override'],
+                     # Mcut_override=pparams['hod_Mcut_override'],
+                     sample_id = pparams['sample_id'])
+        # print('Ncs: ',Ncs)
+        # print('Nss: ',Nss)
 
         NsNsm1 = avg_NsNsm1(Ncs,Nss,corr)
         NcNs = avg_NcNs(Ncs,Nss,corr)
 
         self.hods[name]['Nc'] = Ncs
         self.hods[name]['Ns'] = Nss
-        print('shape ns: ', np.shape(self.hods[name]['Ns']))
-        print('shape nc: ', np.shape(self.hods[name]['Nc']))
+        # print('shape ns: ', np.shape(self.hods[name]['Ns']))
+        # print('shape nc: ', np.shape(self.hods[name]['Nc']))
         self.hods[name]['NsNsm1'] = NsNsm1
         self.hods[name]['NcNs'] = NcNs
         #self.hods[name]['ngal'] = self.get_ngal(Ncs,Nss)
 
         self.hods[name]['ngal'] = self.get_ngal(Ncs,Nss)# debug BB
-        print('shape ngal: ', np.shape(self.hods[name]['ngal']))
+        # print('shape ngal: ', np.shape(self.hods[name]['ngal']))
         self.hods[name]['bg'] = self.get_bg(Ncs,Nss,self.hods[name]['ngal'])
         self.hods[name]['satellite_profile'] = satellite_profile_name
         self.hods[name]['central_profile'] = central_profile_name
@@ -754,11 +758,11 @@ def Mhalo_stellar(z,log10mstellar):
     return output
 
 
-def avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar):
+def avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar,sample_id = 'red'):
     """<Nc(m)>"""
     #log10mstar = Mstellar_halo(z,log10mhalo)
     log10mstar = log10mhalo ## BB: current class_sz assumption
-    num = np.log10(vec_unwise_mthresh(z)) - log10mstar #log10mstellar_thresh - log10mstar
+    num = np.log10(vec_unwise_mthresh(z,sample_id = sample_id)) - log10mstar #log10mstellar_thresh - log10mstar
     #num = np.where(num>0, 0., num) ## BB replace with 0 when M<Mthresh
     denom = np.sqrt(2.) * sig_log_mstellar
     #return 0.5*(1. - erf(num/denom))
@@ -775,28 +779,28 @@ def hod_default_mfunc(mthresh,Bamp,Bind): return (10.**(12.))*Bamp*10**((mthresh
 
 def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None,sig_log_mstellar=None,
            alphasat=None,Bsat=None,betasat=None,Bcut=None,betacut=None,
-           Msat_override=None,Mcut_override=None):
-    mthresh = Mhalo_stellar(z,log10mstellar_thresh)
-    Msat = Msat_override if Msat_override is not None else hod_default_mfunc(mthresh,Bsat,betasat)
-    Mcut = Mcut_override if Mcut_override is not None else hod_default_mfunc(mthresh,Bcut,betacut)
-    Nc = avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar=sig_log_mstellar) if Nc is None else Nc
+           Msat_override=None,Mcut_override=None, sample_id = 'red'):
+    # mthresh = Mhalo_stellar(z,log10mstellar_thresh)
+    # Msat = Msat_override if Msat_override is not None else hod_default_mfunc(mthresh,Bsat,betasat)
+    # Mcut = Mcut_override if Mcut_override is not None else hod_default_mfunc(mthresh,Bcut,betacut)
+    Nc = avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar=sig_log_mstellar, sample_id = sample_id) if Nc is None else Nc
     masses = 10**log10mhalo
     #return Nc*((masses/Msat)**alphasat)*np.exp(-Mcut/(masses)) ## BB: commented for consistency with class_sz
 
     #BB: simplified HOD from KFSW appendix C
     M_min_HOD_satellite_mass_factor_unwise=0.1 ## BB: class_sz
     M1_prime_HOD_factor = 15. ## BB: class_sz
-    Msat = vec_unwise_mthresh(z) ## BB: class_sz,
+    Msat = vec_unwise_mthresh(z,sample_id = sample_id) ## BB: class_sz,
     #Msat = 10**14 ## BB debug
     #print('Ns: Msat : ', Msat) # BB debug
     #print('Ns: masses : ', masses) # BB debug
     num = (masses-M_min_HOD_satellite_mass_factor_unwise*Msat)
-    print('Num: masses : ', num)
+    # print('Num: masses : ', num)
     num = np.where(num<0, 0., num) ## BB replace with 0 when M<Mthresh
-    print('Num: masses : ', num)
+    # print('Num: masses : ', num)
     result =  (num/Msat/M1_prime_HOD_factor)**0.8
-    print('Num: result : ', result)
-    print('shape result: ', np.shape(result))
+    # print('Num: result : ', result)
+    # print('shape result: ', np.shape(result))
     return result
 
 # BB: commented and replaced with class_sz formula:
@@ -1070,8 +1074,8 @@ def ngal_from_mthresh(log10mthresh=None,zs=None,nzm=None,ms=None,
 #We typically use it for M200m, but this is an arbitrary choice
 #We restrict the mass integral to go from m_cut to the max set in the param file ('M2SZ', typically 1e15Msun/h)
 
-def unwise_mthresh(zz):
-    isamp = 'red'
+def unwise_mthresh(zz,sample_id = 'red'):
+    isamp = sample_id
     green_option='default'
     '''Gives mcut for 5-param Zheng HOD for wise sample isamp at redshift zz.
     Satellite fractions 5-10% for red and green, and 25% for blue.

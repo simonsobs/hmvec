@@ -162,6 +162,7 @@ kfsw20_params = {
     'Yp': 0.24,
 
     # HOD
+    'sample_id' : 'red',
     'hod_sig_log_mstellar': 0.25, # KFSW20 value
     'hod_alphasat': 0.8, # KFSW20 value
 

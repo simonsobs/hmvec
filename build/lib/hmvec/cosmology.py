@@ -77,8 +77,7 @@ class Cosmology(object):
                                     cosmomc_theta=theta,ombh2=params['ombh2'],
                                     omch2=params['omch2'], mnu=params['mnu'],
                                     tau=params['tau'],nnu=params['nnu'],
-                                    num_massive_neutrinos=
-                                    params['num_massive_neutrinos'],
+                                    num_massive_neutrinos= params['num_massive_neutrinos'],
                                     w=params['w0'],wa=params['wa'],
                                     dark_energy_model='ppf',
                                     halofit_version=self.p['default_halofit'] if halofit is None else halofit,
@@ -96,6 +95,12 @@ class Cosmology(object):
                                                 hubble_units=False,
                                                 k_hunit=False, kmax=ks.max(),
                                                 zmax=zs.max()+1.)
+        # BB
+        # save pk at z=1.
+        zsx = 1.
+        np.savetxt("/Users/boris/Work/CLASS-SZ/SO-SZ/class_sz_external_data_and_scripts/pk_hmvec.txt",
+                    np.c_[ks,PK.P(zsx, ks)])
+
         return (self.as8**2.) * PK.P(zs, ks, grid=True)
 
 
