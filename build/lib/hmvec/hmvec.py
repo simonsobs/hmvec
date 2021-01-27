@@ -368,7 +368,7 @@ class HaloModel(Cosmology):
             Si, Ci = scipy.special.sici(x)
             Sic, Cic = scipy.special.sici((1.+cs)*x)
             ukouts = (np.sin(x)*(Sic-Si) - np.sin(cs*x)/((1+cs)*x) + np.cos(x)*(Cic-Ci))/mc
-            ukouts = ukouts/ukouts ## BB debug
+            ukouts = ukouts#/ukouts ## BB debug
             self.uk_profiles[name] = ukouts.copy()
 
         #return self.ks,ukouts
@@ -515,7 +515,7 @@ class HaloModel(Cosmology):
         # print('NcNs= ',hod['NcNs'][...,None])
         # print('NsNsm1= ',hod['NsNsm1'][...,None])
         #return (np.sqrt((2.*us*hod['Ns'][...,None]+(hod['Ns'][...,None]*us)**2.))/hod['ngal'][...,None,None])**2. #BB: formula for 1-halo
-        return (np.sqrt((2.*us*hod['Nc'][...,None]+(hod['Nc'][...,None]*us)**2.))/hod['ngal'][...,None,None])**2. #BB: formula for 1-halo
+        return (np.sqrt((2.*us*hod['Ns'][...,None]+(hod['Ns'][...,None]*us)**2.))/hod['ngal'][...,None,None])**2. #BB: formula for 1-halo
         #return ((us*hod['Ns'][...,None])/hod['ngal'][...,None,None])**2. #BB: formula for 1-halo
 
     def _get_hod(self,name,lowklim=False):
@@ -571,7 +571,7 @@ class HaloModel(Cosmology):
                 else: raise ValueError
 
         integrand = self.nzm[...,None] * square_term
-        return np.trapz(integrand,ms,axis=-2)#BB: commented for consistency with class_sz, ask MM about this "*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))"
+        return np.trapz(integrand*ms,np.log(ms),axis=-2)#BB: commented for consistency with class_sz, ask MM about this "*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))"
 
     def get_power_2halo(self,name="nfw",name2=None,verbose=False):
         name2 = name if name2 is None else name2
@@ -1062,7 +1062,7 @@ def ngal_from_mthresh(log10mthresh=None,zs=None,nzm=None,ms=None,
     #              Msat_override=Msat_override,
     #              Mcut_override=Mcut_override)
     integrand = nzm * (Ncs+Nss) #BB: debug
-    return np.trapz(integrand,ms,axis=-1)
+    return np.trapz(integrand*ms,np.log(ms),axis=-1)
 
 
 #Mass cuts for unwise galaxy
