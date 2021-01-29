@@ -398,7 +398,7 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
          f = interp1d(ks,Pzks[0],bounds_error=True)
     Cells = np.zeros(ells.shape)
     for i,ell in enumerate(ells):
-        kevals = ell/chis
+        kevals = (ell+0.5)/chis
         if zs.size>1:
             # hack suggested in https://stackoverflow.com/questions/47087109/evaluate-the-output-from-scipy-2d-interpolation-along-a-curve
             # to get around scipy.interpolate limitations
