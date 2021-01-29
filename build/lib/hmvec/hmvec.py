@@ -8,6 +8,7 @@ import numpy as np
 from . import tinker,utils
 from .cosmology import Cosmology
 
+
 import scipy.constants as constants
 from .params import default_params, battaglia_defaults, kfsw20_params
 from .fft import generic_profile_fft
@@ -175,6 +176,10 @@ class HaloModel(Cosmology):
             return 1. + (1./deltac)*((a*deltac**2./sigma2)-1.) + (2.*p/deltac)/(1.+(a*deltac**2./sigma2)**p)
         elif self.mode=="tinker":
             nus = deltac/np.sqrt(sigma2)
+            ## BB test:
+            # nus_BB_test = 10.
+            # print('tinker.bias(nus) :', tinker.bias(nus_BB_test))
+            # exit(0.)
             return tinker.bias(nus)
         else:
             raise NotImplementedError
@@ -531,8 +536,8 @@ class HaloModel(Cosmology):
         # print('us 2h= ',us)
         # print('uc 2h= ',uc)
         # print('Ns 2hs= ',hod['Ns'][...,None])
-        # print('Nc 2h= ',hod['Nc'][...,None])
-        # print('hod 2h: ',uc*hod['Nc'][...,None]+us*hod['Ns'][...,None] )
+        #print('Nc 2h= ',hod['Nc'][...,None])
+        #print('hod 2h: ',uc*hod['Nc'][...,None]+us*hod['Ns'][...,None] )
         return (uc*hod['Nc'][...,None]+us*hod['Ns'][...,None])/hod['ngal'][...,None,None] # BB: debug
 
     def _get_matter(self,name,lowklim=False):
@@ -770,8 +775,8 @@ def avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar,sample_id = 'red')
     ##print('Nc: 10**log10mstellar_thresh : ', 10**log10mstellar_thresh) # BB debug
     #print('Nc: 10**log10mstar : ', 10**log10mstar) # BB debug
     result = 0.5*(1. - erf(num/denom))
-    print('Nc Num: result : ', result)
-    print('Nc shape result: ', np.shape(result))
+    # print('Nc Num: result : ', result)
+    # print('Nc shape result: ', np.shape(result))
     return result
 
 
