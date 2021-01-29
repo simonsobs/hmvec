@@ -104,7 +104,9 @@ class HaloModel(Cosmology):
         # Profiles
         self.uk_profiles = {}
         self.pk_profiles = {}
-        if not(skip_nfw): self.add_nfw_profile("nfw",numeric=nfw_numeric)
+        if not(skip_nfw):
+            print('adding nfw with nfw_numeric = ', nfw_numeric) # BB debug
+            self.add_nfw_profile("nfw",numeric=nfw_numeric)
 
     def _init_cosmology(self,params,halofit):
         Cosmology._init_cosmology(self,params,halofit)
@@ -119,9 +121,12 @@ class HaloModel(Cosmology):
         return d
     def rvir(self,m,z):
         if self.mdef == 'vir':
+            #print('getting rvir') ### BB debug
             return R_from_M(m,self.rho_critical_z(z),delta=self.deltav(z))
         elif self.mdef == 'mean':
+            #print('getting r200m') ### BB debug
             return R_from_M(m,self.rho_matter_z(z),delta=200.)
+
 
     def R_of_m(self,ms):
         return R_from_M(ms,self.rho_matter_z(0),delta=1.) # note rhom0
@@ -364,12 +369,14 @@ class HaloModel(Cosmology):
         rvirs = self.rvir(ms[None,:],self.zs[:,None])
         rss = (rvirs/cs)[...,None]
         if numeric:
+            print('xmax, nxs: ', xmax,nxs)
             ks,ukouts = generic_profile_fft(lambda x: rho_nfw_x(x,rhoscale=1),cs,rss,self.zs,self.ks,xmax,nxs)
             self.uk_profiles[name] = ukouts.copy()
         else:
+            print('doing truncated nfw analytical')
             cs = cs[...,None]
             mc = np.log(1+cs)-cs/(1.+cs)
-            x = self.ks[None,None]*rss *(1+self.zs[:,None,None])# !!!!
+            x = 10.*self.ks[None,None]*rss *(1+self.zs[:,None,None])# !!!! ## bb debug
             Si, Ci = scipy.special.sici(x)
             Sic, Cic = scipy.special.sici((1.+cs)*x)
             ukouts = (np.sin(x)*(Sic-Si) - np.sin(cs*x)/((1+cs)*x) + np.cos(x)*(Cic-Ci))/mc
@@ -574,6 +581,7 @@ class HaloModel(Cosmology):
                 if nm in hnames:
                     square_term *= self._get_hod(nm)
                 elif nm in mnames:
+                    print('getting matter')
                     square_term *= self._get_matter(nm)
                 elif nm in pnames:
                     square_term *= self._get_pressure(nm)
