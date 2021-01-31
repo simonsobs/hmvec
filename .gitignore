@@ -10,3 +10,4 @@ specs.ini
 commented.py
 build/*
 examples/.ipynb*
+.DS_store
