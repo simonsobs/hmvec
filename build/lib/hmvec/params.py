@@ -126,11 +126,8 @@ kfsw20_params = {
     'duffy_A_mean':10.14, # for M200rhomeanz
     'duffy_alpha_mean':-0.081,
     'duffy_beta_mean':-1.01,
-
-    'nfw_integral_numxs':800, # not sufficient
-    'nfw_integral_xmax':.1,
-
-
+    'nfw_integral_numxs':40000, # not sufficient
+    'nfw_integral_xmax':200,
     'electron_density_profile_integral_numxs':5000,
     'electron_density_profile_integral_xmax':20,
     'electron_pressure_profile_integral_numxs':5000,
