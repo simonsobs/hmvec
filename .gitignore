@@ -9,3 +9,4 @@ kszSignal.py
 specs.ini
 commented.py
 build/*
+examples/.ipynb*
