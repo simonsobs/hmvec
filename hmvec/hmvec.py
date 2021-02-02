@@ -844,7 +844,7 @@ class HaloModel(Cosmology):
             Lcen = self._get_fcen(nu_obs)
         if satflag:
             Lsat = self._get_fsat(nu_obs, satmf=satmf)
-        assert cenflag=True or satflag=True, "Pick a flux source"
+        assert cenflag==True or satflag==True, "Pick a flux source"
 
         #Flux
         return (Lcen + Lsat) / ((1+self.zs) * chis**2)
