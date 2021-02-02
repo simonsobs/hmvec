@@ -63,8 +63,8 @@ class ChiSqLikelihood(Likelihood):
         
 
 #Toy Data
-filename_cov = ''
-filename_data = ''
+filename_cov = 'toy_cov.npy'
+filename_data = 'toy_data.npy'
 cov = np.load(filename_cov)
 data = np.load(filename_data)
 
@@ -114,5 +114,10 @@ info = {
 
     "sampler": {
         "mcmc": {"Rminus1_stop": 0.001, "max_tries": 1000}
-    }
+    },
+
+    "output": toy/autocib
 }
+
+#Run Cobaya
+updated_info, sampler = run(info)
