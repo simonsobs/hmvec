@@ -544,7 +544,15 @@ class HaloModel(Cosmology):
     """
     def _get_fcen(self, nu):
         '''Function of M and z, but defined over whole z,M,k grid'''
-        return cib.luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
+        Lcen = cib.luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
+        
+        #Flux Cut
+        maxflux
+        prefactor = (1+self.zs) / (4*np.pi * self.comoving_radial_distance(zs)**2)
+        flux = Lcen * prefactor[:, np.newaxis, np.newaxis]
+        fmask = np.where(flux <= maxflux, 1, 0)
+
+        return Lcen * fmask
 
     def _get_fsat(self, freq, cibinteg='trap', satmf='Tinker'):
         '''Function of M and z, but defined over whole z,M,k grid'''
