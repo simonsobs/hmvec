@@ -546,13 +546,15 @@ class HaloModel(Cosmology):
         '''Function of M and z, but defined over whole z,M,k grid'''
         Lcen = cib.luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
         
-        #Flux Cut
-        maxflux
-        prefactor = (1+self.zs) / (4*np.pi * self.comoving_radial_distance(zs)**2)
-        flux = Lcen * prefactor[:, np.newaxis, np.newaxis]
-        fmask = np.where(flux <= maxflux, 1, 0)
+        # #Flux Cut
+        # maxflux
+        # prefactor = (1+self.zs) / (4*np.pi * self.comoving_radial_distance(zs)**2)
+        # flux = Lcen * prefactor[:, np.newaxis, np.newaxis]
+        # fmask = np.where(flux <= maxflux, 1, 0)
 
-        return Lcen * fmask
+        # return Lcen * fmask
+
+        return Lcen / (4.0*np.pi)
 
     def _get_fsat(self, freq, cibinteg='trap', satmf='Tinker'):
         '''Function of M and z, but defined over whole z,M,k grid'''
