@@ -8,4 +8,5 @@ kszBispectrum.py
 kszSignal.py
 specs.ini
 commented.py
-.vscode/settings.jsons
+.vscode/
+.ipynb_checkpoints

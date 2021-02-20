@@ -1,14 +1,15 @@
-import numpy as np
-import hmvec as hm
-import matplotlib
-import matplotlib.pyplot as plt
 from cobaya.run import run
+
+#Directories
+theorypath = "/home/r/rbond/ymehta3/hmvec/mcmc/mcmc_class.PowerSpectrum"
+likepath = "/home/r/rbond/ymehta3/hmvec/mcmc/mcmc_class.ChiSqLikelihood"
+outputpath = "/home/r/rbond/ymehta3/hmvec/mcmc/output/toy/autocib"
 
 #Cobaya Input File
 info = {
-    "theory": {"mcmc_class.PowerSpectrum": None},
+    "theory": {theorypath: None},
     
-    "likelihood": {"mcmc_class.ChiSqLikelihood": None},
+    "likelihood": {likepath: None},
     
     "params": {
         #CIB Model Parameters
@@ -46,7 +47,7 @@ info = {
         "mcmc": {"Rminus1_stop": 0.001, "max_tries": 1000}
     },
 
-    "output": "toy/autocib"
+    "output": outputpath
 }
 
 #Run Cobaya
