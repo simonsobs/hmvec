@@ -6,21 +6,14 @@ cosmo = Planck15
 # import time
 
 #Setup Grid
-Nz = 500                                 # num of redshifts
-Nm = 500                                 # num of masses
+Nz = 100                                 # num of redshifts
+Nm = 100                                 # num of masses
 Nk = 1000                                # num of wavenumbers
-redshifts = np.linspace(0.01, 10, Nz)             # redshifts
-logmass = np.arange(6,15.005,0.1)
-masses = 10**logmass           # masses
-ells = np.linspace(150., 2000., 20)
-ks = np.array([])
-chis = cosmo.comoving_distance(redshifts).value
-for ell in ells:
-    ks = np.append(ks, ell/chis) 
-ks = np.sort(ks)
-# ks = np.geomspace(0.0155, 37, Nk)               # wavenumbers
-# Nl = 20
-# ells = np.arange(150, 2000, Nl)
+redshifts = np.linspace(0.01, 6, Nz)             
+masses = np.geomspace(1.0e6, 1.0e15, Nm)          
+ks = np.geomspace(1.0e-3, 100.0, Nk)              # wavenumbers
+ells = np.linspace(10, 3000, 200)
+
 frequencies = np.array([[143],[217],[353],[545],[857],[3000]], dtype=np.double)     #Ghz
 
 #Initialize Halo Model 

@@ -700,7 +700,7 @@ class HaloModel(Cosmology):
     Power Stuff
     """
 
-    def get_power(self,name1,name2=None,nu_obs=None,verbose=True, subhalos=True, cibinteg='trap', satmf='Tinker'):
+    def get_power(self,name1,name2=None,nu_obs=None,verbose=False, subhalos=True, cibinteg='trap', satmf='Tinker'):
         '''
         CIB Keyword Arguments:
         nu_obs [2darray] : 1st axis - freq's to be cross correlated. 2nd axis - bandpass
@@ -793,7 +793,6 @@ class HaloModel(Cosmology):
 
         def _2haloint(iterm):
             integrand = self.nzm[...,None] * iterm * self.bh[...,None]
-            # import pdb; pdb.set_trace()
             integral = np.trapz(integrand,ms,axis=-2)
             return integral
 
