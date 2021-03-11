@@ -238,7 +238,7 @@ def capitalSigma(M, logM_eff, sigma2):
 
     return M/np.sqrt(2*np.pi*sigma2) * np.exp(- (np.log10(M)-logM_eff)**2 / (2*sigma2))
 
-def luminosity(z, M, Nks, nu, nuframe='obs', params=None):  
+def luminosity(z, M, Nks, nu, params, nuframe='obs'):  
     """Luminosity of CIB galaxies. It depends only on mass and redshift, but is broadcasted onto a grid of [z, M, k/r]. Most of the fit parameter values are from Viero using Herschel data; the exception is gamma, which wasn't part of the Viero model and therefore is obtained from Planck2013. The fit parameters are in the "params" dictionary.
 
     Arguments:
