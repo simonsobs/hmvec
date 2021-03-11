@@ -544,7 +544,7 @@ class HaloModel(Cosmology):
     """
     def _get_fcen(self, nu):
         '''Function of M and z, but defined over whole z,M,k grid'''
-        return cib.luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
+        return cib.luminosity(self.zs, self.ms, len(self.ks), nu, **self.cib_params) / (4.0*np.pi)
 
         # Lcen = cib.luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
         
