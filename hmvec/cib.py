@@ -238,8 +238,8 @@ def capitalSigma(M, logM_eff, sigma2):
 
     return M/np.sqrt(2*np.pi*sigma2) * np.exp(- (np.log10(M)-logM_eff)**2 / (2*sigma2))
 
-def luminosity(z, M, Nks, nu, nuframe='obs', a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20.7, logM_eff=12.3, var = 0.3, L_o=1):  
-    """Luminosity of CIB galaxies. It depends only on mass and redshift, but is broadcasted onto a grid of [z, M, k/r]. Most of the fit parameter values are from Viero using Herschel data; the exception is gamma, which wasn't part of the Viero model and therefore is obtained from Planck2013.
+def luminosity(z, M, Nks, nu, nuframe='obs', params=None):  
+    """Luminosity of CIB galaxies. It depends only on mass and redshift, but is broadcasted onto a grid of [z, M, k/r]. Most of the fit parameter values are from Viero using Herschel data; the exception is gamma, which wasn't part of the Viero model and therefore is obtained from Planck2013. The fit parameters are in the "params" dictionary.
 
     Arguments:
         M [1darray]: galaxy's masses
@@ -248,11 +248,11 @@ def luminosity(z, M, Nks, nu, nuframe='obs', a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20
         nu [1darray]: either single frequency or the endpoints of a bandpass
         nuframe [str:'obs'|'rest']: frame that the nu is given in
     
-    Keyword Arguments:
-        a [float]: fit parameter - alpha (default = 0.2)
-        b [float]: fit parameter - beta  (default = 1.6)
-        g [float]: fit parameter - gamma (default = 1.7)
-        d [float]: fit parameter - delta (default = 2.4)
+    Model parameters:
+        alpha [float]: fit parameter - alpha (default = 0.2)
+        beta [float]: fit parameter - beta  (default = 1.6)
+        gamma [float]: fit parameter - gamma (default = 1.7)
+        delta [float]: fit parameter - delta (default = 2.4)
         Td_o [float]: fit parameter - dust temp at z=0 (default = 20.7)
         logM_eff [float]: fit parameter - log(M_eff) in L-M relation (default = 12.3)
         var [float]: model parameter - variance of Gaussian part of L-M relation (default = 0.3)
@@ -261,7 +261,16 @@ def luminosity(z, M, Nks, nu, nuframe='obs', a=0.2, b=1.6, g=1.7, d=2.4, Td_o=20
     Returns:
         [3darray, float] : luminosity[z, M, k/r]
     """     
-    
+    #Unpack Parameters
+    a = params['alpha']
+    b = params['beta']
+    d = params['delta']
+    g = params['gamma']
+    Td_o =params['Td_o']
+    logM_eff =params['logM_eff']
+    var =params['var']
+    L_o =params['L_o']
+
     #Calculate the z and M Dependence
     Lz = capitalPhi(z, d) * capitalTheta(nu, nuframe, z, a, b, g, Td_o)
     Lm = capitalSigma(M, logM_eff, var)
