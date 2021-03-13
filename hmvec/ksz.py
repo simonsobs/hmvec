@@ -138,8 +138,8 @@ class kSZ(HaloModel):
         self.adotf = []
         self.d2vs = []
         if not skip_hod:
-            self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=False,b1=b1,b2=b1) 
-            self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=False,b1=b1) 
+            self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=verbose,b1=b1,b2=b1) 
+            self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=verbose,b1=b1) 
             
         # Warn user that k_min is the same for all zs (thanks to Simon Foreman for speed-up here)
         if np.max(volumes_gpc3) != np.min(volumes_gpc3):
@@ -161,6 +161,7 @@ class kSZ(HaloModel):
         self.vrec = []
         self.sPggtot = []
         self.sPge = []
+        self.bgs = []
         for zindex,volume_gpc3 in enumerate(volumes_gpc3):
             self.Pmms.append(np.resize(p[zindex],(self.mu.size,self.kLs.size)))
             self.fs.append(growth[:,zindex])
@@ -175,6 +176,7 @@ class kSZ(HaloModel):
 
             # Compute P_gg + N_gg and P_gv for fiducial and "true" parameters, as functions of k_L
             bg = self.hods['g']['bg'][zindex]
+            self.bgs.append(bg)
             ngal = ngals_mpc3[zindex]
             ngg = Ngg(ngal)
             flPgg = self.lPgg(zindex,bg1=bg,bg2=bg)[0,:] + ngg
@@ -186,17 +188,18 @@ class kSZ(HaloModel):
             vrec = np.trapz(integrand,kls)
             self.vrec.append(vrec)
             
-            print("Calculating small scale Pgg...")
-            Pgg = self.get_power('g','g')
+            if verbose: print("Calculating small scale Pgg...")
+            Pgg = self.get_power('g','g',verbose=verbose)
             Pggtot  = Pgg + ngg
             self.sPggtot.append(Pggtot)
-            self.sPge.append(self.get_power('g','e'))
+            self.sPge.append(self.get_power('g','e',verbose=verbose))
             # self.D = self.cc.D_growth(self.cc.z2a(z),"camb_anorm")
             # self.T = lambda x: self.cc.transfer(x)
             # self.alpha_func = lambda x: (2. * x**2. * self.T(x)) / (3.* self.cc.Omega_m * self.cc.results.h_of_z(0)**2.) * self.D
         
         # # kr = mu * kL ; this is an array of krs of shape (num_mus,num_kLs)
         self.krs = self.mu.reshape((self.mu.size,1)) * self.kLs.reshape((1,self.kLs.size))
+        self.ngals_mpc3 = ngals_mpc3
 
     def Pge_err(self,zindex,ks_bin_edges,Cls):
         kstar = self.kstars[zindex]
@@ -240,11 +243,16 @@ class kSZ(HaloModel):
     def ksz_radial_function(self,zindex, gasfrac = 0.9,xe=1, tau=0, params=None):
         return ksz_radial_function(self.zs[zindex],self.pars.ombh2, self.pars.YHe, gasfrac = gasfrac,xe=xe, tau=tau, params=params)
 
-    def Nvv(self,Cls):
-        pass
+    def Nvv(self,zindex,Cls):
+        chi_star = self.chistars[zindex]
+        Fstar = self.ksz_radial_function(zindex)
+        return Nvv_core_integral(chi_star,Fstar,self.mu,self.kLs,self.kS,Cls,
+                                 self.sPge[zindex],self.sPggtot[zindex],
+                                 Pgg_photo_tot=None,errs=False,
+                                 robust_term=False,photo=True)
 
     
-def Nvv_core_integral(chi_star,Fstar,mu,kL,ngalMpc3,kSs,Cls,Pge,Pgg,Pgg_photo=None,errs=False,
+def Nvv_core_integral(chi_star,Fstar,mu,kL,kSs,Cls,Pge,Pgg_tot,Pgg_photo_tot=None,errs=False,
                       robust_term=False,photo=True):
     """
     Returns velocity recon noise Nvv as a function of mu,kL
@@ -266,15 +274,13 @@ def Nvv_core_integral(chi_star,Fstar,mu,kL,ngalMpc3,kSs,Cls,Pge,Pgg,Pgg_photo=No
 
     amu = np.resize(mu,(kL.size,mu.size)).T
     prefact = amu**(-2.) * 2. * np.pi * chi_star**2. / Fstar**2.
-    Pgg_tot = Pgg + Ngg(ngalMpc3)
 
 
     Clkstot = get_interpolated_cls(Cls,chi_star,kSs)
-    integrand = _sanitize(kSs * ( Pge**2. / (Pgg_tot * ClksTot)))
+    integrand = _sanitize(kSs * ( Pge**2. / (Pgg_tot * Clkstot)))
 
     if robust_term:
-        assert Pgg_photo is not None
-        Pgg_photo_tot = Pgg_photo + Ngg(ngalMpc3)
+        assert Pgg_photo_tot is not None
         integrand = _sanitize(integrand * (Pgg_photo_tot/Pgg_tot))
 
     integral = np.trapz(integrand,kSs)
@@ -829,5 +835,59 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
     # Return kSZ object (in case we want to use it later), C_ell array,
     # and dict of spectra used
     return pksz, cl, spec_dict
-#     return pksz
 
+
+def Nvv(z,vol_gpc3,ngals_mpc3,Cl_total,
+        kL_max=0.1,num_kL_bins=100,
+        kS_min=0.1,
+        kS_max=10.0,
+        num_kS_bins=101,
+        num_mu_bins=102):
+    """
+    Get the reconstruction noise N_vv on the radial velocity field
+    as reconstructed using kSZ tomography using a CMB survey
+    and a galaxy survey.
+
+    This function provides a convenience wrapper for very basic usage.
+    More advanced usage (e.g. photo-zs) involves using the 'kSZ' class and/or
+    the 'Nvv_core_integral' function.
+
+    Parameters
+    ----------
+    
+    z : float
+        The central redshift of the galaxy survey's "box"
+    vol_gpc3 : float
+        The overlap volume of the galaxy survey box with the CMB survey in Gpc^3
+    ngals_mpc3 : float
+        The comoving number density of the galaxy survey in Mpc^{-3}
+    Cl_total : (nells,) float
+        The total power spectrum of the CMB survey including lensed 
+        CMB, kSZ, beam-deconvolved noise and foregrounds
+
+    Returns
+    -------
+
+    mus : (nmus,) float
+        Angle to the line-of-sight k.n from -1 to 1, corresponding to 
+        the first dimension of the returned N_vv
+    kLs : (nkls,) float
+        An array of long-wavelength wavenumbers in Mpc^{-1}, corresponding
+        to the second dimension of the returned N_vv
+    N_vv : (nmus,nkls) float
+        A 2d array containing the reconstruction noise power as a function
+        of angle to the line-of-sight along the first dimension
+        and long-wavelength wavenumbers along the second dimension
+    
+
+    """
+    zs = [z]
+    volumes_gpc3 = [vol_gpc3]
+    ngals_mpc3 = [ngals_mpc3]
+    hksz = kSZ(zs,volumes_gpc3,ngals_mpc3,
+                   kL_max=kL_max,num_kL_bins=num_kL_bins,
+                   kS_min=kS_min,
+                   kS_max=kS_max,
+                   num_kS_bins=num_kS_bins,
+                   num_mu_bins=num_mu_bins)
+    return hksz.mu,hksz.kLs,hksz.Nvv(0,Cl_total)
