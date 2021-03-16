@@ -175,8 +175,6 @@ class kSZ(HaloModel):
             ['growth']
         )[:,:,0]
 
-        
-
         self.kstars = []
         self.chistars = []
         self.Vs = volumes_gpc3
