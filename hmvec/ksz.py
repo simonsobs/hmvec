@@ -103,7 +103,7 @@ class kSZ(HaloModel):
                  skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None,
                  mthreshs_override=None,
                  verbose=False,
-                 b1=None,b2=None):
+                 b1=None,b2=None,sigz=None):
 
         if ms is None: ms = np.geomspace(defaults['min_mass'],defaults['max_mass'],defaults['num_mass'])
         volumes_gpc3 = np.atleast_1d(volumes_gpc3)
@@ -137,23 +137,45 @@ class kSZ(HaloModel):
         self.fs = []
         self.adotf = []
         self.d2vs = []
+        
+        self.sigma_z_func = lambda z : sigz * (1.+z)
+        zhs,hs = np.loadtxt("fiducial_cosmology_Hs.txt",unpack=True)
+        self.Hphotoz = interp1d(zhs,hs)
+
+        # Define log-spaced array of k values
+        self.kLs = np.geomspace(get_kmin(np.max(volumes_gpc3)),kL_max,num_kL_bins)
+        # # kr = mu * kL ; this is an array of krs of shape (num_mus,num_kLs)
+        self.krs = self.mu.reshape((self.mu.size,1)) * self.kLs.reshape((1,self.kLs.size))
+        
+        self.sigz = sigz
         if not skip_hod:
-            self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=verbose,b1=b1,b2=b1) 
+            self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=verbose,b1=b1,b2=b1)
             self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=verbose,b1=b1) 
+            if sigz is not None:
+                oPggs = self.sPggs.copy()
+                oPges = self.sPges.copy()
+                self.sPggs = []
+                self.sPges = []
+                for zindex in range(oPggs.shape[0]):
+                    self.sPggs.append( oPggs[zindex] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1))**2.) )
+                    self.sPges.append( oPges[zindex] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1))) )
+                self.sPggs = np.asarray(self.sPggs)
+                self.sPges = np.asarray(self.sPges)
             
         # Warn user that k_min is the same for all zs (thanks to Simon Foreman for speed-up here)
         if np.max(volumes_gpc3) != np.min(volumes_gpc3):
             warnings.warn('Using equal k_min at each z, despite different volumes at each z')
- 
-        # Define log-spaced array of k values, and get P_linear and f(z)
+            
+        # get P_linear and f(z)
         # on grid in z and k
-        self.kLs = np.geomspace(get_kmin(np.max(volumes_gpc3)),kL_max,num_kL_bins)
         p = self._get_matter_power(self.zs,self.kLs,nonlinear=False)
         growth = self.results.get_redshift_evolution(
             self.kLs, 
             self.zs, 
             ['growth']
         )[:,:,0]
+
+        
 
         self.kstars = []
         self.chistars = []
@@ -162,9 +184,11 @@ class kSZ(HaloModel):
         self.sPggtot = []
         self.sPge = []
         self.bgs = []
+        aPgg = self.get_power('g','g',verbose=verbose)
+        aPge = self.get_power('g','e',verbose=verbose)
         for zindex,volume_gpc3 in enumerate(volumes_gpc3):
-            self.Pmms.append(np.resize(p[zindex],(self.mu.size,self.kLs.size)))
-            self.fs.append(growth[:,zindex])
+            self.Pmms.append(np.resize(p[zindex].copy(),(self.mu.size,self.kLs.size)))
+            self.fs.append(growth[:,zindex].copy())
             z = self.zs[zindex]
             a = 1./(1.+z)
             H = self.results.h_of_z(z)
@@ -186,19 +210,19 @@ class kSZ(HaloModel):
             kls = self.kLs
             integrand = _sanitize((kls**2.)*(flPgv*flPgv)/flPgg)
             vrec = np.trapz(integrand,kls)
-            self.vrec.append(vrec)
+            self.vrec.append(vrec.copy())
             
             if verbose: print("Calculating small scale Pgg...")
-            Pgg = self.get_power('g','g',verbose=verbose)
+            Pgg = aPgg[zindex].copy()
+            if sigz is not None:
+                Pgg = Pgg[None,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1))**2.)
             Pggtot  = Pgg + ngg
-            self.sPggtot.append(Pggtot)
-            self.sPge.append(self.get_power('g','e',verbose=verbose))
-            # self.D = self.cc.D_growth(self.cc.z2a(z),"camb_anorm")
-            # self.T = lambda x: self.cc.transfer(x)
-            # self.alpha_func = lambda x: (2. * x**2. * self.T(x)) / (3.* self.cc.Omega_m * self.cc.results.h_of_z(0)**2.) * self.D
+            self.sPggtot.append(Pggtot.copy())
+            Pge = aPge[zindex].copy()
+            if sigz is not None:
+                Pge = Pge[None,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1)))
+            self.sPge.append(Pge.copy())
         
-        # # kr = mu * kL ; this is an array of krs of shape (num_mus,num_kLs)
-        self.krs = self.mu.reshape((self.mu.size,1)) * self.kLs.reshape((1,self.kLs.size))
         self.ngals_mpc3 = ngals_mpc3
 
     def Pge_err(self,zindex,ks_bin_edges,Cls):
@@ -229,6 +253,8 @@ class kSZ(HaloModel):
         bg1 and bg2 are the linear galaxy biases in each bin.
         """
         Pgg =  self.Pmms[zindex] *bg1*bg2
+        if not(self.sigz is None):
+            Pgg = Pgg[...,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1))**2.)
         return Pgg
 
     def lPgv(self,zindex,bg,bv=1):
@@ -237,11 +263,20 @@ class kSZ(HaloModel):
         bg1 and bg2 are the linear galaxy biases in each bin.
         """
         Pgv =  self.Pmms[zindex] *bg*bv * (self.d2vs[zindex])
+        if not(self.sigz is None):
+            Pgv = Pgv[...,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1)))
         return Pgv
     
 
     def ksz_radial_function(self,zindex, gasfrac = 0.9,xe=1, tau=0, params=None):
         return ksz_radial_function(self.zs[zindex],self.pars.ombh2, self.pars.YHe, gasfrac = gasfrac,xe=xe, tau=tau, params=params)
+
+    def Wphoto(self,zindex):
+        krs = self.krs
+        z = self.zs[zindex]
+        H = self.Hphotoz(z)
+        return np.exp(-self.sigma_z_func(z)**2.*krs**2./2./H**2.) # (mus,kLs)
+    
 
     def Nvv(self,zindex,Cls):
         chi_star = self.chistars[zindex]
@@ -388,14 +423,16 @@ def get_interpolated_cls(Cls,chistar,kss):
 
 
 
-def get_ksz_snr(volume_gpc3,z,ngal_mpc3,bg,Cls,params=None,
+def get_ksz_snr(volume_gpc3,z,ngal_mpc3,Cls,bg=None,params=None,
                 kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
                 num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
                 mdef='vir',nfw_numeric=False,
                 electron_profile_family='AGN',
-                electron_profile_nxs=None,electron_profile_xmax=None):
+                electron_profile_nxs=None,electron_profile_xmax=None,sigz=None):
 
-
+    """
+    SNR = \int 2pi k_L^2 dk_L dmu (1/(2pi)^3) Pgv(mu,kL)^2 / Pggtot(mu,kL)^2 / Nvv(mu,kL)
+    """
     fksz = kSZ([z],[volume_gpc3],[ngal_mpc3],
                kL_max=kL_max,num_kL_bins=num_kL_bins,kS_min=kS_min,kS_max=kS_max,
                num_kS_bins=num_kS_bins,num_mu_bins=num_mu_bins,ms=ms,params=params,mass_function=mass_function,
@@ -403,33 +440,23 @@ def get_ksz_snr(volume_gpc3,z,ngal_mpc3,bg,Cls,params=None,
                electron_profile_name='e',electron_profile_family=electron_profile_family,
                skip_electron_profile=False,electron_profile_param_override=params,
                electron_profile_nxs=electron_profile_nxs,electron_profile_xmax=electron_profile_xmax,
-               skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None)
-    
-    Fstar = fksz.ksz_radial_function(zindex=0)
+               skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None,sigz=sigz)
     V = volume_gpc3 * 1e9
     ngg = Ngg(ngal_mpc3)
-    
-    lPgg = fksz.lPgg(zindex=0,bg1=bg,bg2=bg)[0,:] + ngg
-    lPgv = fksz.lPgv(zindex=0,bg=bg)[0,:]
+    Nvv = fksz.Nvv(0,Cls)
+    if bg is None:
+        bg = fksz.bgs[0]
+    lPgg = fksz.lPgg(zindex=0,bg1=bg,bg2=bg)
+    lPgv = fksz.lPgv(zindex=0,bg=bg)
+    if sigz is not None:
+        lPgg = lPgg[...,0]
+        lPgv = lPgv[...,0]
+    ltPgg = lPgg + ngg
     kls = fksz.kLs
-    integrand = _sanitize((kls**2.)*(lPgv**2)/lPgg)
-    vrec = np.trapz(integrand,kls)
-
-
-    sPgg = fksz.sPggs[0] + ngg
-    sPge = fksz.sPges[0]
-    chistar = fksz.results.comoving_radial_distance(z)
-
-    
-    
-    kss = fksz.kS
-
-    Clkstot = get_interpolated_cls(Cls,chistar,kss)
-
-    integrand = _sanitize(kss * sPge**2. / sPgg / Clkstot)
-    ksint = np.trapz(integrand,kss)
-
-    return np.sqrt(V*Fstar**2. * vrec * ksint / 12 / np.pi**3 / chistar**2.),fksz
+    integrand = _sanitize((kls**2.)*(lPgv**2)/ltPgg/Nvv)
+    result = np.trapz(integrand,kls)
+    snr2 = np.trapz(result,fksz.mu) / (2.*np.pi)**2.
+    return np.sqrt(V*snr2),fksz
 
 
 def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
@@ -837,7 +864,7 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
     return pksz, cl, spec_dict
 
 
-def Nvv(z,vol_gpc3,ngals_mpc3,Cl_total,
+def Nvv(z,vol_gpc3,ngals_mpc3,Cl_total,sigz=None,
         kL_max=0.1,num_kL_bins=100,
         kS_min=0.1,
         kS_max=10.0,
@@ -864,6 +891,9 @@ def Nvv(z,vol_gpc3,ngals_mpc3,Cl_total,
     Cl_total : (nells,) float
         The total power spectrum of the CMB survey including lensed 
         CMB, kSZ, beam-deconvolved noise and foregrounds
+    sigz : float, optional
+        The Gaussian scatter for photometric redshifts. The assumed scatter
+        will be sigz x (1+z).
 
     Returns
     -------
@@ -889,5 +919,61 @@ def Nvv(z,vol_gpc3,ngals_mpc3,Cl_total,
                    kS_min=kS_min,
                    kS_max=kS_max,
                    num_kS_bins=num_kS_bins,
-                   num_mu_bins=num_mu_bins)
+                   num_mu_bins=num_mu_bins,sigz=sigz)
     return hksz.mu,hksz.kLs,hksz.Nvv(0,Cl_total)
+
+
+
+def get_ksz_snr_survey(zs,dndz,zedges,Cls,fsky,Ngals,bs=None,sigz=None):
+    """
+
+    Get the total kSZ SNR from survey specifications.
+    Provide the redshift distribution through (zs,dndz)
+    Divide into "boxes" by specifying the redshift bin edges.
+    This allows the survey overlap volumes in each bin
+    to be computed from the overlap sky fraction fsky.
+    Provide the total CMB+foreground+noise power in Cls.
+    Provide sigma_z/(1+z) if this is a photometric survey.
+    Provide the total number of galaxies in the overlap
+    region in Ngals.
+    Provide the galaxy biases in each bin in bs.
+
+    """
+
+    from astropy.cosmology import WMAP9 as cosmo
+    
+    nbins = len(zedges) - 1
+    if not(bs is None):
+        if len(bs)!=nbins: raise Exception
+    vols_gpc3 = []
+    ngals_mpc3 = []
+    snrs = []
+    zcents = []
+    tdndz = np.trapz(dndz,zs)
+    bgs = []
+    for i in range(nbins):
+        # Calculate bin volumes in Gpc3
+        zmin = zedges[i]
+        zmax = zedges[i+1]
+        zcent = (zmax+zmin)/2.
+        chimin = cosmo.comoving_distance(zmin).value
+        chimax = cosmo.comoving_distance(zmax).value
+        vols_gpc3.append( fsky * (4./3.) * np.pi * (chimax**3. - chimin**3.) / 1e9)
+        
+        # Calculate comoving number densities
+        sel = np.logical_and(zs>zmin,zs<=zmax)
+        fracz = np.trapz(dndz[sel],zs[sel]) / tdndz
+        Ng = Ngals * fracz
+        ngals_mpc3.append( Ng / (vols_gpc3[i]*1e9) )
+
+        # Calculate SNRs
+        snr,fksz = get_ksz_snr(vols_gpc3[i],zcent,ngals_mpc3[i],Cls,bs[i] if not(bs is None) else None,sigz=sigz)
+        bgs.append(fksz.bgs[0])
+        snrs.append(snr)
+        zcents.append(zcent)
+
+    snrs = np.asarray(snrs)
+    totsnr = np.sqrt(np.sum(snrs**2.))
+
+    return vols_gpc3,ngals_mpc3,zcents,bgs,snrs,totsnr
+        
