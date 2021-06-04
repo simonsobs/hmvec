@@ -1,7 +1,7 @@
 import numpy as np
-from matplotlib import pyplot as plt
-from matplotlib import colors as c
-import sympy as sym
+# from matplotlib import pyplot as plt
+# from matplotlib import colors as c
+
 import astropy.constants as const
 from astropy import units as u
 from astropy.modeling.blackbody import blackbody_nu
@@ -164,7 +164,7 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
         #Setup
         nu_range = np.logspace(11, 14, 2000)
         iplt = 0
-        # fig, ax = plt.subplots(len(sampleindices), 1, sharey=True, figsize=(10, 20))
+        fig, ax = plt.subplots(len(sampleindices), 1, sharey=True, figsize=(10, 20))
         alphavalue = 0.2
         colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
         colorsalpha = c.to_rgba_array(colors, alphavalue)
@@ -176,51 +176,52 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
             #Calculation
             spectrum = wholeSED(nu_range, nu_o_array[zi], temp_array[zi], A_array[zi])
             
-            plt.plot(nu_range, spectrum, color=colors[iplt], label=fr'z = {z[zi]:0.2f}, $\nu_o$ = {nu_o/1e9:,.0f} Ghz')
+            # plt.plot(nu_range, spectrum, color=colors[iplt], label=fr'z = {z[zi]:0.2f}, $\nu_o$ = {nu_o/1e9:,.0f} Ghz')
             
-            plt.xscale('log')
-            plt.yscale('log')
-            plt.xlabel(r'$\nu$ (Hz)')
-            plt.ylabel(r'$\Theta (\nu, z)$')
-            plt.legend()
-            plt.ylim(bottom=1e-4)
+            # plt.xscale('log')
+            # plt.yscale('log')
+            # plt.xlabel(r'$\nu$ (Hz)')
+            # plt.ylabel(r'$\Theta (\nu, z)$')
+            # plt.legend()
+            # plt.ylim(bottom=1e-4)
 
-            # #Plot curves
-            # ax[iplt].plot(nu_range, spectrum, color=colors[iplt], label=f'z = {z[zi]:0.2f}')
+            #Plot curves
+            ax[iplt].plot(nu_range, spectrum, color=colors[iplt], label=f'z = {z[zi]:0.2f}')
  
-            # #Marking v_o on the graph
-            # ax[iplt].axvline(x = nu_o, ls=':', color='k', lw=0.4, label=rf'$\nu_o$ = {nu_o/1e9:,.0f} Ghz')
+            #Marking v_o on the graph
+            ax[iplt].axvline(x = nu_o, ls=':', color='k', lw=0.4, label=rf'$\nu_o$ = {nu_o/1e9:,.2e} GHz')
             
 
-            # #Marking bandpass on graph
-            # if bandpassflag:
-            #     lowend = freq_array[zi, 0]
-            #     highend = freq_array[zi, 1]
-            #     bandpass_range = np.logspace(np.log10(lowend), np.log10(highend))
-            #     ax[iplt].fill_between(bandpass_range, wholeSED(bandpass_range, nu_o, temp_array[zi], A_array[zi]), 
-            #                             color=colorsalpha[iplt], edgecolors='none', label=f'Bandpass: {lowend/1e9:,.0f} to {highend/1e9:,.0f} Ghz')
+            #Marking bandpass on graph
+            if bandpassflag:
+                lowend = freq_array[zi, 0]
+                highend = freq_array[zi, 1]
+                bandpass_range = np.logspace(np.log10(lowend), np.log10(highend))
+                ax[iplt].fill_between(bandpass_range, wholeSED(bandpass_range, nu_o, temp_array[zi], A_array[zi]), 
+                                        color=colorsalpha[iplt], edgecolors='none', label=f'Bandpass: {lowend/1e9:,.2e} to {highend/1e9:,.2e} GHz')
 
 
-            # #Marking nu_sample at sed frame on the graph
-            # else:
-            #     ax[iplt].axvline(x = freq_array[zi], color=colors[iplt], lw=0.4, label=rf'$\nu_{{obs}}$ = {freq_array[zi]/1e9:,.0f} Ghz in rest frame')
+            #Marking nu_sample at sed frame on the graph
+            else:
+                ax[iplt].axvline(x = freq_array[zi], color=colors[iplt], lw=0.4, label=rf'$\nu_{{obs}}$ = {freq_array[zi]/1e9:,.2e} GHz in rest frame')
 
-            # #Plot Properties
-            # ax[iplt].set_xscale('log')
-            # ax[iplt].set_yscale('log')
-            # ax[iplt].set_xlabel(r'$\nu$ (Hz)')
-            # ax[iplt].set_ylabel(r'$\Theta (\nu, z)$')
-            # ax[iplt].legend()
+            #Plot Properties
+            ax[iplt].set_xscale('log')
+            ax[iplt].set_yscale('log')
+            ax[iplt].legend()
 
             iplt += 1
-        
-        plt.savefig('sed_norm_planck.pdf', dpi=900, bbox_inches='tight');
+        #Super Labels
+        fig.text(0.5, 0.09, r'$\nu$ (Hz)', ha='center', fontsize='xx-large')
+        fig.text(0.04, 0.5, r'$\Theta (\nu, z)$', va='center', rotation='vertical', fontsize='xx-large')
+
+        # plt.savefig('sed_norm_planck.pdf', dpi=900, bbox_inches='tight');
 
         #Save file
-        # if bandpassflag:
-        #     plt.savefig('sed_range.pdf', dpi=900, bbox_inches='tight');
-        # else:
-        #     plt.savefig('sed_1freq.pdf', dpi=900, bbox_inches='tight');
+        if bandpassflag:
+            plt.savefig('sed_range.pdf', dpi=400, bbox_inches='tight');
+        else:
+            plt.savefig('/scratch/r/rbond/ymehta3/sed_norm_1freq.png', dpi=900, bbox_inches='tight');
 
     return sed
 
@@ -239,7 +240,7 @@ def capitalSigma(M, logM_eff, sigma2):
     return M/np.sqrt(2*np.pi*sigma2) * np.exp(- (np.log10(M)-logM_eff)**2 / (2*sigma2))
 
 def luminosity(z, M, Nks, nu, params, nuframe='obs'):  
-    """Luminosity of CIB galaxies. It depends only on mass and redshift, but is broadcasted onto a grid of [z, M, k/r]. Most of the fit parameter values are from Viero using Herschel data; the exception is gamma, which wasn't part of the Viero model and therefore is obtained from Planck2013. The fit parameters are in the "params" dictionary.
+    """Luminosity of CIB galaxies. It depends only on mass and redshift, but is broadcasted onto a grid of [z, M, k/r]. The fit parameters are in the "params" dictionary.
 
     Arguments:
         M [1darray]: galaxy's masses
@@ -249,14 +250,14 @@ def luminosity(z, M, Nks, nu, params, nuframe='obs'):
         nuframe [str:'obs'|'rest']: frame that the nu is given in
     
     Model parameters:
-        alpha [float]: fit parameter - alpha (default = 0.2)
-        beta [float]: fit parameter - beta  (default = 1.6)
-        gamma [float]: fit parameter - gamma (default = 1.7)
-        delta [float]: fit parameter - delta (default = 2.4)
-        Td_o [float]: fit parameter - dust temp at z=0 (default = 20.7)
-        logM_eff [float]: fit parameter - log(M_eff) in L-M relation (default = 12.3)
-        var [float]: model parameter - variance of Gaussian part of L-M relation (default = 0.3)
-        L_o [float]: fit parameter - normalization constant (default: 1)
+        alpha [float]: fit parameter - alpha 
+        beta [float]: fit parameter - beta  
+        gamma [float]: fit parameter - gamma 
+        delta [float]: fit parameter - delta 
+        Td_o [float]: fit parameter - dust temp at z=0 
+        logM_eff [float]: fit parameter - log(M_eff) in L-M relation 
+        var [float]: model parameter - variance of Gaussian part of L-M relation 
+        L_o [float]: fit parameter - normalization constant 
 
     Returns:
         [3darray, float] : luminosity[z, M, k/r]
@@ -285,8 +286,8 @@ def luminosity(z, M, Nks, nu, params, nuframe='obs'):
 #Testing
 # lamdarange = np.array([8.0e-6, 1000.0e-6])
 # nurange = 3.0e8 / lamdarange
-# nurange = np.array([857.])*1e9
+# nurange = np.array([545.])*1e9
 # redshifts = np.linspace(0.01, 6, 200)
 # # redshifts = np.array([2.0])
 # sed = capitalTheta(nurange, 'obs', redshifts, alpha=0.36, beta=1.75, gamma=1.7, T_o=24.4, plot=True)
-# print(sed)
+# # print(sed)
