@@ -18,7 +18,7 @@ import scipy
 from scipy.integrate import simps
 from scipy.integrate import quad
 import time
-from matplotlib import pyplot as plt
+# from matplotlib import pyplot as plt
 """
 
 General vectorized FFT-based halo model implementation
@@ -162,6 +162,7 @@ class HaloModel(Cosmology):
         elif self.mode=="tinker":
             nus = deltac/np.sqrt(sigma2)
             fnus = tinker.f_nu(nus,self.zs[:,None])
+            # return nus, fnus                 # debugging    
             return nus * fnus # note that f is actually nu*fnu !
         else:
             raise NotImplementedError
@@ -176,6 +177,7 @@ class HaloModel(Cosmology):
             return 1. + (1./deltac)*((a*deltac**2./sigma2)-1.) + (2.*p/deltac)/(1.+(a*deltac**2./sigma2)**p)
         elif self.mode=="tinker":
             nus = deltac/np.sqrt(sigma2)
+            # return nus, tinker.bias(nus)          # debugging
             return tinker.bias(nus)
         else:
             raise NotImplementedError
@@ -482,16 +484,16 @@ class HaloModel(Cosmology):
             self.cib_params['Td_o'] = 24.4
             self.cib_params['logM_eff'] = 12.6
             self.cib_params['var'] = 0.5
-            self.cib_params['L_o'] = 3.0e-15
+            self.cib_params['L_o'] = 5e-8
         elif name.lower() == 'vierro':      # Vierro et al
             self.cib_params['alpha'] = 0.2
             self.cib_params['beta'] = 1.6
-            self.cib_params['gamma'] = 1.7
+            self.cib_params['gamma'] = 1.7      # not in Viero, so using Planck13
             self.cib_params['delta'] = 2.4
             self.cib_params['Td_o'] = 20.7
             self.cib_params['logM_eff'] = 12.3
             self.cib_params['var'] = 0.3
-            self.cib_params['L_o'] = 3.0e-15
+            self.cib_params['L_o'] = 5e-8
         else:
             assert len(params) == 8, "New sets of parameters require exactly 8 parameters"
 
@@ -542,6 +544,33 @@ class HaloModel(Cosmology):
     """
     CIB Stuff
     """
+    def get_flux(self, nu_obs, cenflag=True, satflag=True, satmf='Tinker'):
+        """Gives CIB flux at observed frequency.
+
+        Args:
+            nu_obs (float): Observed frequency
+            cenflag (bool, optional): Include central galaxies. Defaults to True.
+            satflag (bool, optional): Include satellite galaxies. Defaults to True.
+            satmf (str, optional): Subhalo mass function. Defaults to 'Tinker'.
+
+        Returns:
+            [array]: flux on whole z,m,k grid
+        """
+        chis = self.comoving_radial_distance(self.zs)
+        Lcen = 0.0
+        Lsat = 0.0
+
+        #Luminosities
+        if cenflag:
+            Lcen = self._get_fcen(nu_obs)
+        if satflag:
+            Lsat = self._get_fsat(nu_obs, satmf=satmf)
+        assert cenflag==True or satflag==True, "Pick a flux source: centrals and/or satellites"
+
+        #Flux
+        return (Lcen + Lsat) / ((1+self.zs) * chis**2)
+
+
     def _get_fcen(self, nu):
         '''Function of M and z, but defined over whole z,M,k grid'''
         return cib.luminosity(self.zs, self.ms, len(self.ks), nu, self.cib_params) / (4.0*np.pi)
@@ -842,21 +871,6 @@ class HaloModel(Cosmology):
         sfr = kennicutt * cib.luminosity(self.zs, self.ms, len(self.ks), freq_range, 'rest', **self.cib_params)
 
         return np.trapz(self.nzm * sfr[:,:,0], self.ms, axis=-1)
-
-    def get_flux(self, nu_obs, cenflag=True, satflag=True, satmf='Tinker'):
-        chis = self.comoving_radial_distance(self.zs)
-        Lcen = 0.0
-        Lsat = 0.0
-
-        #Luminosities
-        if cenflag:
-            Lcen = self._get_fcen(nu_obs)
-        if satflag:
-            Lsat = self._get_fsat(nu_obs, satmf=satmf)
-        assert cenflag==True or satflag==True, "Pick a flux source"
-
-        #Flux
-        return (Lcen + Lsat) / ((1+self.zs) * chis**2)
         
 
 
@@ -884,7 +898,7 @@ def sdndm(msat, mcen, funcname='Tinker'):
             gamma    = 0.3
             alpha    = -0.7
             beta     = -9.9
-            zeta       = 2.5
+            zeta     = 2.5
 
             #Calculation
             dndm = 1/msat*((gamma * ((msat/mcen)**alpha))*
