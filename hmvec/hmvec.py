@@ -456,9 +456,9 @@ class HaloModel(Cosmology):
         self.hods[name]['central_profile'] = central_profile_name
         self.hods[name]['log10mthresh'] = np.log10(mthresh[:,None])
 
-    def set_cibParams(self, name, **params):
+    def set_cibParams(self, name=None, **params):
         """
-        Values for parameters of CIB model. You can use a pre-existing set of parameters, slightly tweaked pre-existing set, or completely newly defined set of parameters.
+        Values for parameters of CIB model. To use a pre-existing set of parameters, simply specify 'name'. To tweak a pre-existing set, specify the preset and add the different parameter values as keyword arguments. To use a completely newly set of parameters, don't give a name and give all of the new parameters.
         
         Required Arguments:
         name [string] : Name of parameter set. Presets: 'planck13' and 'vierro'
@@ -494,8 +494,10 @@ class HaloModel(Cosmology):
             self.cib_params['logM_eff'] = 12.3
             self.cib_params['var'] = 0.3
             self.cib_params['L_o'] = 5e-8
+        elif name==None and len(params)!=8:
+            raise Exception("New sets of parameters require exactly 8 parameters")
         else:
-            assert len(params) == 8, "New sets of parameters require exactly 8 parameters"
+            raise NotImplementedError("Need valid parameter set name")    
 
         #Add Specific Parameters
         for key in params:
@@ -568,7 +570,10 @@ class HaloModel(Cosmology):
         assert cenflag==True or satflag==True, "Pick a flux source: centrals and/or satellites"
 
         #Flux
-        return (Lcen + Lsat) / ((1+self.zs) * chis**2)
+        Ltot = Lcen + Lsat
+        decay = 1 / ((1+self.zs) * chis**2)
+
+        return np.einsum('ijk,i->ijk', Ltot, decay)
 
 
     def _get_fcen(self, nu):
@@ -593,13 +598,13 @@ class HaloModel(Cosmology):
 
         #Integrate Subhalo Masses
         Nsatm = len(self.ms)
-        # satms = np.geomspace(self.ms[0], self.ms, num=Nsatm, axis=-1)
-        satms = np.geomspace(self.ms[0]*.01, self.ms, num=Nsatm, axis=-1)
+        Mmin = 1e10
+        satms = np.geomspace(Mmin, self.ms, num=Nsatm, axis=-1)
         if cibinteg.lower() == 'trap':
             fsat_m = np.trapz(integ(satms, self.ms[...,None]), satms, axis=-1)
         elif cibinteg.lower() == 'simps':
             fsat_m = simps(integ(satms, self.ms[...,None]), satms, axis=-1)
-        else: raise ValueError('Invalid cibinteg')
+        else: raise NotImplementedError('Invalid subhalo integration method (cibinteg)')
 
         #Get Redshift Dependencies
         a = self.cib_params['alpha']
@@ -904,7 +909,7 @@ def sdndm(msat, mcen, funcname='Tinker'):
             dndm = 1/msat*((gamma * ((msat/mcen)**alpha))*
                 (np.exp((beta) * ((msat / mcen)**zeta))))
 
-        else: raise ValueError('Invalid subhalo mass function name')
+        else: raise NotImplementedError('Invalid subhalo mass function name')
 
         return dndm
 
