@@ -559,21 +559,22 @@ class HaloModel(Cosmology):
             [array]: flux on whole z,m,k grid
         """
         chis = self.comoving_radial_distance(self.zs)
-        Lcen = 0.0
-        Lsat = 0.0
+        fcen = 0.0
+        fsat = 0.0
+        nu_obs = np.array([nu_obs])
 
         #Luminosities
         if cenflag:
-            Lcen = self._get_fcen(nu_obs)
+            fcen = self._get_fcen(nu_obs)
         if satflag:
-            Lsat = self._get_fsat(nu_obs, satmf=satmf)
+            fsat = self._get_fsat(nu_obs, satmf=satmf)
         assert cenflag==True or satflag==True, "Pick a flux source: centrals and/or satellites"
 
         #Flux
-        Ltot = Lcen + Lsat
+        ftot = fcen + fsat
         decay = 1 / ((1+self.zs) * chis**2)
 
-        return np.einsum('ijk,i->ijk', Ltot, decay)
+        return np.einsum('ijk,i->ijk', ftot, decay)
 
 
     def _get_fcen(self, nu):
@@ -597,7 +598,8 @@ class HaloModel(Cosmology):
             return sdndm(m, M, satmf) * cib.capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
 
         #Integrate Subhalo Masses
-        Nsatm = len(self.ms)
+#         import pdb; pdb.set_trace()
+        Nsatm = len(self.ms) + 1
         Mmin = 1e10
         satms = np.geomspace(Mmin, self.ms, num=Nsatm, axis=-1)
         if cibinteg.lower() == 'trap':
@@ -605,7 +607,8 @@ class HaloModel(Cosmology):
         elif cibinteg.lower() == 'simps':
             fsat_m = simps(integ(satms, self.ms[...,None]), satms, axis=-1)
         else: raise NotImplementedError('Invalid subhalo integration method (cibinteg)')
-
+#         pdb.set_trace()
+        
         #Get Redshift Dependencies
         a = self.cib_params['alpha']
         b = self.cib_params['beta']
@@ -623,7 +626,7 @@ class HaloModel(Cosmology):
         return fsat / (4.0*np.pi)
 
     def _get_cib(self, freq, satflag=True, cibinteg='trap', satmf='Tinker'):
-        '''Assumes NFW mass profile for the centrals'''
+        '''Assumes central galaxies are at the center of the halo'''
         uhalo = self.uk_profiles['nfw']
         fcen = self._get_fcen(freq)
         if satflag:
@@ -633,7 +636,7 @@ class HaloModel(Cosmology):
         return fcen + uhalo*fsat
     
     def _get_cib_square(self, freq, satflag=True, cibinteg='trap', satmf='Tinker'):
-        '''Assumes NFW mass profile for the centrals'''
+        '''Assumes central galaxies are at the center of the halo'''
         if satflag:
             uhalo = self.uk_profiles['nfw']
             fcen1 = self._get_fcen(freq[0])
@@ -641,7 +644,7 @@ class HaloModel(Cosmology):
             fsat1 = self._get_fsat(freq[0], cibinteg, satmf)
             fsat2 = self._get_fsat(freq[1], cibinteg, satmf)
 
-            return (fcen1*fsat2*uhalo) + (fcen2*fsat1*uhalo) + (fsat1*fsat2*uhalo**2)
+            return (fcen1*fsat2*uhalo) + (fcen2*fsat1*uhalo) + (fsat1*fsat2*uhalo*uhalo)
         else:
             return 0.
 
@@ -729,7 +732,20 @@ class HaloModel(Cosmology):
         
         print(timestring)
 
+    def _freqtest(self, freq):
+        """ Tests formatting of CIB frequencies """
+        if len(nu_obs) > 2:
+            raise ValueError('Only 1 pair of frequencies to cross at a time')
+        elif len(nu_obs) == 1  and  nu_obs.ndim == 1:
+            freqarray = np.array([freq, freq])
+        elif len(nu_obs) == 1  and  nu_obs.ndim == 2:
+            freqarray = np.array([freq[0], freq[0]])
+        elif nu_obs.ndim != 2:
+            raise ValueError('Need a 2D array for the frequency')
 
+        return freqarray
+    
+    
     """
     Power Stuff
     """
@@ -743,20 +759,14 @@ class HaloModel(Cosmology):
         satmf [str]      : subhalo mass function; either 'Tinker' or 'Jiang'
         '''
         if name2 is None: name2 = name1
-
+        
         if name1.lower() == 'cib' or name2.lower() == 'cib':
-            if len(nu_obs) > 2: 
-                raise ValueError('Frequency array must have at most 2 elements')
-            elif len(nu_obs) == 1:
-                nu_obs = np.array([nu_obs, nu_obs])
-            elif nu_obs.ndim != 2:
-                raise ValueError('Need a 2D array for the frequency')
-            elif nu_obs.shape[0] > 2:
-                raise ValueError('Only 1 pair of frequencies at a time')
+            nu_obs = _freqtest(nu_obs)
             return self.get_power_1halo(name1,name2, nu_obs, subhalos, cibinteg, satmf) + self.get_power_2halo(name1,name2,verbose, nu_obs, subhalos, cibinteg, satmf)
         else:
             return self.get_power_1halo(name1,name2) + self.get_power_2halo(name1,name2,verbose)
 
+        
     def get_power_1halo(self,name="nfw",name2=None, nu_obs=None, subhalos=True, cibinteg='trap', satmf='Tinker'):
         '''
         Keyword Arguments:
@@ -767,14 +777,7 @@ class HaloModel(Cosmology):
         '''
         name2 = name if name2 is None else name2
         if name.lower() == 'cib' or name2.lower() == 'cib':
-            if len(nu_obs) > 2: 
-                raise ValueError('Frequency array must have at most 2 elements')
-            elif len(nu_obs) == 1:
-                nu_obs = np.array([nu_obs, nu_obs])
-            elif nu_obs.ndim != 2:
-                raise ValueError('Need a 2D array for the frequency')
-            elif nu_obs.shape[0] > 2:
-                raise ValueError('Only 1 pair of frequencies at a time')
+            nu_obs = _freqtest(nu_obs)
 
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
@@ -805,6 +808,7 @@ class HaloModel(Cosmology):
         integrand = self.nzm[...,None] * square_term
         return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
 
+    
     def get_power_2halo(self,name="nfw",name2=None,verbose=False,nu_obs=None, subhalos=True, cibinteg='trap', satmf='Tinker'):
         '''
         Keyword Arguments:
@@ -815,16 +819,8 @@ class HaloModel(Cosmology):
         '''
         name2 = name if name2 is None else name2
         if name.lower() == 'cib' or name2.lower() == 'cib':
-            if len(nu_obs) == 1:
-                nu_obs = np.array([nu_obs, nu_obs])
-            elif len(nu_obs) > 2: 
-                raise ValueError('Frequency array must have at most 2 elements')
-            elif nu_obs.ndim != 2:
-                raise ValueError('Need a 2D array for the frequency')
-            elif nu_obs.shape[0] > 2:
-                raise ValueError('Only 1 pair of frequencies at a time')
+            nu_obs = _freqtest(nu_obs)
             
-
         def _2haloint(iterm):
             integrand = self.nzm[...,None] * iterm * self.bh[...,None]
             integral = np.trapz(integrand,ms,axis=-2)
@@ -848,17 +844,20 @@ class HaloModel(Cosmology):
                 rterm1 = self._get_cib(nu_obs[inu], subhalos, cibinteg, satmf)
                 rterm01 = 0
                 b = 0
-                inu+=1
             else: raise ValueError
 
             return rterm1,rterm01,b
 
         ms = self.ms[...,None]
+        
+        #Integrand Terms
         freqctr = 0
-
-        iterm1,iterm01,b1 = _get_term(name, freqctr)
-        iterm2,iterm02,b2 = _get_term(name2, freqctr)
-
+        iterm1, iterm01, b1 = _get_term(name, freqctr)
+        if name.lower() == 'cib':
+            freqctr += 1
+        iterm2, iterm02, b2 = _get_term(name2, freqctr)
+        
+        #Calculate Integral
         integral = _2haloint(iterm1)
         integral2 = _2haloint(iterm2)
 
@@ -870,6 +869,7 @@ class HaloModel(Cosmology):
             print("Two-halo consistency2: " , consistency2,integral2)
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
+    
     def get_sfrd(self, freq_range):
         kennicutt = 1.7e-10
 
@@ -880,38 +880,38 @@ class HaloModel(Cosmology):
 
 
 def sdndm(msat, mcen, funcname='Tinker'):
-        '''Satellite halo mass function 
-        Tinker: https://iopscience.iop.org/article/10.1088/0004-637X/719/1/88
-        Jiang: '''
+    '''Satellite halo mass function 
+    Tinker: https://iopscience.iop.org/article/10.1088/0004-637X/719/1/88
+    Jiang: '''
 
-        if funcname.lower() == 'jiang':
-            #Parameters
-            gamma_1    = 0.13
-            alpha_1    = -0.83
-            gamma_2    = 1.33
-            alpha_2    = -0.02
-            beta_2     = 5.67
-            zeta       = 1.19
+    if funcname.lower() == 'jiang':
+        #Parameters
+        gamma_1    = 0.13
+        alpha_1    = -0.83
+        gamma_2    = 1.33
+        alpha_2    = -0.02
+        beta_2     = 5.67
+        zeta       = 1.19
 
-            #Calculation
-            dndm = 1/msat*(((gamma_1 * ((msat/mcen)**alpha_1)) +
-                (gamma_2 * ((msat/mcen)**alpha_2))) *
-                (np.exp(-(beta_2) * ((msat / mcen)**zeta))))
+        #Calculation
+        dndm = 1/msat*(((gamma_1 * ((msat/mcen)**alpha_1)) +
+            (gamma_2 * ((msat/mcen)**alpha_2))) *
+            (np.exp(-(beta_2) * ((msat / mcen)**zeta))))
 
-        elif funcname.lower() == 'tinker':
-            # Extra factor of m as we need dndm not dndlnm
-            gamma    = 0.3
-            alpha    = -0.7
-            beta     = -9.9
-            zeta     = 2.5
+    elif funcname.lower() == 'tinker':
+        # Extra factor of m as we need dndm not dndlnm
+        gamma    = 0.3
+        alpha    = -0.7
+        beta     = -9.9
+        zeta     = 2.5
 
-            #Calculation
-            dndm = 1/msat*((gamma * ((msat/mcen)**alpha))*
-                (np.exp((beta) * ((msat / mcen)**zeta))))
+        #Calculation
+        dndm = 1/msat * ((gamma * ((msat/mcen)**alpha))*
+            (np.exp((beta) * ((msat / mcen)**zeta))))
 
-        else: raise NotImplementedError('Invalid subhalo mass function name')
+    else: raise NotImplementedError('Invalid subhalo mass function name')
 
-        return dndm
+    return dndm
 
 
 """

@@ -72,8 +72,7 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
             freq_array = np.outer((1+z), nu_sample)
         else:
             freq_array = (1+z) * nu_sample
-    #Already in Rest Frame
-    elif nuframe.lower() == 'rest':
+    elif nuframe.lower() == 'rest':           # already in Rest Frame
         if bandpassflag:
             freq_array = np.outer(np.ones(z.shape), nu_sample)
         else:
