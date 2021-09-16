@@ -340,6 +340,14 @@ class Cosmology(object):
         chis = self.comoving_radial_distance(zs) # Mpc
 
         return limber_integral(ells, zs, ks, Pjj, zs, a/hzs, a/hzs, hzs, chis, dcdzflag)
+    
+    def C_ki(self,ells,zs,ks,Pjm,lzs1=None,ldndz1=None,lwindow1=None,dcdzflag=False):
+        if lwindow1 is None: lwindow1 = self.lensing_window(zs,lzs1,ldndz1)
+        hzs = self.h_of_z(zs)           # 1/Mpc
+        a = 1.0/(1.0+zs)              # scale factor
+        chis = self.comoving_radial_distance(zs) # Mpc
+        
+        return limber_integral(ells, zs, ks, Pjm, zs, lwindow1, a/hzs, hzs, chis, dcdzflag)
 
     def total_matter_power_spectrum(self,Pnn,Pne,Pee):
         omtoth2 = self.p['omch2'] + self.p['ombh2']

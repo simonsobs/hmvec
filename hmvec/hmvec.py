@@ -18,7 +18,6 @@ import scipy
 from scipy.integrate import simps
 from scipy.integrate import quad
 import time
-# from matplotlib import pyplot as plt
 """
 
 General vectorized FFT-based halo model implementation
@@ -484,7 +483,7 @@ class HaloModel(Cosmology):
             self.cib_params['Td_o'] = 24.4
             self.cib_params['logM_eff'] = 12.6
             self.cib_params['var'] = 0.5
-            self.cib_params['L_o'] = 5e-8
+            self.cib_params['L_o'] = 6.4e-8
         elif name.lower() == 'vierro':      # Vierro et al
             self.cib_params['alpha'] = 0.2
             self.cib_params['beta'] = 1.6
@@ -493,7 +492,7 @@ class HaloModel(Cosmology):
             self.cib_params['Td_o'] = 20.7
             self.cib_params['logM_eff'] = 12.3
             self.cib_params['var'] = 0.3
-            self.cib_params['L_o'] = 5e-8
+            self.cib_params['L_o'] = 6.4e-8
         elif name==None and len(params)!=8:
             raise Exception("New sets of parameters require exactly 8 parameters")
         else:
@@ -734,16 +733,16 @@ class HaloModel(Cosmology):
 
     def _freqtest(self, freq):
         """ Tests formatting of CIB frequencies """
-        if len(nu_obs) > 2:
+        if len(freq) > 2:
             raise ValueError('Only 1 pair of frequencies to cross at a time')
-        elif len(nu_obs) == 1  and  nu_obs.ndim == 1:
-            freqarray = np.array([freq, freq])
-        elif len(nu_obs) == 1  and  nu_obs.ndim == 2:
-            freqarray = np.array([freq[0], freq[0]])
-        elif nu_obs.ndim != 2:
+        elif len(freq) == 1  and  freq.ndim == 1:
+            return np.array([freq, freq])
+        elif len(freq) == 1  and  freq.ndim == 2:
+            return np.array([freq[0], freq[0]])
+        elif freq.ndim != 2:
             raise ValueError('Need a 2D array for the frequency')
-
-        return freqarray
+        else:
+            return freq
     
     
     """
@@ -761,7 +760,7 @@ class HaloModel(Cosmology):
         if name2 is None: name2 = name1
         
         if name1.lower() == 'cib' or name2.lower() == 'cib':
-            nu_obs = _freqtest(nu_obs)
+            nu_obs = self._freqtest(nu_obs)
             return self.get_power_1halo(name1,name2, nu_obs, subhalos, cibinteg, satmf) + self.get_power_2halo(name1,name2,verbose, nu_obs, subhalos, cibinteg, satmf)
         else:
             return self.get_power_1halo(name1,name2) + self.get_power_2halo(name1,name2,verbose)
@@ -777,7 +776,7 @@ class HaloModel(Cosmology):
         '''
         name2 = name if name2 is None else name2
         if name.lower() == 'cib' or name2.lower() == 'cib':
-            nu_obs = _freqtest(nu_obs)
+            nu_obs = self._freqtest(nu_obs)
 
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
@@ -801,7 +800,7 @@ class HaloModel(Cosmology):
                     square_term *= self._get_matter(nm)
                 elif nm in pnames:
                     square_term *= self._get_pressure(nm)
-                elif name.lower()=='cib':
+                elif nm.lower()=='cib':
                     square_term *= self._get_cib(nu_obs[0], subhalos, cibinteg, satmf)
                 else: raise ValueError
 
@@ -819,7 +818,7 @@ class HaloModel(Cosmology):
         '''
         name2 = name if name2 is None else name2
         if name.lower() == 'cib' or name2.lower() == 'cib':
-            nu_obs = _freqtest(nu_obs)
+            nu_obs = self._freqtest(nu_obs)
             
         def _2haloint(iterm):
             integrand = self.nzm[...,None] * iterm * self.bh[...,None]
