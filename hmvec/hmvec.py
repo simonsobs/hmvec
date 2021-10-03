@@ -600,7 +600,9 @@ class HaloModel(Cosmology):
                     square_term *= self._get_matter(nm)
                 elif nm in pnames:
                     square_term *= self._get_pressure(nm)
-                else: raise ValueError
+                else: raise ValueError(
+                    f"Profile {nm} not computed! Available profiles are {hnames}; {mnames}; {pnames}"
+                )
 
         integrand = self.nzm[...,None] * square_term
         return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
