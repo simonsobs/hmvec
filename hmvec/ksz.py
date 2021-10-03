@@ -330,10 +330,9 @@ class kSZ(HaloModel):
         self.adotf = []
         self.d2vs = []
 
-        self.sigma_z_func = None
-        self.Hphotoz = None
-        if sigz is not None:
-            self.sigma_z_func = lambda z : sigz * (1.+z)
+        self.sigz = sigz
+        if self.sigz is not None:
+            self.sigma_z_func = lambda z : self.sigz * (1.+z)
             # TODO: Compute H(z) internally instead
             zhs,hs = np.loadtxt("fiducial_cosmology_Hs.txt",unpack=True)
             self.Hphotoz = interp1d(zhs,hs)
@@ -343,11 +342,11 @@ class kSZ(HaloModel):
         # # kr = mu * kL ; this is an array of krs of shape (num_mus,num_kLs)
         self.krs = self.mu.reshape((self.mu.size,1)) * self.kLs.reshape((1,self.kLs.size))
 
-        self.sigz = sigz
+
         if not skip_hod:
             self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=verbose,b1=b1,b2=b1)
             self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=verbose,b1=b1)
-            if sigz is not None:
+            if self.sigz is not None:
                 oPggs = self.sPggs.copy()
                 oPges = self.sPges.copy()
                 self.sPggs = []
@@ -408,12 +407,12 @@ class kSZ(HaloModel):
 
             if verbose: print("Calculating small scale Pgg...")
             Pgg = aPgg[zindex].copy()
-            if sigz is not None:
+            if self.sigz is not None:
                 Pgg = Pgg[None,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1))**2.)
             Pggtot  = Pgg + ngg
             self.sPggtot.append(Pggtot.copy())
             Pge = aPge[zindex].copy()
-            if sigz is not None:
+            if self.sigz is not None:
                 Pge = Pge[None,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1)))
             self.sPge.append(Pge.copy())
 
@@ -466,7 +465,7 @@ class kSZ(HaloModel):
         return ksz_radial_function(self.zs[zindex],self.pars.ombh2, self.pars.YHe, gasfrac = gasfrac,xe=xe, tau=tau, params=params)
 
     def Wphoto(self,zindex):
-        if sigma_z_func is None:
+        if self.sigz is None:
             return np.ones_like(self.krs)
         else:
             krs = self.krs
