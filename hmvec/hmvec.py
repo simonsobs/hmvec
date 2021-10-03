@@ -576,7 +576,7 @@ class HaloModel(Cosmology):
         return pk
 
 
-    def get_power(self,name,name2=None,verbose=True,b1=None,b2=None):
+    def get_power(self,name,name2=None,verbose=False,b1=None,b2=None):
         if name2 is None: name2 = name
         return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose,b1,b2)
 
