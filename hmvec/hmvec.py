@@ -219,7 +219,8 @@ class HaloModel(Cosmology):
 
     def add_battaglia_profile(self,name,family=None,param_override=None,
                               nxs=None,
-                              xmax=None,ignore_existing=False,vectorize_z=True):
+                              xmax=None,ignore_existing=False,vectorize_z=True,
+                              verbose=False):
         if not(ignore_existing): assert name not in self.uk_profiles.keys(), "Profile name already exists."
         assert name!='nfw', "Name nfw is reserved."
         if nxs is None: nxs = self.p['electron_density_profile_integral_numxs']
@@ -233,7 +234,7 @@ class HaloModel(Cosmology):
 
         # Update with overrides
         if param_override is not None:
-            print(param_override)
+            if verbose: print(param_override)
             for key in param_override.keys():
                 if key=='battaglia_gas_gamma':
                     pparams[key] = param_override[key]

@@ -315,7 +315,7 @@ class kSZ(HaloModel):
                                             param_override=electron_profile_param_override,
                                             nxs=electron_profile_nxs,
                                             xmax=electron_profile_xmax,ignore_existing=False,
-                                            vectorize_z=False)
+                                            vectorize_z=False, verbose=verbose)
             if verbose: print('Defining electron profile: finished')
 
         if not(skip_hod):
