@@ -330,9 +330,13 @@ class kSZ(HaloModel):
         self.adotf = []
         self.d2vs = []
 
-        self.sigma_z_func = lambda z : sigz * (1.+z)
-        zhs,hs = np.loadtxt("fiducial_cosmology_Hs.txt",unpack=True)
-        self.Hphotoz = interp1d(zhs,hs)
+        self.sigma_z_func = None
+        self.Hphotoz = None
+        if sigz is not None:
+            self.sigma_z_func = lambda z : sigz * (1.+z)
+            # TODO: Compute H(z) internally instead
+            zhs,hs = np.loadtxt("fiducial_cosmology_Hs.txt",unpack=True)
+            self.Hphotoz = interp1d(zhs,hs)
 
         # Define log-spaced array of k values
         self.kLs = np.geomspace(get_kmin(np.max(volumes_gpc3)),kL_max,num_kL_bins)
@@ -462,10 +466,13 @@ class kSZ(HaloModel):
         return ksz_radial_function(self.zs[zindex],self.pars.ombh2, self.pars.YHe, gasfrac = gasfrac,xe=xe, tau=tau, params=params)
 
     def Wphoto(self,zindex):
-        krs = self.krs
-        z = self.zs[zindex]
-        H = self.Hphotoz(z)
-        return np.exp(-self.sigma_z_func(z)**2.*krs**2./2./H**2.) # (mus,kLs)
+        if sigma_z_func is None:
+            return np.ones_like(self.krs)
+        else:
+            krs = self.krs
+            z = self.zs[zindex]
+            H = self.Hphotoz(z)
+            return np.exp(-self.sigma_z_func(z)**2.*krs**2./2./H**2.) # (mus,kLs)
 
 
     def Nvv(self,zindex,Cls):
