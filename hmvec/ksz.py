@@ -1009,6 +1009,9 @@ def get_ksz_auto_squeezed(
     slow_chi_integral : bool, optional
         Use slower quad method for Limber integral for C_ell, instead of faster
         trapz. Default: False.
+    save_cl_integrand : bool, optional
+        Save integrand of C_ell to spec_dict, along with coordinate values
+        that integrand was evaluated at, w.r.t. either chi or z.
 
     Returns
     -------
@@ -1191,6 +1194,41 @@ def get_ksz_auto_squeezed(
         )**2
         integrand *= (pksz.pars.TCMB * 1e6)**2
 
+        # If desired, save integrand for each ell to spec_dict.
+        # We save the integrand w.r.t either chi and z, along with the
+        # chi and z value it is evaluated at
+        if save_cl_integrand:
+            # Make empty arrays to hold output
+            if iell == 0:
+                spec_dict['ClkSZ_integrand_chi'] = np.zeros(
+                    (len(ells), len(chi_int)), dtype=chi_int.dtype
+                )
+                spec_dict['ClkSZ_integrand_z'] = np.zeros_like(
+                    spec_dict['ClkSZ_integrand_chi']
+                )
+
+                spec_dict['ClkSZ_dchi_integrand'] = np.zeros(
+                    (len(ells), len(integrand)), dtype=integrand.dtype
+                )
+                spec_dict['ClkSZ_dz_integrand'] = np.zeros_like(
+                    spec_dict['ClkSZ_dchi_integrand']
+                )
+
+            # Save integrand w.r.t. chi
+            spec_dict['ClkSZ_integrand_chi'][iell] = chi_int
+            spec_dict['ClkSZ_dchi_integrand'][iell] = integrand
+
+            # Save integrand w.r.t z, which is dchi/dz * integrand_dchi
+            spec_dict['ClkSZ_integrand_z'][iell] = z_int
+            _DERIV_DZ = 0.001
+            dchi_dz_int = (
+                (
+                    pksz.results.comoving_radial_distance(z_int + _DERIV_DZ)
+                    - pksz.results.comoving_radial_distance(z_int - _DERIV_DZ)
+                ) / (2 * _DERIV_DZ)
+            )
+            spec_dict['ClkSZ_dz_integrand'][iell] = integrand * dchi_dz_int
+
         if not slow_chi_integral:
             # Do C_ell integral via trapezoid rule
             cl[iell] = np.trapz(integrand, chi_int)
@@ -1199,6 +1237,8 @@ def get_ksz_auto_squeezed(
             # equivalent results at the precision we care about
             igr_interp = interp1d(chi_int, integrand)
             cl[iell] = quad(igr_interp, chi_int[0], chi_int[-1])[0]
+
+
 
     # If desired, save some files for debugging
     if save_debug_files and not template:
