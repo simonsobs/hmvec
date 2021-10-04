@@ -292,23 +292,40 @@ class kSZ(HaloModel):
                  verbose=False,
                  b1=None,b2=None,sigz=None):
 
+        # Define masses to compute for
         if ms is None: ms = np.geomspace(defaults['min_mass'],defaults['max_mass'],defaults['num_mass'])
 
+        # Define comoving volume and galaxy number density at each redshift
         volumes_gpc3 = np.atleast_1d(volumes_gpc3)
-        assert len(zs)==len(volumes_gpc3)==len(ngals_mpc3)
         ngals_mpc3 = np.asarray(ngals_mpc3)
+        if (len(zs) != len(volumes_gpc3)) or (len(zs) != len(ngals_mpc3)):
+            raise ValueError("zs, volumes_gpc3, and ngals_mpc3 must have same length")
+        self.ngals_mpc3 = ngals_mpc3
 
+        # Warn user if k_min is the same for all zs
+        if np.max(volumes_gpc3) != np.min(volumes_gpc3):
+            warnings.warn('Using equal k_min at each z, despite different volumes at each z')
+
+        # Define k_short and mu values to compute for
         ks = np.geomspace(kS_min,kS_max,num_kS_bins)
         self.ks = ks
+        self.kS = self.ks
         self.mu = np.linspace(-1.,1.,num_mu_bins)
 
+        # Define k_long values to compute for
+        self.kLs = np.geomspace(get_kmin(np.max(volumes_gpc3)),kL_max,num_kL_bins)
+        # Defile k_{long,radial} = k_long * mu values to compute for.
+        # This is an array of krs of shape (num_mus,num_kLs)
+        self.krs = self.mu[:, np.newaxis] * self.kLs[np.newaxis, :]
+
+        # Initialize HaloModel object
         if verbose: print('Defining HaloModel')
         HaloModel.__init__(self,zs,ks,ms=ms,params=params,mass_function=mass_function,
                  halofit=halofit,mdef=mdef,nfw_numeric=nfw_numeric,skip_nfw=skip_nfw)
         if verbose: print('Defining HaloModel: finished')
 
-        self.kS = self.ks
-        if not(skip_electron_profile):
+        # Initialize electron profile
+        if not skip_electron_profile:
             if verbose: print('Defining electron profile')
             self.add_battaglia_profile(name=electron_profile_name,
                                             family=electron_profile_family,
@@ -318,18 +335,16 @@ class kSZ(HaloModel):
                                             vectorize_z=False, verbose=verbose)
             if verbose: print('Defining electron profile: finished')
 
-        if not(skip_hod):
+        # Define galaxy HOD
+        if not skip_hod:
             if verbose: print('Defining HOD')
             self.add_hod(hod_name,mthresh=mthreshs_override,ngal=ngals_mpc3,corr=hod_corr,
                          satellite_profile_name='nfw',
-                         central_profile_name=None,ignore_existing=False,param_override=hod_param_override)
+                         central_profile_name=None,ignore_existing=False,
+                         param_override=hod_param_override)
             if verbose: print('Defining HOD: finished')
 
-        self.Pmms = []
-        self.fs = []
-        self.adotf = []
-        self.d2vs = []
-
+        # Set quantities needed for photo-z uncertainty calculations
         self.sigz = sigz
         if self.sigz is not None:
             self.sigma_z_func = lambda z : self.sigz * (1.+z)
@@ -337,15 +352,39 @@ class kSZ(HaloModel):
             zhs,hs = np.loadtxt("fiducial_cosmology_Hs.txt",unpack=True)
             self.Hphotoz = interp1d(zhs,hs)
 
-        # Define log-spaced array of k values
-        self.kLs = np.geomspace(get_kmin(np.max(volumes_gpc3)),kL_max,num_kL_bins)
-        # # kr = mu * kL ; this is an array of krs of shape (num_mus,num_kLs)
-        self.krs = self.mu.reshape((self.mu.size,1)) * self.kLs.reshape((1,self.kLs.size))
+        # Get P_linear and f(z) on grid in z and k
+        p = self._get_matter_power(self.zs,self.kLs,nonlinear=False)
+        growth = self.results.get_redshift_evolution(
+            self.kLs,
+            self.zs,
+            ['growth']
+        )[:,:,0]
 
+        # Compute some cosmological quantities needed for large-scale spectra
+        self.Pmms = []
+        self.fs = []
+        self.adotf = []
+        self.d2vs = []
+        self.kstars = []
+        self.chistars = []
+        for zindex,volume_gpc3 in enumerate(volumes_gpc3):
+            self.Pmms.append(np.resize(p[zindex].copy(),(self.mu.size,self.kLs.size)))
+            self.fs.append(growth[:,zindex].copy())
+            z = self.zs[zindex]
+            a = 1./(1.+z)
+            H = self.results.h_of_z(z)
+            self.kstars.append(self.ksz_radial_function(zindex))
+            self.d2vs.append(self.fs[zindex]*a*H / self.kLs)
+            self.adotf.append(self.fs[zindex]*a*H)
+            self.chistars.append(self.results.comoving_radial_distance(z))
 
+        # Compute 3d power spectra
         if not skip_hod:
+            # Compute P_gg and P_ge
             self.sPggs = self.get_power(hod_name,name2=hod_name,verbose=verbose,b1=b1,b2=b1)
             self.sPges = self.get_power(hod_name,name2=electron_profile_name,verbose=verbose,b1=b1)
+
+            # Incorporate photo-z uncertainty
             if self.sigz is not None:
                 oPggs = self.sPggs.copy()
                 oPges = self.sPges.copy()
@@ -357,66 +396,41 @@ class kSZ(HaloModel):
                 self.sPggs = np.asarray(self.sPggs)
                 self.sPges = np.asarray(self.sPges)
 
-        # Warn user that k_min is the same for all zs (thanks to Simon Foreman for speed-up here)
-        if np.max(volumes_gpc3) != np.min(volumes_gpc3):
-            warnings.warn('Using equal k_min at each z, despite different volumes at each z')
+            # Compute further power spectra
+            # TODO: clean this up and add more comments
+            self.Vs = volumes_gpc3
+            self.vrec = []
+            self.sPggtot = []
+            self.sPge = []
+            self.bgs = []
+            aPgg = self.get_power('g','g',verbose=verbose)
+            aPge = self.get_power('g','e',verbose=verbose)
+            for zindex,volume_gpc3 in enumerate(volumes_gpc3):
+                # Compute P_gg + N_gg and P_gv for fiducial and "true" parameters, as functions of k_L
+                bg = self.hods['g']['bg'][zindex]
+                self.bgs.append(bg)
+                ngal = ngals_mpc3[zindex]
+                ngg = Ngg(ngal)
+                flPgg = self.lPgg(zindex,bg1=bg,bg2=bg)[0,:] + ngg
+                flPgv = self.lPgv(zindex,bg=bg)[0,:]
+                # Construct integrand (without prefactor) as function of tabulated k_L values,
+                # and integrate
+                kls = self.kLs
+                integrand = _sanitize((kls**2.)*(flPgv*flPgv)/flPgg)
+                vrec = np.trapz(integrand,kls)
+                self.vrec.append(vrec.copy())
 
-        # get P_linear and f(z)
-        # on grid in z and k
-        p = self._get_matter_power(self.zs,self.kLs,nonlinear=False)
-        growth = self.results.get_redshift_evolution(
-            self.kLs,
-            self.zs,
-            ['growth']
-        )[:,:,0]
+                if verbose: print("Calculating small scale Pgg...")
+                Pgg = aPgg[zindex].copy()
+                if self.sigz is not None:
+                    Pgg = Pgg[None,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1))**2.)
+                Pggtot  = Pgg + ngg
+                self.sPggtot.append(Pggtot.copy())
+                Pge = aPge[zindex].copy()
+                if self.sigz is not None:
+                    Pge = Pge[None,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1)))
+                self.sPge.append(Pge.copy())
 
-        self.kstars = []
-        self.chistars = []
-        self.Vs = volumes_gpc3
-        self.vrec = []
-        self.sPggtot = []
-        self.sPge = []
-        self.bgs = []
-        aPgg = self.get_power('g','g',verbose=verbose)
-        aPge = self.get_power('g','e',verbose=verbose)
-        for zindex,volume_gpc3 in enumerate(volumes_gpc3):
-            self.Pmms.append(np.resize(p[zindex].copy(),(self.mu.size,self.kLs.size)))
-            self.fs.append(growth[:,zindex].copy())
-            z = self.zs[zindex]
-            a = 1./(1.+z)
-            H = self.results.h_of_z(z)
-            self.kstars.append(self.ksz_radial_function(zindex))
-            self.d2vs.append(  self.fs[zindex]*a*H / self.kLs )
-            self.adotf.append(self.fs[zindex]*a*H)
-
-            self.chistars.append( self.results.comoving_radial_distance(z) )
-
-            # Compute P_gg + N_gg and P_gv for fiducial and "true" parameters, as functions of k_L
-            bg = self.hods['g']['bg'][zindex]
-            self.bgs.append(bg)
-            ngal = ngals_mpc3[zindex]
-            ngg = Ngg(ngal)
-            flPgg = self.lPgg(zindex,bg1=bg,bg2=bg)[0,:] + ngg
-            flPgv = self.lPgv(zindex,bg=bg)[0,:]
-            # Construct integrand (without prefactor) as function of tabulated k_L values,
-            # and integrate
-            kls = self.kLs
-            integrand = _sanitize((kls**2.)*(flPgv*flPgv)/flPgg)
-            vrec = np.trapz(integrand,kls)
-            self.vrec.append(vrec.copy())
-
-            if verbose: print("Calculating small scale Pgg...")
-            Pgg = aPgg[zindex].copy()
-            if self.sigz is not None:
-                Pgg = Pgg[None,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1))**2.)
-            Pggtot  = Pgg + ngg
-            self.sPggtot.append(Pggtot.copy())
-            Pge = aPge[zindex].copy()
-            if self.sigz is not None:
-                Pge = Pge[None,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1)))
-            self.sPge.append(Pge.copy())
-
-        self.ngals_mpc3 = ngals_mpc3
 
     def Pge_err(self,zindex,ks_bin_edges,Cls):
         kstar = self.kstars[zindex]
@@ -428,7 +442,8 @@ class kSZ(HaloModel):
         return pge_err_core(pgv_int,kstar,chistar,volume,kss,ks_bin_edges,pggtot,Cls)
 
     def lPvv(self,zindex,bv1=1,bv2=1):
-        """The long-wavelength power spectrum of vxv.
+        """The long-wavelength velocity auto spectrum, P_vv.
+
         This is calculated as:
         (faH/kL)**2*Pmm(kL)
         to return a 1D array [mu,kL] with identical
@@ -436,33 +451,89 @@ class kSZ(HaloModel):
 
         Here Pmm is the non-linear power for all halos.
         bv1 and bv2 are the velocity biases in each bin.
+
+        Parameters
+        ----------
+        zindex : int
+            Z index to compute at.
+        bv1, bv2 : float, optional
+            Linear bias of each velocity field.
+
+        Returns
+        -------
+        Pvv : array_like
+            P_vv, packed as [mu, k].
         """
-        Pvv = (self.d2vs[zindex])**2. * self.Pmms[zindex] *bv1*bv2
+        Pvv = self.d2vs[zindex]**2. * self.Pmms[zindex] * bv1 * bv2
         return Pvv
 
     def lPgg(self,zindex,bg1,bg2):
-        """The long-wavelength power spectrum of gxg.
+        """The long-wavelength galaxy auto spectrum, P_gg.
+
+        This is calculated as:
+        (faH/kL)**2*Pmm(kL)
+        to return a 1D array [mu,kL] with identical
+        copies over mus.
+
         Here Pmm is the non-linear power for all halos.
         bg1 and bg2 are the linear galaxy biases in each bin.
+
+        Parameters
+        ----------
+        zindex : int
+            Z index to compute at.
+        bg1, bg2 : float
+            Linear bias of each galaxy field.
+
+        Returns
+        -------
+        Pgg : array_like
+            P_gg, packed as [mu, k].
         """
-        Pgg =  self.Pmms[zindex] *bg1*bg2
-        if not(self.sigz is None):
+        Pgg =  self.Pmms[zindex] * bg1 * bg2
+        if self.sigz is not None:
             Pgg = Pgg[...,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1))**2.)
         return Pgg
 
     def lPgv(self,zindex,bg,bv=1):
-        """The long-wavelength power spectrum of gxg.
-        Here Pmm is the non-linear power for all halos.
-        bg1 and bg2 are the linear galaxy biases in each bin.
+        """The long-wavelength galaxy-velocity cross spectrum, P_gv.
+
+        Parameters
+        ----------
+        zindex : int
+            Z index to compute at.
+        bg, bv : float
+            Linear biases of galaxy and velocity field.
+
+        Returns
+        -------
+        Pgv : array_like
+            P_gv, packed as [mu, k].
         """
         Pgv =  self.Pmms[zindex] *bg*bv * (self.d2vs[zindex])
         if not(self.sigz is None):
             Pgv = Pgv[...,None] * (self.Wphoto(zindex).reshape((self.mu.size,self.kLs.size,1)))
         return Pgv
 
+    def ksz_radial_function(self, zindex, gasfrac = 0.9, xe=1, tau=0, params=None):
+        """Radial kSZ weight function from Smith et al.
 
-    def ksz_radial_function(self,zindex, gasfrac = 0.9,xe=1, tau=0, params=None):
-        return ksz_radial_function(self.zs[zindex],self.pars.ombh2, self.pars.YHe, gasfrac = gasfrac,xe=xe, tau=tau, params=params)
+        See ksz.ksz_radial_function for information and parameter descriptions.
+
+        Returns
+        -------
+        K : float
+            kSZ weight function value at specified redshift.
+        """
+        return ksz_radial_function(
+            self.zs[zindex],
+            self.pars.ombh2,
+            self.pars.YHe,
+            gasfrac=gasfrac,
+            xe=xe,
+            tau=tau,
+            params=params
+        )
 
     def Wphoto(self,zindex):
         if self.sigz is None:
@@ -472,7 +543,6 @@ class kSZ(HaloModel):
             z = self.zs[zindex]
             H = self.Hphotoz(z)
             return np.exp(-self.sigma_z_func(z)**2.*krs**2./2./H**2.) # (mus,kLs)
-
 
     def Nvv(self,zindex,Cls):
         chi_star = self.chistars[zindex]
@@ -845,19 +915,35 @@ def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
     return pksz, cl
 
 
-def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
-                        k_max = 100., num_k_bins = 200,
-#                             kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
-                            num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
-                            mdef='vir',nfw_numeric=False,
-                            electron_profile_family='AGN',
-                            electron_profile_nxs=None,electron_profile_xmax=None,
-                       verbose=False, pksz_in=None, save_debug_files=False,
-                                template=False,
-                         ngals_mpc3_for_v=None):
-    """
-    Get C_ell_^kSZ, the CMB kSZ auto power, as described by the squeezed limit
-    in Ma & Fry, with some altered notation:
+def get_ksz_auto_squeezed(
+    ells,
+    volume_gpc3,
+    zs,
+    ngals_mpc3,
+    bgs,
+    params=None,
+    k_max = 100.,
+    num_k_bins = 200,
+#    kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
+    num_mu_bins=102,
+    ms=None,
+    mass_function="sheth-torman",
+    mdef='vir',
+    nfw_numeric=False,
+    electron_profile_family='AGN',
+    electron_profile_nxs=None,
+    electron_profile_xmax=None,
+    verbose=False,
+    template=False,
+    pksz_in=None,
+    save_debug_files=False,
+    ngals_mpc3_for_v=None,
+    slow_chi_integral=False,
+    save_cl_integrand=False
+):
+    """Compute kSZ angular auto power spectrum, C_ell, as in Ma & Fry.
+
+    We use the squeezed limit from Ma & Fry, with some altered notation:
 
         C_\ell = \int \frac{d\chi}{\chi^2 H_0^2} \tilde{K}(z[\chi])^2
                  P_{q_r}(k=\ell/\chi, \chi)
@@ -867,6 +953,72 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
         P_{q_r}(k,z) = \frac{1}{6\pi^2} \int dk' (k')^2 P_{vv}(k',z) P_{ee}(k,z)
 
     C_ell^kSZ is returned in uK^2.
+
+    Parameters
+    ----------
+    ells : array_like
+        Array of ell values to compute C_ell at.
+    volumes_gpc3, ngals_mpc3 : array_like
+        Arrays of comoving volume (in Gpc^3) and galaxy number density (in Mpc^3)
+        corresponding to redshifts in zs.
+    zs : array_like
+        Array of redshifts to compute at.
+    bgs : array_like
+        Array of linear galaxy bias at each redshift.
+    **params : dict, optional
+        Optional dict of parameters for halo model and radial kSZ weight computations.
+        Default: None.
+    k_max : float, optional
+        Maximum k to consider as k_long and k_short (same value used for both).
+        Default: 100.
+    num_k_bins : int, optional
+        Number of k_long and k_short bins for computations. Default: 200.
+    num_mu_bins : int, optional
+        Number of mu bins for computations. Bins will be linear between -1 and 1.
+        Default: 102.
+    ms : array_like, optional
+        Array of halo masses to compute over, in Msun.
+        Default: Log-spaced array determined by parameters in `defaults` dict.
+    mass_function : {'sheth-torman', 'tinker'}, optional
+        Mass function to use. Default: 'sheth-torman'
+    mdef : {'vir', 'mean'}
+        Halo mass definition. 'mean' = M200m.
+    nfw_numeric : bool, optional
+        Compute Fourier transform of NFW profile numerically instead of analytically.
+        Default : False.
+    electron_profile_family : {'AGN', 'SH', 'pres'}, optional
+        Electron profile to use. Default: 'AGN'.
+    electron_profile_nxs : int, optional
+        Number of samples of electron profile for FFT. Default: None.
+    electron_profile_xmax : float, optional
+        X_max for electron profile in FFT. Default: None.
+    verbose : bool, optional
+        Print progress of computations. Default: False.
+    template : bool, optional
+        Whether to assume that the v and e fields have been constructed from templates
+        based on galaxy surveys (True), or v and e are the true fields (False).
+        Default: False.
+    pksz_in : kSZ object, optional
+        Predefined kSZ object to use for computations, instead of initializing
+        a new one. Default: None.
+    save_debug_files : bool, optional
+        Save some computed spectra to disk for offline debugging. Default: False.
+    ngals_mpc3_for_v : array_like, optional
+        If specified, use these galaxy number densities for the velocity
+        template. Default: None.
+    slow_chi_integral : bool, optional
+        Use slower quad method for Limber integral for C_ell, instead of faster
+        trapz. Default: False.
+
+    Returns
+    -------
+    pksz : kSZ object
+        kSZ object initialized during the routine. (Can be used as input to
+        later calls to save time.)
+    cl : np.ndarray
+        Computed C_ell^kSZ, evaluated at input ells.
+    **spec_dict : dict
+        Dict containing various 3d power spectra used for kSZ computation.
     """
 
     # Define empty dict for storing spectra
@@ -880,9 +1032,11 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
     # Make sure input redshifts are sorted
     zs = np.sort(np.asarray(zs))
 
-    # Make arrays for volume, for feeding to kSZ object
+    # Make array for volumes, for feeding to kSZ object
     volumes_gpc3 = volume_gpc3 * np.ones_like(zs)
 
+    # If different galaxy number density for velocity template is not specified,
+    # set equal to density for electron template
     if ngals_mpc3_for_v is None:
         ngals_mpc3_for_v = ngals_mpc3
 
@@ -926,21 +1080,19 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
             b2=bgs
         )
 
-    # Get ks and that P_{q_perp} integrand is evaluated at
+    # Get k_short values that P_{q_perp} integrand is evaluated at
     ks = pksz.kS
     spec_dict['ks'] = ks
 
     # If not computing for a kSZ template, get P_ee and P_vv
     # on grids in z and k
     if not template:
-
-        # Get P_ee as a function of z and k (packed as [z,k])
+        # Get P_ee (packed as [z,k])
         sPee = pksz.get_power('e',name2='e',verbose=False)
 
-        # Get P_vv as a function of z and k (packed as [z,k]),
-        # by getting it for each z individually
+        # Get P_vv (packed as [z,k]), by getting it for each z individually
         lPvv0 = pksz.lPvv(zindex=0)[0,:]
-        lPvv = np.zeros((len(zs), lPvv0.shape[0]))
+        lPvv = np.zeros((len(zs), lPvv0.shape[0]), dtype=lPvv0.dtype)
         lPvv[0,:] = lPvv0
         for zi in range(1, len(zs)):
             lPvv[zi,:] = pksz.lPvv(zindex=zi)[0,:]
@@ -952,8 +1104,7 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
     # P_vv on grids in z and k
     else:
 
-        # Get small-scale P_gg and P_ee as functions of z and k
-        # (packed as [z,k])
+        # Get small-scale P_gg and P_ee (packed as [z,k])
         sPgg_for_e = pksz.sPggs
         sPgg_for_v = sPgg_for_e.copy()
         for zi in range(zs.shape[0]):
@@ -961,17 +1112,17 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
             sPgg_for_v[zi] += 1/ngals_mpc3_for_v[zi]
         sPge = pksz.sPges
 
-        # Get large-scale P_vv as a function of z and k (packed as [z,k]),
+        # Get large-scale P_gv (packed as [z,k]),
         # by getting it for each z individually
         lPgv0 = pksz.lPgv(zindex=0,bg=bgs[0])[0,:]
-        lPgv = np.zeros((len(zs), lPgv0.shape[0]))
+        lPgv = np.zeros((len(zs), lPgv0.shape[0]), dtype=lPgv0.dtype)
         lPgv[0,:] = lPgv0
         for zi in range(1, len(zs)):
             lPgv[zi,:] = pksz.lPgv(zindex=zi,bg=bgs[zi])[0,:]
 
         # Same for large-scale Pgg
         lPgg0 = pksz.lPgg(0,bgs[0],bgs[0])[0,:]
-        lPgg = np.zeros((len(zs), lPgg0.shape[0]))
+        lPgg = np.zeros((len(zs), lPgg0.shape[0]), dtype=lPgg0.dtype)
         lPgg[0,:] = lPgg0
         for zi in range(zs.shape[0]):
             lPgg[zi,:] = pksz.lPgg(zi,bgs[zi],bgs[zi])[0,:]
@@ -1033,12 +1184,14 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
         # Include prefactors
         ne0 = ne0_shaw(pksz.pars.ombh2, pksz.pars.YHe)
         # Units: (m^2 * m^-3 * Mpc^-1 m^1)^2
-        integrand *= (constants['thompson_SI'] \
-                      * ne0 \
-                      * 1/constants['meter_to_megaparsec'] )**2
+        integrand *= (
+            constants['thompson_SI']
+            * ne0
+            * 1/constants['meter_to_megaparsec']
+        )**2
         integrand *= (pksz.pars.TCMB * 1e6)**2
 
-        if True:
+        if not slow_chi_integral:
             # Do C_ell integral via trapezoid rule
             cl[iell] = np.trapz(integrand, chi_int)
         else:
