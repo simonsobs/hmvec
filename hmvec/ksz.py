@@ -933,6 +933,7 @@ def get_ksz_auto_squeezed(
     electron_profile_family='AGN',
     electron_profile_nxs=None,
     electron_profile_xmax=None,
+    n_int = 100,
     verbose=False,
     template=False,
     pksz_in=None,
@@ -992,6 +993,8 @@ def get_ksz_auto_squeezed(
         Number of samples of electron profile for FFT. Default: None.
     electron_profile_xmax : float, optional
         X_max for electron profile in FFT. Default: None.
+    n_int : int, optional
+        Number of samples to use in Limber integral. Default: 100.
     verbose : bool, optional
         Print progress of computations. Default: False.
     template : bool, optional
@@ -1173,7 +1176,7 @@ def get_ksz_auto_squeezed(
         # Set chi_min based on k=30Mpc^-1, and chi_max from max redshift
         chi_min = ell/30.
         chi_max = pksz.results.comoving_radial_distance(zs[-1])
-        chi_int = np.geomspace(chi_min, chi_max, 100)
+        chi_int = np.geomspace(chi_min, chi_max, n_int)
         k_int = ell/chi_int
         z_int = pksz.results.redshift_at_comoving_radial_distance(chi_int)
 
@@ -1237,8 +1240,6 @@ def get_ksz_auto_squeezed(
             # equivalent results at the precision we care about
             igr_interp = interp1d(chi_int, integrand)
             cl[iell] = quad(igr_interp, chi_int[0], chi_int[-1])[0]
-
-
 
     # If desired, save some files for debugging
     if save_debug_files and not template:
