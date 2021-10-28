@@ -940,7 +940,8 @@ def get_ksz_auto_squeezed(
     save_debug_files=False,
     ngals_mpc3_for_v=None,
     slow_chi_integral=False,
-    save_cl_integrand=False
+    save_cl_integrand=False,
+    pgg_noise_function=None
 ):
     """Compute kSZ angular auto power spectrum, C_ell, as in Ma & Fry.
 
@@ -1015,6 +1016,9 @@ def get_ksz_auto_squeezed(
     save_cl_integrand : bool, optional
         Save integrand of C_ell to spec_dict, along with coordinate values
         that integrand was evaluated at, w.r.t. either chi or z.
+    pgg_noise_function : function(z, k), optional
+        Callable function of z and k that gives the noise power spectrum
+        for P_gg. If specified, replaces 1/ngals. Default: None.
 
     Returns
     -------
@@ -1113,9 +1117,13 @@ def get_ksz_auto_squeezed(
         # Get small-scale P_gg and P_ee (packed as [z,k])
         sPgg_for_e = pksz.sPggs
         sPgg_for_v = sPgg_for_e.copy()
-        for zi in range(zs.shape[0]):
-            sPgg_for_e[zi] += 1/ngals_mpc3[zi]
-            sPgg_for_v[zi] += 1/ngals_mpc3_for_v[zi]
+        for zi, z in enumerate(zs):
+            if pgg_noise_function is None:
+                sPgg_for_e[zi] += 1/ngals_mpc3[zi]
+                sPgg_for_v[zi] += 1/ngals_mpc3_for_v[zi]
+            else:
+                sPgg_for_e[zi] += pgg_noise_function(z, ks)
+                sPgg_for_v[zi] += pgg_noise_function(z, ks)
         sPge = pksz.sPges
 
         # Get large-scale P_gv (packed as [z,k]),
@@ -1130,9 +1138,12 @@ def get_ksz_auto_squeezed(
         lPgg0 = pksz.lPgg(0,bgs[0],bgs[0])[0,:]
         lPgg = np.zeros((len(zs), lPgg0.shape[0]), dtype=lPgg0.dtype)
         lPgg[0,:] = lPgg0
-        for zi in range(zs.shape[0]):
+        for zi, z in enumerate(zs):
             lPgg[zi,:] = pksz.lPgg(zi,bgs[zi],bgs[zi])[0,:]
-            lPgg[zi] += 1/ngals_mpc3_for_v[zi]
+            if pgg_noise_function is None:
+                lPgg[zi] += 1/ngals_mpc3_for_v[zi]
+            else:
+                lPgg[zi] += pgg_noise_function(z, pksz.kLs)
 
         spec_dict['sPgg'] = sPgg_for_e
         spec_dict['sPge'] = sPge
