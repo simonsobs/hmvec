@@ -10,3 +10,4 @@ specs.ini
 commented.py
 .vscode/
 .ipynb_checkpoints
+*.pyc
