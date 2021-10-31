@@ -1265,6 +1265,267 @@ def get_ksz_auto_squeezed(
     return pksz, cl, spec_dict
 
 
+def get_ksz_auto_squeezed_m_integrand(
+    ells,
+    volume_gpc3,
+    zs,
+    ngals_mpc3,
+    bgs,
+    params=None,
+    k_max = 100.,
+    num_k_bins = 200,
+    num_mu_bins=102,
+    ms=None,
+    mass_function="sheth-torman",
+    mdef='vir',
+    nfw_numeric=False,
+    electron_profile_family='AGN',
+    electron_profile_nxs=None,
+    electron_profile_xmax=None,
+    n_int = 100,
+    verbose=False,
+    pksz_in=None,
+    save_cl_integrand=False,
+):
+    """Compute kSZ angular auto power spectrum M derivative, dC_\ell / dM_halo.
+
+    We use the squeezed limit from Ma & Fry, with some altered notation:
+
+        C_\ell = \int \frac{d\chi}{\chi^2 H_0^2} \tilde{K}(z[\chi])^2
+                 P_{q_r}(k=\ell/\chi, \chi)
+
+        \tilde{K}(z) = T_{CMB} \bar{n}_{e,0} \sigma_T (1+z)^2 \exp(-\tau(z))
+
+        P_{q_r}(k,z) = \frac{1}{6\pi^2} \int dk' (k')^2 P_{vv}(k',z) P_{ee}(k,z)
+
+    dC_\ell / dM_halo is returned in uK^2 Msun^-1.
+
+    Parameters
+    ----------
+    ells : array_like
+        Array of ell values to compute C_ell at.
+    volumes_gpc3, ngals_mpc3 : array_like
+        Arrays of comoving volume (in Gpc^3) and galaxy number density (in Mpc^3)
+        corresponding to redshifts in zs.
+    zs : array_like
+        Array of redshifts to compute at.
+    bgs : array_like
+        Array of linear galaxy bias at each redshift.
+    **params : dict, optional
+        Optional dict of parameters for halo model and radial kSZ weight computations.
+        Default: None.
+    k_max : float, optional
+        Maximum k to consider as k_long and k_short (same value used for both).
+        Default: 100.
+    num_k_bins : int, optional
+        Number of k_long and k_short bins for computations. Default: 200.
+    num_mu_bins : int, optional
+        Number of mu bins for computations. Bins will be linear between -1 and 1.
+        Default: 102.
+    ms : array_like, optional
+        Array of halo masses to compute over, in Msun.
+        Default: Log-spaced array determined by parameters in `defaults` dict.
+    mass_function : {'sheth-torman', 'tinker'}, optional
+        Mass function to use. Default: 'sheth-torman'
+    mdef : {'vir', 'mean'}
+        Halo mass definition. 'mean' = M200m.
+    nfw_numeric : bool, optional
+        Compute Fourier transform of NFW profile numerically instead of analytically.
+        Default : False.
+    electron_profile_family : {'AGN', 'SH', 'pres'}, optional
+        Electron profile to use. Default: 'AGN'.
+    electron_profile_nxs : int, optional
+        Number of samples of electron profile for FFT. Default: None.
+    electron_profile_xmax : float, optional
+        X_max for electron profile in FFT. Default: None.
+    n_int : int, optional
+        Number of samples to use in Limber integral. Default: 100.
+    verbose : bool, optional
+        Print progress of computations. Default: False.
+    pksz_in : kSZ object, optional
+        Predefined kSZ object to use for computations, instead of initializing
+        a new one. Default: None.
+    save_cl_integrand : bool, optional
+        Save integrand of C_ell to spec_dict, along with coordinate values
+        that integrand was evaluated at, w.r.t. either chi or z.
+
+    Returns
+    -------
+    pksz : kSZ object
+        kSZ object initialized during the routine. (Can be used as input to
+        later calls to save time.)
+    cl : np.ndarray
+        Computed dC_ell^kSZ / dM_halo, evaluated at input ells.
+        Packed as [ell, m].
+    **spec_dict : dict
+        Dict containing various 3d power spectra used for kSZ computation.
+    """
+
+    # Define empty dict for storing spectra
+    spec_dict = {}
+
+    # Widen search range for setting lower mass threshold from nbar
+    if params is None:
+        params = default_params
+    params['hod_bisection_search_min_log10mthresh'] = 1
+
+    # Make sure input redshifts are sorted
+    zs = np.sort(np.asarray(zs))
+
+    # Make array for volumes, for feeding to kSZ object
+    volumes_gpc3 = volume_gpc3 * np.ones_like(zs)
+
+    # Define kSZ object, if not specified as input
+    if pksz_in is not None:
+        pksz = pksz_in
+    else:
+        if verbose: print('Initializing kSZ objects')
+        pksz = kSZ(
+            zs,
+            volumes_gpc3,
+            ngals_mpc3,
+            kL_max=k_max,                 # Same k_max for kL and kS
+            num_kL_bins=num_k_bins,
+            kS_min=get_kmin(volume_gpc3), # Same k_min for kL and kS
+            kS_max=k_max,
+            num_kS_bins=num_k_bins,
+            num_mu_bins=num_mu_bins,
+            ms=ms,
+            params=params,
+            mass_function=mass_function,
+            halofit=None,
+            mdef=mdef,
+            nfw_numeric=nfw_numeric,
+            skip_nfw=False,
+            electron_profile_name='e',
+            electron_profile_family=electron_profile_family,
+            skip_electron_profile=False,
+            electron_profile_param_override=params,
+            electron_profile_nxs=electron_profile_nxs,
+            electron_profile_xmax=electron_profile_xmax,
+            skip_hod=skip_hod,
+            verbose=verbose,
+            b1=bgs,
+            b2=bgs
+        )
+
+    # Get k_short values that P_{q_perp} integrand is evaluated at
+    ks = pksz.kS
+    spec_dict['ks'] = ks
+
+    # Get P_ee (packed as [z,M,k])
+    sPee = pksz.get_power('e', name2='e', verbose=False, m_integrand=True)
+
+    # Get P_vv (packed as [z,k]), by getting it for each z individually
+    lPvv0 = pksz.lPvv(zindex=0)[0,:]
+    lPvv = np.zeros((len(zs), lPvv0.shape[0]), dtype=lPvv0.dtype)
+    lPvv[0,:] = lPvv0
+    for zi in range(1, len(zs)):
+        lPvv[zi,:] = pksz.lPvv(zindex=zi)[0,:]
+
+    spec_dict['sPee'] = sPee
+    spec_dict['lPvv'] = lPvv
+
+    # Compute P_{q_r} values on grid in k,M,z
+    if verbose: print('Computing P_{q_r} on grid in k,M,z')
+    Pqr = np.zeros((ks.shape[0], pksz.ms.shape[0], zs.shape[0]))
+    for zi,z in enumerate(zs):
+
+        # Get P_vv, and integrate in k
+        kls = pksz.kLs
+        integrand = _sanitize((kls**2.)*lPvv[zi])
+        vint = np.trapz(integrand,kls)
+
+        # Get P_ee, packed as [k,M,z]
+        Pqr[:,:,zi] = sPee[zi].T
+
+        # Multiply by numerical prefactor and integral from above
+        Pqr[:,:,zi] *= (6*np.pi**2)**-1 * vint
+
+    log10ms = np.log10(pksz.ms)
+    log10ks = np.log10(ks)
+
+    if verbose: print('Computing C_ell')
+    cl = np.zeros((len(ells), len(log10ms)))
+    if save_cl_integrand:
+        spec_dict['ClkSZ_integrand_chi'] = np.zeros(
+            (len(ells), n_int), dtype=np.float64
+        )
+        spec_dict['ClkSZ_integrand_z'] = np.zeros_like(
+            spec_dict['ClkSZ_integrand_chi']
+        )
+
+        spec_dict['ClkSZ_dchi_integrand'] = np.zeros(
+            (len(ells), len(log10ms), n_int), dtype=np.float64
+        )
+        spec_dict['ClkSZ_dz_integrand'] = np.zeros_like(
+            spec_dict['ClkSZ_dchi_integrand']
+        )
+
+    # Loop over M. This is slow, but enables us to use scipy's interp2d
+    # to interpolate over z,k at each M
+    for ilogm, logm in enumerate(log10ms):
+        nm = len(log10ms)
+        if verbose and (ilogm % (nm // 10) == 0):
+            print(f"\tComputing for M {ilogm} / {len(log10ms)}")
+        iPqr = interp2d(zs, log10ks, Pqr[:, ilogm, :])
+
+        # Compute C_ell integral at each ell
+        for iell,ell in enumerate(ells):
+
+            # Set chi_min based on k=30Mpc^-1, and chi_max from max redshift
+            chi_min = ell/30.
+            chi_max = pksz.results.comoving_radial_distance(zs[-1])
+            chi_int = np.geomspace(chi_min, chi_max, n_int)
+            k_int = ell/chi_int
+            z_int = pksz.results.redshift_at_comoving_radial_distance(chi_int)
+
+            # Get integrand evaluated at z,k corresponding to Limber integral
+            integrand = np.zeros(k_int.shape[0])
+            for ki,k in enumerate(k_int):
+                # integrand[ki] = iPqr(z_int[ki], k)
+                integrand[ki] = iPqr(z_int[ki], np.log10(k))
+            integrand /= chi_int**2
+            integrand *= (1+z_int)**4
+
+            # Include prefactors
+            ne0 = ne0_shaw(pksz.pars.ombh2, pksz.pars.YHe)
+            # Units: (m^2 * m^-3 * Mpc^-1 m^1)^2
+            integrand *= (
+                constants['thompson_SI']
+                * ne0
+                * 1/constants['meter_to_megaparsec']
+            )**2
+            integrand *= (pksz.pars.TCMB * 1e6)**2
+
+            # If desired, save integrand for each ell to spec_dict.
+            # We save the integrand w.r.t either chi and z, along with the
+            # chi and z value it is evaluated at
+            if save_cl_integrand:
+
+                # Save integrand w.r.t. chi
+                spec_dict['ClkSZ_integrand_chi'][iell] = chi_int
+                spec_dict['ClkSZ_dchi_integrand'][iell, ilogm] = integrand
+
+                # Save integrand w.r.t z, which is dchi/dz * integrand_dchi
+                spec_dict['ClkSZ_integrand_z'][iell] = z_int
+                _DERIV_DZ = 0.001
+                dchi_dz_int = (
+                    (
+                        pksz.results.comoving_radial_distance(z_int + _DERIV_DZ)
+                        - pksz.results.comoving_radial_distance(z_int - _DERIV_DZ)
+                    ) / (2 * _DERIV_DZ)
+                )
+                spec_dict['ClkSZ_dz_integrand'][iell, ilogm] = integrand * dchi_dz_int
+
+            # Do C_ell chi integral via trapezoid rule
+            cl[iell, ilogm] = np.trapz(integrand, chi_int)
+
+    # Return kSZ object (in case we want to use it later), C_ell array,
+    # and dict of spectra used
+    return pksz, cl, spec_dict
+
+
 def Nvv(z,vol_gpc3,ngals_mpc3,Cl_total,sigz=None,
         kL_max=0.1,num_kL_bins=100,
         kS_min=0.1,
