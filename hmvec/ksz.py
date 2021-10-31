@@ -920,7 +920,7 @@ def get_ksz_auto_squeezed(
     volume_gpc3,
     zs,
     ngals_mpc3,
-    bgs,
+    bgs=None,
     params=None,
     k_max = 100.,
     num_k_bins = 200,
@@ -965,8 +965,8 @@ def get_ksz_auto_squeezed(
         corresponding to redshifts in zs.
     zs : array_like
         Array of redshifts to compute at.
-    bgs : array_like
-        Array of linear galaxy bias at each redshift.
+    bgs : array_like, optional
+        Array of linear galaxy bias at each redshift. Default: None.
     **params : dict, optional
         Optional dict of parameters for halo model and radial kSZ weight computations.
         Default: None.
@@ -1113,6 +1113,10 @@ def get_ksz_auto_squeezed(
     # If computing for a kSZ template, get P_gg^total, P_ge, and
     # P_vv on grids in z and k
     else:
+
+        # If no galaxy bias was specified, take from galaxy HOD
+        if bgs is None:
+            bgs = pksz.hods['g']['bg']
 
         # Get small-scale P_gg and P_ee (packed as [z,k])
         sPgg_for_e = pksz.sPggs
@@ -1270,7 +1274,6 @@ def get_ksz_auto_squeezed_m_integrand(
     volume_gpc3,
     zs,
     ngals_mpc3,
-    bgs,
     params=None,
     k_max = 100.,
     num_k_bins = 200,
@@ -1405,8 +1408,6 @@ def get_ksz_auto_squeezed_m_integrand(
             electron_profile_xmax=electron_profile_xmax,
             skip_hod=skip_hod,
             verbose=verbose,
-            b1=bgs,
-            b2=bgs
         )
 
     # Get k_short values that P_{q_perp} integrand is evaluated at
@@ -1638,3 +1639,36 @@ def get_ksz_snr_survey(zs,dndz,zedges,Cls,fsky,Ngals,bs=None,sigz=None):
     totsnr = np.sqrt(np.sum(snrs**2.))
 
     return vols_gpc3,ngals_mpc3,zcents,bgs,snrs,totsnr
+
+
+def get_ksz_halomodel_spectra(pksz, b1=None):
+    """Get separate 1h and 2h terms for P_ee, P_ge, and P_gg.
+
+    Parameters
+    ----------
+    pksz : kSZ object
+        Predefined kSZ object to use for computations.
+    b1 : array_like, optional
+        Linear galaxy bias at desired redshifts. Default: None.
+
+    Returns
+    -------
+    **spec_dict : dict
+        Dict containing 3d power spectra.
+    """
+
+    spec_dict = {}
+
+    ks = pksz.kS
+    spec_dict['ks'] = pksz.kS
+
+    spec_dict["sPee_1h"] = pksz.get_power_1halo('e', name2='e')
+    spec_dict["sPee_2h"] = pksz.get_power_2halo('e', name2='e')
+
+    spec_dict["sPgg_1h"] = pksz.get_power_1halo('g', name2='g')
+    spec_dict["sPgg_2h"] = pksz.get_power_2halo('g', name2='g', b1_in=b1, b2_in=b1)
+
+    spec_dict["sPge_1h"] = pksz.get_power_1halo('g', name2='e')
+    spec_dict["sPge_2h"] = pksz.get_power_2halo('g', name2='e', b1_in=b1)
+
+    return spec_dict
