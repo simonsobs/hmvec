@@ -577,11 +577,16 @@ class HaloModel(Cosmology):
         return pk
 
 
-    def get_power(self,name,name2=None,verbose=False,b1=None,b2=None):
+    def get_power(
+        self, name, name2=None, verbose=False, b1=None, b2=None, m_integrand=False
+    ):
         if name2 is None: name2 = name
-        return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose,b1,b2)
+        return (
+            self.get_power_1halo(name,name2,m_integrand=m_integrand)
+            + self.get_power_2halo(name,name2,verbose,b1,b2,m_integrand=m_integrand)
+        )
 
-    def get_power_1halo(self,name="nfw",name2=None):
+    def get_power_1halo(self, name="nfw", name2=None, m_integrand=False):
         name2 = name if name2 is None else name2
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
@@ -605,14 +610,32 @@ class HaloModel(Cosmology):
                 )
 
         integrand = self.nzm[...,None] * square_term
-        return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
 
-    def get_power_2halo(self,name="nfw",name2=None,verbose=False,b1_in=None,b2_in=None):
+        if not m_integrand:
+            # Integrate in m, and return result packed as [z,k]
+            return (
+                np.trapz(integrand,ms,axis=-2)
+                * (1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
+            )
+        else:
+            # Return full integrand, packed as [z,m,k]
+            return (
+                integrand * (
+                    1-np.exp(-(self.ks/self.p['kstar_damping'])**2.)
+                )[np.newaxis, np.newaxis, :]
+            )
+
+    def get_power_2halo(
+        self,name="nfw",name2=None,verbose=False,b1_in=None,b2_in=None,m_integrand=False
+    ):
         name2 = name if name2 is None else name2
 
+        def _2halointegrand(iterm):
+            return self.nzm[...,None] * iterm * self.bh[...,None]
+
         def _2haloint(iterm):
-            integrand = self.nzm[...,None] * iterm * self.bh[...,None]
-            integral = np.trapz(integrand,ms,axis=-2)
+            integrand = _2halointegrand(iterm)
+            integral = np.trapz(integrand,self.ms[..., None],axis=-2)
             return integral
 
         def _get_term(iname):
@@ -632,8 +655,6 @@ class HaloModel(Cosmology):
             else: raise ValueError
             return rterm1,rterm01,b
 
-        ms = self.ms[...,None]
-
 
         iterm1,iterm01,b1 = _get_term(name)
         iterm2,iterm02,b2 = _get_term(name2)
@@ -645,13 +666,29 @@ class HaloModel(Cosmology):
         integral = _2haloint(iterm1)
         integral2 = _2haloint(iterm2)
 
-        # consistency relation : Correct for part that's missing from low-mass halos to get P(k->0) = b1*b2*Plinear
+        # consistency relation : Correct for part that's missing from low-mass
+        # halos to get P(k->0) = b1*b2*Plinear
         consistency1 = _2haloint(iterm01)
         consistency2 = _2haloint(iterm02)
-        if verbose:
-            print("Two-halo consistency1: " , consistency1,integral)
-            print("Two-halo consistency2: " , consistency2,integral2)
-        return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
+
+        if m_integrand:
+            # Return dP_2h / dM, packed as [z,m,k].
+            # There is a question of how to incorporate the
+            # normalization from the consistency relation into this. The
+            # prescription below, which takes d(consistency)/dM=0, seems to work,
+            # in that integrating it in M gives a result that's pretty close
+            # to the full result.
+            prefactor = (
+                _2halointegrand(iterm1) * (integral2+b2-consistency2)[..., np.newaxis, :]
+                + (integral+b1-consistency1)[..., np.newaxis, :] * _2halointegrand(iterm2)
+            )
+            return prefactor * self.Pzk[..., np.newaxis, :]
+        else:
+            # Return P_2h packed as [z,k]
+            if verbose:
+                print("Two-halo consistency1: " , consistency1,integral)
+                print("Two-halo consistency2: " , consistency2,integral2)
+            return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
     def sigma_1h_profiles(self,thetas,Ms,concs,sig_theta=None,delta=200,rho='mean',rho_at_z=True):
         import clusterlensing as cl
