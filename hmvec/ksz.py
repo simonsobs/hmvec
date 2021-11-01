@@ -1665,6 +1665,7 @@ def get_ksz_halomodel_spectra(pksz, b1=None):
     spec_dict["sPee_1h"] = pksz.get_power_1halo('e', name2='e')
     spec_dict["sPee_2h"] = pksz.get_power_2halo('e', name2='e')
 
+    spec_dict["sPgg_shot"] = 1/pksz.ngals_mpc3
     spec_dict["sPgg_1h"] = pksz.get_power_1halo('g', name2='g')
     spec_dict["sPgg_2h"] = pksz.get_power_2halo('g', name2='g', b1_in=b1, b2_in=b1)
 
