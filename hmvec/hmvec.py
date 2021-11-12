@@ -555,7 +555,7 @@ class HaloModel(Cosmology):
             satmf (str, optional): Subhalo mass function. Defaults to 'Tinker'.
 
         Returns:
-            [array]: flux on whole z,m,k grid
+            (array): flux observed from source on z,m,k grid
         """
         chis = self.comoving_radial_distance(self.zs)
         fcen = 0.0
@@ -597,7 +597,6 @@ class HaloModel(Cosmology):
             return sdndm(m, M, satmf) * cib.capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
 
         #Integrate Subhalo Masses
-#         import pdb; pdb.set_trace()
         Nsatm = len(self.ms) + 1
         Mmin = 1e10
         satms = np.geomspace(Mmin, self.ms, num=Nsatm, axis=-1)
@@ -606,7 +605,6 @@ class HaloModel(Cosmology):
         elif cibinteg.lower() == 'simps':
             fsat_m = simps(integ(satms, self.ms[...,None]), satms, axis=-1)
         else: raise NotImplementedError('Invalid subhalo integration method (cibinteg)')
-#         pdb.set_trace()
         
         #Get Redshift Dependencies
         a = self.cib_params['alpha']

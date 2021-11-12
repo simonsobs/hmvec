@@ -4,7 +4,6 @@ import numpy as np
 
 import astropy.constants as const
 from astropy import units as u
-from astropy.modeling.blackbody import blackbody_nu
 from scipy.optimize import fsolve
 
 def blackbody(v, T):
@@ -282,11 +281,12 @@ def luminosity(z, M, Nks, nu, params, nuframe='obs'):
 
     return L_o * L
 
-#Testing
-# lamdarange = np.array([8.0e-6, 1000.0e-6])
-# nurange = 3.0e8 / lamdarange
-# nurange = np.array([545.])*1e9
-# redshifts = np.linspace(0.01, 6, 200)
-# # redshifts = np.array([2.0])
-# sed = capitalTheta(nurange, 'obs', redshifts, alpha=0.36, beta=1.75, gamma=1.7, T_o=24.4, plot=True)
-# # print(sed)
+if __name__ == "__main__":
+    #Testing
+    lamdarange = np.array([8.0e-6, 1000.0e-6])
+    nurange = 3.0e8 / lamdarange
+    nurange = np.array([545.])*1e9
+    redshifts = np.linspace(0.01, 6, 200)
+    # redshifts = np.array([2.0])
+    sed = capitalTheta(nurange, 'obs', redshifts, alpha=0.36, beta=1.75, gamma=1.7, T_o=24.4, plot=True)
+    # print(sed)
