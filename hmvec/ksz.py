@@ -941,7 +941,8 @@ def get_ksz_auto_squeezed(
     ngals_mpc3_for_v=None,
     slow_chi_integral=False,
     save_cl_integrand=False,
-    pgg_noise_function=None
+    pgg_noise_function=None,
+    use_pee_in_template=False
 ):
     """Compute kSZ angular auto power spectrum, C_ell, as in Ma & Fry.
 
@@ -1019,6 +1020,10 @@ def get_ksz_auto_squeezed(
     pgg_noise_function : function(z, k), optional
         Callable function of z and k that gives the noise power spectrum
         for P_gg. If specified, replaces 1/ngals. Default: None.
+    use_pee_in_template : bool, optional
+        For template calculation, use P_ee instead of P_ge^2 / P_gg^tot.
+        This tests the effect of the g-v correlation on the template
+        amplitude. Default: False.
 
     Returns
     -------
@@ -1111,7 +1116,7 @@ def get_ksz_auto_squeezed(
         spec_dict['lPvv'] = lPvv
 
     # If computing for a kSZ template, get P_gg^total, P_ge, and
-    # P_vv on grids in z and k
+    # P_gv on grids in z and k
     else:
 
         # If no galaxy bias was specified, take from galaxy HOD
@@ -1157,8 +1162,13 @@ def get_ksz_auto_squeezed(
     # Compute P_{q_r} values on grid in k,z
     if verbose: print('Computing P_{q_r} on grid in k,z')
     Pqr = np.zeros((ks.shape[0], zs.shape[0]))
-    for zi,z in enumerate(zs):
 
+    if template and use_pee_in_template:
+        # In this case, P_ee won't have been computed before,
+        # so we do it here
+        sPee = pksz.get_power('e',name2='e',verbose=False)
+
+    for zi,z in enumerate(zs):
         # Get P_gv^2 / P_gg^total or P_vv, and integrate in k
         kls = pksz.kLs
         if template:
@@ -1169,7 +1179,7 @@ def get_ksz_auto_squeezed(
         vint = np.trapz(integrand,kls)
 
         # Get P_ge^2 / P_gg^total or P_ee
-        if template:
+        if template and not use_pee_in_template:
             Pqr[:,zi] = sPge[zi]**2 / sPgg_for_e[zi]
         else:
             Pqr[:,zi] = sPee[zi]
