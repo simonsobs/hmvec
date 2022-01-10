@@ -476,6 +476,14 @@ class HaloModel(Cosmology):
                 else:
                     raise ValueError # param in param_override doesn't seem to be an HOD parameter
 
+        try:
+            Msat_override = pparams['hod_Msat_override']
+        except:
+            Msat_override = None
+        try:
+            Mcut_override = pparams['hod_Mcut_override']
+        except:
+            Mcut_override = None
 
         self.hods[name] = {}
         if ngal is not None:
@@ -483,15 +491,6 @@ class HaloModel(Cosmology):
             except:
                 raise ValueError("ngal has to be a vector of size self.zs")
             assert mthresh is None
-
-            try:
-                Msat_override = pparams['hod_Msat_override']
-            except:
-                Msat_override = None
-            try:
-                Mcut_override = pparams['hod_Mcut_override']
-            except:
-                Mcut_override = None
 
             nfunc = lambda ilog10mthresh: ngal_from_mthresh(ilog10mthresh,
                                                             self.zs,
