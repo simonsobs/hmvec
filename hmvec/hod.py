@@ -181,10 +181,10 @@ class Leauthaud12HOD(HODBase):
                 raise ValueError("Can only specify one of ngal or mthresh")
 
             # Set overrides for Msat and Mcut
-            if "hod_Msat_override" not in self.p.keys():
-                self.p["hod_Msat_override"] = None
-            if "hod_Mcut_override" not in self.p.keys():
-                self.p["hod_Mcut_override"] = None
+            if "hod_Leau12_Msat_override" not in self.p.keys():
+                self.p["hod_Leau12_Msat_override"] = None
+            if "hod_Leau12_Mcut_override" not in self.p.keys():
+                self.p["hod_Leau12_Mcut_override"] = None
 
             # Define n_gal(m_thresh) function
             nfunc = lambda ilog10mthresh: self.ngal_from_mthresh(
@@ -204,7 +204,7 @@ class Leauthaud12HOD(HODBase):
                 verbose=True,
                 hang_check_num_iter=self.p["hod_bisection_search_warn_iter"],
             )
-            mthresh = 10 ** (log10mthresh * self.p["hod_A_log10mthresh"])
+            mthresh = 10 ** (log10mthresh * self.p["hod_Leau12_A_log10mthresh"])
 
         # Do sanity check on mthresh
         if mthresh.size != zs.size:
@@ -218,17 +218,17 @@ class Leauthaud12HOD(HODBase):
     @property
     def hod_params(self):
         return [
-            "hod_sig_log_mstellar",
+            "hod_Leau12_sig_log_mstellar",
             "hod_bisection_search_min_log10mthresh",
             "hod_bisection_search_max_log10mthresh",
             "hod_bisection_search_rtol",
             "hod_bisection_search_warn_iter",
-            "hod_alphasat",
-            "hod_Bsat",
-            "hod_betasat",
-            "hod_Bcut",
-            "hod_betacut",
-            "hod_A_log10mthresh",
+            "hod_Leau12_alphasat",
+            "hod_Leau12_Bsat",
+            "hod_Leau12_betasat",
+            "hod_Leau12_Bcut",
+            "hod_Leau12_betacut",
+            "hod_Leau12_A_log10mthresh",
         ]
 
     def avg_Nc(self, log10mhalo, z, log10mstellar_thresh=None):
@@ -237,7 +237,7 @@ class Leauthaud12HOD(HODBase):
 
         log10mstar = Mstellar_halo(z, log10mhalo)
         num = log10mstellar_thresh - log10mstar
-        denom = np.sqrt(2.0) * self.p["hod_sig_log_mstellar"]
+        denom = np.sqrt(2.0) * self.p["hod_Leau12_sig_log_mstellar"]
         return 0.5 * (1.0 - erf(num / denom))
 
     def avg_Ns(self, log10mhalo, z, log10mstellar_thresh=None, Nc=None):
@@ -248,24 +248,24 @@ class Leauthaud12HOD(HODBase):
             mthresh = Mhalo_stellar(z, self.log10mstellar_thresh)
 
         if (
-            "hod_Msat_override" in self.p.keys()
-            and self.p["hod_Msat_override"] is not None
+            "hod_Leau12_Msat_override" in self.p.keys()
+            and self.p["hod_Leau12_Msat_override"] is not None
         ):
 
-            Msat = self.p["hod_Msat_override"]
+            Msat = self.p["hod_Leau12_Msat_override"]
         else:
             Msat = self.hod_default_mfunc(
-                mthresh, self.p["hod_Bsat"], self.p["hod_betasat"]
+                mthresh, self.p["hod_Leau12_Bsat"], self.p["hod_Leau12_betasat"]
             )
 
         if (
-            "hod_Mcut_override" in self.p.keys()
-            and self.p["hod_Mcut_override"] is not None
+            "hod_Leau12_Mcut_override" in self.p.keys()
+            and self.p["hod_Leau12_Mcut_override"] is not None
         ):
-            Mcut = self.p["hod_Mcut_override"]
+            Mcut = self.p["hod_Leau12_Mcut_override"]
         else:
             Mcut = self.hod_default_mfunc(
-                mthresh, self.p["hod_Bcut"], self.p["hod_betacut"]
+                mthresh, self.p["hod_Leau12_Bcut"], self.p["hod_Leau12_betacut"]
             )
 
         if Nc is None:
@@ -274,7 +274,11 @@ class Leauthaud12HOD(HODBase):
             else:
                 Nc = self.avg_Nc(log10mhalo, z)
 
-        return Nc * ((masses / Msat) ** self.p["hod_alphasat"]) * np.exp(-Mcut / masses)
+        return (
+            Nc
+            * ((masses / Msat) ** self.p["hod_Leau12_alphasat"])
+            * np.exp(-Mcut / masses)
+        )
 
     def hod_default_mfunc(self, mthresh, Bamp, Bind):
         return (10.0 ** (12.0)) * Bamp * 10 ** ((mthresh - 12) * Bind)

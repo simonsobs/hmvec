@@ -22,7 +22,7 @@ battaglia_defaults['SH'] = {
     'beta_alpham':0.005,
     'beta_alphaz':0.037
 }
-    
+
 
 battaglia_defaults['pres'] = {
     'P0_A0':18.1,
@@ -35,10 +35,10 @@ battaglia_defaults['pres'] = {
     'beta_alpham':0.0393,
     'beta_alphaz':0.415
 }
-    
+
 
 default_params = {
-    
+
     # Mass function
     'st_A': 0.3222,
     'st_a': 0.707,
@@ -71,7 +71,7 @@ default_params = {
     # Power spectra
     'kstar_damping':0.01,
     'default_halofit':'mead',
-    
+
     # Cosmology
     'omch2': 0.1198,
     'ombh2': 0.02225,
@@ -91,16 +91,18 @@ default_params = {
     'meterToMegaparsec': 3.241e-23,
     'Yp': 0.24,
 
-    # HOD
-    'hod_A_log10mthresh': 1.0, # This parameter is used to vary log10mthresh
-    'hod_sig_log_mstellar': 0.2,
-    'hod_alphasat': 1.0,
-    'hod_Bsat':9.04,
-    'hod_betasat':0.74,
-    'hod_Bcut':1.65,
-    'hod_betacut':0.59,
+    # General HOD
     'hod_bisection_search_min_log10mthresh': 7.,
     'hod_bisection_search_max_log10mthresh': 14.,
     'hod_bisection_search_rtol': 1e-4,
     'hod_bisection_search_warn_iter': 20,
+
+    # Leauthaud12 HOD
+    'hod_Leau12_A_log10mthresh': 1.0, # This parameter is used to vary log10mthresh
+    'hod_Leau12_sig_log_mstellar': 0.2,
+    'hod_Leau12_alphasat': 1.0,
+    'hod_Leau12_Bsat':9.04,
+    'hod_Leau12_betasat':0.74,
+    'hod_Leau12_Bcut':1.65,
+    'hod_Leau12_betacut':0.59,
 }
