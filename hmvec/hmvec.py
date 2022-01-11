@@ -5,7 +5,7 @@ from scipy.interpolate import interp1d
 import camb
 from camb import model
 import numpy as np
-from . import tinker,utils
+from . import tinker,utils,hod
 from .cosmology import Cosmology
 
 import scipy.constants as constants
@@ -437,17 +437,43 @@ class HaloModel(Cosmology):
 
         return self.ks,ukouts
 
-    def add_hod(self,name,mthresh=None,ngal=None,corr="max",
-                satellite_profile_name='nfw',
-                central_profile_name=None,ignore_existing=False,param_override=None):
+    def add_hod(
+        self,
+        name,
+        family=hod.Leauthaud12HOD,
+        corr="max",
+        satellite_profile_name='nfw',
+        central_profile_name=None,
+        ignore_existing=False,
+        param_override=None,
+        **kwargs
+    ):
+        """Precompute and store quantities related to a given HOD.
+
+        Possible HODs are defined as subclasses of HODBase in hod.py.
+
+        Parameters
+        ----------
+        name : string
+            Name for HOD. Quantities are fetched from name item
+            in hods dict.
+        family : hod.HODBase
+            Name of HOD class (e.g. hod.Leauthaud12HOD).
+        corr : string, optional
+            Either "min" or "max", describing correlations in central-satellite model.
+            Default: "max"
+        satellite_profile_name : string, optional
+            Density profile for satellites. Default: "nfw"
+        central_profile_name : string, optional
+            Density profile for centrals, used to specify miscentering.
+            Default: None (correponds to uk=1)
+        ignore_existing : bool, optional
+            Whether to overwrite existing HOD with given name. Default: False
+        **param_override : dict, optional
+            Dict of parameter values to override defaults with. Default: None
         """
-        Specify an HOD.
-        This requires either a stellar mass threshold mthresh (nz,)
-        or a number density ngal (nz,) from which mthresh is identified iteratively.
-        You can either specify a corr="max" maximally correlated central-satellite
-        model or a corr="min" minimally correlated model.
-        Miscentering could be included through central_profile_name (default uk=1 for default name of None).
-        """
+
+        # Check for existing profiles or HODs with same name
         if not(ignore_existing):
             assert name not in self.uk_profiles.keys(), \
                 "HOD name already used by profile."
@@ -459,92 +485,38 @@ class HaloModel(Cosmology):
         if not(ignore_existing):
             assert name not in self.hods.keys(), "HOD with that name already exists."
 
-        hod_params = ['hod_sig_log_mstellar','hod_bisection_search_min_log10mthresh',
-                   'hod_bisection_search_max_log10mthresh','hod_bisection_search_rtol',
-                   'hod_bisection_search_warn_iter','hod_alphasat','hod_Bsat',
-                      'hod_betasat','hod_Bcut','hod_betacut','hod_A_log10mthresh']
-        # Set default parameters
-        pparams = {}
-        for ip in hod_params:
-            pparams[ip] = self.p[ip]
-
-        # Update with overrides
-        if param_override is not None:
-            for key in param_override.keys():
-                if key in hod_params:
-                    pparams[key] = param_override[key]
-                else:
-                    raise ValueError # param in param_override doesn't seem to be an HOD parameter
-
-        try:
-            Msat_override = pparams['hod_Msat_override']
-        except:
-            Msat_override = None
-        try:
-            Mcut_override = pparams['hod_Mcut_override']
-        except:
-            Mcut_override = None
-
+        # Make dict entry to store info for new HOD, and store HOD object.
         self.hods[name] = {}
-        if ngal is not None:
-            try: assert ngal.size == self.zs.size
-            except:
-                raise ValueError("ngal has to be a vector of size self.zs")
-            assert mthresh is None
+        self.hods[name]["hod"] = family(
+            self.zs, self.ms, params=self.p, param_override=param_override, **kwargs
+        )
 
-            nfunc = lambda ilog10mthresh: ngal_from_mthresh(ilog10mthresh,
-                                                            self.zs,
-                                                            self.nzm,
-                                                            self.ms,
-                                                            sig_log_mstellar=pparams['hod_sig_log_mstellar'],
-                                                            alphasat=pparams['hod_alphasat'],
-                                                            Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
-                                                            Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
-                                                            Msat_override=Msat_override,
-                                                            Mcut_override=Mcut_override)
-
-            log10mthresh = utils.vectorized_bisection_search(ngal,nfunc,
-                                                             [pparams['hod_bisection_search_min_log10mthresh'],
-                                                              pparams['hod_bisection_search_max_log10mthresh']],
-                                                             "decreasing",
-                                                             rtol=pparams['hod_bisection_search_rtol'],
-                                                             verbose=True,
-                                                             hang_check_num_iter=pparams['hod_bisection_search_warn_iter'])
-            mthresh = 10**(log10mthresh*pparams['hod_A_log10mthresh'])
-
-        try: assert mthresh.size == self.zs.size
-        except:
-            raise ValueError("mthresh has to be a vector of size self.zs")
-
-        log10mhalo = np.log10(self.ms[None,:])
-        log10mstellar_thresh = np.log10(mthresh[:,None])
-        Ncs = avg_Nc(log10mhalo,self.zs[:,None],log10mstellar_thresh,sig_log_mstellar=pparams['hod_sig_log_mstellar'])
-        Nss = avg_Ns(log10mhalo,self.zs[:,None],log10mstellar_thresh,Nc=Ncs,
-                     sig_log_mstellar=pparams['hod_sig_log_mstellar'],
-                     alphasat=pparams['hod_alphasat'],
-                     Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
-                     Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
-                     Msat_override=Msat_override,
-                     Mcut_override=Mcut_override)
-        NsNsm1 = avg_NsNsm1(Ncs,Nss,corr)
-        NcNs = avg_NcNs(Ncs,Nss,corr)
-
-        self.hods[name]['Nc'] = Ncs
-        self.hods[name]['Ns'] = Nss
-        self.hods[name]['NsNsm1'] = NsNsm1
-        self.hods[name]['NcNs'] = NcNs
-        self.hods[name]['ngal'] = self.get_ngal(Ncs,Nss)
-        self.hods[name]['bg'] = self.get_bg(Ncs,Nss,self.hods[name]['ngal'])
+        # Store precomputed HOD quantities.
+        # TODO: This is a bit redundant, since these quantities are also stored
+        # in self.hods[name]['hod'], but it's left here for consistency with previous
+        # routines
+        self.hods[name]['Nc'] = self.hods[name]['hod'].Nc
+        self.hods[name]['Ns'] = self.hods[name]['hod'].Ns
+        self.hods[name]['NsNsm1'] = self.hods[name]['hod'].NsNsm1
+        self.hods[name]['NcNs'] = self.hods[name]['hod'].NcNs
+        self.hods[name]['ngal'] = self.get_ngal(
+            self.hods[name]['Nc'], self.hods[name]['Ns']
+        )
+        self.hods[name]['bg'] = self.get_bg(
+            self.hods[name]['Nc'],
+            self.hods[name]['Ns'],
+            self.hods[name]['ngal']
+        )
         self.hods[name]['satellite_profile'] = satellite_profile_name
         self.hods[name]['central_profile'] = central_profile_name
-        self.hods[name]['log10mthresh'] = np.log10(mthresh[:,None])
 
-    def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
+    def get_ngal(self, Nc, Ns):
+        integrand = self.nzm * (Nc + Ns)
+        return np.trapz(integrand, self.ms, axis=-1)
 
-    def get_bg(self,Nc,Ns,ngal):
-        integrand = self.nzm * (Nc+Ns) * self.bh
-        return np.trapz(integrand,self.ms,axis=-1)/ngal
-
+    def get_bg(self, Nc, Ns, ngal):
+        integrand = self.nzm * (Nc + Ns) * self.bh
+        return np.trapz(integrand, self.ms, axis=-1) / ngal
 
     def _get_hod_common(self,name):
         hod = self.hods[name]
@@ -745,44 +717,6 @@ Mass function
 """
 def R_from_M(M,rho,delta): return (3.*M/4./np.pi/delta/rho)**(1./3.)
 
-"""
-HOD functions from Matt Johnson and Moritz Munchmeyer (modified)
-"""
-
-def avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar):
-    """<Nc(m)>"""
-    log10mstar = Mstellar_halo(z,log10mhalo)
-    num = log10mstellar_thresh - log10mstar
-    denom = np.sqrt(2.) * sig_log_mstellar
-    return 0.5*(1. - erf(num/denom))
-
-
-def hod_default_mfunc(mthresh,Bamp,Bind): return (10.**(12.))*Bamp*10**((mthresh-12)*Bind)
-
-def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None,sig_log_mstellar=None,
-           alphasat=None,Bsat=None,betasat=None,Bcut=None,betacut=None,
-           Msat_override=None,Mcut_override=None):
-    mthresh = Mhalo_stellar(z,log10mstellar_thresh)
-    Msat = Msat_override if Msat_override is not None else hod_default_mfunc(mthresh,Bsat,betasat)
-    Mcut = Mcut_override if Mcut_override is not None else hod_default_mfunc(mthresh,Bcut,betacut)
-    Nc = avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar=sig_log_mstellar) if Nc is None else Nc
-    masses = 10**log10mhalo
-    return Nc*((masses/Msat)**alphasat)*np.exp(-Mcut/(masses))
-
-
-def avg_NsNsm1(Nc,Ns,corr="max"):
-    if corr=='max':
-        ret = Ns**2./Nc
-        ret[np.isclose(Nc,0.)] = 0 #FIXME: is this kosher?
-        return ret
-    elif corr=='min':
-        return Ns**2.
-
-def avg_NcNs(Nc,Ns,corr="max"):
-    if corr=='max':
-        return Ns
-    elif corr=='min':
-        return Ns*Nc
 
 """
 Profiles
@@ -981,31 +915,4 @@ def P_e_generic_x(x,m200critz,R200critz,z,omb,omm,rhocritz,
     return eFrac*(omb/omm)*200*m200critz*G_newt* rhocritz/(2*R200critz) * P0 * (x/xc)**gamma * (1.+(x/xc)**alpha)**(-beta)
 
 
-
-
-
 def a2z(a): return (1.0/a)-1.0
-
-
-def ngal_from_mthresh(log10mthresh=None,zs=None,nzm=None,ms=None,
-                      sig_log_mstellar=None,Ncs=None,Nss=None,
-                      alphasat=None,Bsat=None,betasat=None,
-                      Bcut=None,betacut=None,
-                      Msat_override=None,
-                      Mcut_override=None):
-    if (Ncs is None) and (Nss is None):
-        log10mstellar_thresh = log10mthresh[:,None]
-        log10mhalo = np.log10(ms[None,:])
-        Ncs = avg_Nc(log10mhalo,zs[:,None],log10mstellar_thresh,sig_log_mstellar)
-        Nss = avg_Ns(log10mhalo,zs[:,None],log10mstellar_thresh,Ncs,
-                     sig_log_mstellar,alphasat,
-                     Bsat,betasat,
-                     Bcut,betacut,
-                     Msat_override=Msat_override,
-                     Mcut_override=Mcut_override)
-    else:
-        assert log10mthresh is None
-        assert zs is None
-        assert sig_log_mstellar is None
-    integrand = nzm * (Ncs+Nss)
-    return np.trapz(integrand,ms,axis=-1)
