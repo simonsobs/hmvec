@@ -105,4 +105,31 @@ default_params = {
     'hod_Leau12_betasat':0.74,
     'hod_Leau12_Bcut':1.65,
     'hod_Leau12_betacut':0.59,
+    'hod_Leau12_log10mstellar_thresh': 10.5,
+
+    # HMQ ELG Alam2020 HOD
+    'hod_Alam20_HMQ_ELG_log10Mc': 11.75,
+    'hod_Alam20_HMQ_ELG_sigmaM': 0.58,
+    'hod_Alam20_HMQ_ELG_gamma': 4.12,
+    'hod_Alam20_HMQ_ELG_Q': 100,
+    'hod_Alam20_HMQ_ELG_log10M1': 13.53,
+    'hod_Alam20_HMQ_ELG_kappa': 1.0,
+    'hod_Alam20_HMQ_ELG_alpha': 1.0,
+    'hod_Alam20_HMQ_ELG_pmax': 0.33,
+
+    # LRG Alam2020 HOD
+    'hod_Alam20_HMQ_LRG_log10Mc': 13.0,
+    'hod_Alam20_HMQ_LRG_sigmaM': 0.60,
+    'hod_Alam20_HMQ_LRG_log10M1': 14.24,
+    'hod_Alam20_HMQ_LRG_kappa': 0.98,
+    'hod_Alam20_HMQ_LRG_alpha': 0.4,
+    'hod_Alam20_HMQ_LRG_pmax': 0.33,
+
+    # QSO Alam2020 HOD
+    'hod_Alam20_HMQ_QSO_log10Mc': 12.21,
+    'hod_Alam20_HMQ_QSO_sigmaM': 0.60,
+    'hod_Alam20_HMQ_QSO_log10M1': 14.09,
+    'hod_Alam20_HMQ_QSO_kappa': 1.0,
+    'hod_Alam20_HMQ_QSO_alpha': 0.39,
+    'hod_Alam20_HMQ_QSO_pmax': 0.033,
 }

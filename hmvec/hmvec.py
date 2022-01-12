@@ -440,7 +440,7 @@ class HaloModel(Cosmology):
     def add_hod(
         self,
         name,
-        family=hod.Leauthaud12HOD,
+        family=hod.Leauthaud12_HOD,
         corr="max",
         satellite_profile_name='nfw',
         central_profile_name=None,
@@ -458,7 +458,7 @@ class HaloModel(Cosmology):
             Name for HOD. Quantities are fetched from name item
             in hods dict.
         family : hod.HODBase
-            Name of HOD class (e.g. hod.Leauthaud12HOD).
+            Name of HOD class (e.g. hod.Leauthaud12_HOD).
         corr : string, optional
             Either "min" or "max", describing correlations in central-satellite model.
             Default: "max"
