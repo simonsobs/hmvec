@@ -14,6 +14,7 @@ import warnings
 from .params import default_params
 from .hmvec import HaloModel
 from . import utils
+from .utils import sanitize
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
 from scipy.integrate import quad, dblquad
@@ -65,7 +66,7 @@ def pge_err_core(pgv_int,kstar,chistar,volume_gpc3,kss,ks_bin_edges,pggtot,Cls):
     integrand = (kss/(pggtot * cltot))
     for kleft,kright in zip(ks_bin_edges[:-1],ks_bin_edges[1:]):
         sel = np.s_[np.logical_and(kss>kleft,kss<=kright)]
-        y = _sanitize(integrand[sel])
+        y = sanitize(integrand[sel])
         x = kss[sel]
         ints.append(np.trapz(y,x))
     return (volume * kstar**2 / 12 / np.pi**3 / chistar**2. * pgv_int * np.asarray(ints))**(-0.5)
@@ -183,23 +184,6 @@ def ksz_radial_function(z, ombh2, Yp, gasfrac = 0.9, xe=1, tau=0, params=None):
     meterToMegaparsec = constants['meter_to_megaparsec'] # Mpc m^-1
     ne0 = ne0_shaw(ombh2,Yp) # m^-3
     return T_CMB_muk * thompson_SI * ne0 * (1.+z)**2. / meterToMegaparsec  * xe  * np.exp(-tau)
-
-
-def _sanitize(inp):
-    """Set infinite or NaN values to zero in an array.
-
-    Parameters
-    ----------
-    inp : array_like
-        Input array.
-
-    Returns
-    -------
-    out : array_like
-        Sanitized array.
-    """
-    inp[~np.isfinite(inp)] = 0
-    return inp
 
 
 class kSZ(HaloModel):
@@ -416,7 +400,7 @@ class kSZ(HaloModel):
                 # Construct integrand (without prefactor) as function of tabulated k_L values,
                 # and integrate
                 kls = self.kLs
-                integrand = _sanitize((kls**2.)*(flPgv*flPgv)/flPgg)
+                integrand = sanitize((kls**2.)*(flPgv*flPgv)/flPgg)
                 vrec = np.trapz(integrand,kls)
                 self.vrec.append(vrec.copy())
 
@@ -578,11 +562,11 @@ def Nvv_core_integral(chi_star,Fstar,mu,kL,kSs,Cls,Pge,Pgg_tot,Pgg_photo_tot=Non
 
 
     Clkstot = get_interpolated_cls(Cls,chi_star,kSs)
-    integrand = _sanitize(kSs * ( Pge**2. / (Pgg_tot * Clkstot)))
+    integrand = sanitize(kSs * ( Pge**2. / (Pgg_tot * Clkstot)))
 
     if robust_term:
         assert Pgg_photo_tot is not None
-        integrand = _sanitize(integrand * (Pgg_photo_tot/Pgg_tot))
+        integrand = sanitize(integrand * (Pgg_photo_tot/Pgg_tot))
 
     integral = np.trapz(integrand,kSs)
     Nvv = prefact / integral
@@ -646,7 +630,7 @@ def get_ksz_template_signal_snapshot(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=Non
     chistar = pksz.results.comoving_radial_distance(z)
 
     # Get interpolating function for P_ge^fid * P_ge^true / P_gg^{tot,fid}
-    iPk = utils.interp(fksz.kS,_sanitize(fsPge * psPge / fsPgg))
+    iPk = utils.interp(fksz.kS,sanitize(fsPge * psPge / fsPgg))
     # Get product above at k = ell/chi_* for specified ells
     Pks = np.asarray([iPk(k) for k in ells/chistar])
 
@@ -669,7 +653,7 @@ def get_ksz_template_signal_snapshot(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=Non
     # Construct integrand (without prefactor) as function of tabulated k_L values,
     # and integrate
     kls = fksz.kLs
-    integrand = _sanitize((kls**2.)*(flPgv*plPgv)/flPgg)
+    integrand = sanitize((kls**2.)*(flPgv*plPgv)/flPgg)
     vrec = np.trapz(integrand,kls)
 
     # Return full integral as function of input ell values, and other info
@@ -719,7 +703,7 @@ def get_ksz_snr(volume_gpc3,z,ngal_mpc3,Cls,bg=None,params=None,
         lPgv = lPgv[...,0]
     ltPgg = lPgg + ngg
     kls = fksz.kLs
-    integrand = _sanitize((kls**2.)*(lPgv**2)/ltPgg/Nvv)
+    integrand = sanitize((kls**2.)*(lPgv**2)/ltPgg/Nvv)
     result = np.trapz(integrand,kls)
     snr2 = np.trapz(result,fksz.mu) / (2.*np.pi)**2.
     return np.sqrt(V*snr2),fksz
@@ -1172,10 +1156,10 @@ def get_ksz_auto_squeezed(
         # Get P_gv^2 / P_gg^total or P_vv, and integrate in k
         kls = pksz.kLs
         if template:
-#             integrand = _sanitize((kls**2.)*lPgv[zi]**2/lPgg[zi])
-            integrand = _sanitize((kls**2.)*lPgv[zi]**2/sPgg_for_v[zi])
+#             integrand = sanitize((kls**2.)*lPgv[zi]**2/lPgg[zi])
+            integrand = sanitize((kls**2.)*lPgv[zi]**2/sPgg_for_v[zi])
         else:
-            integrand = _sanitize((kls**2.)*lPvv[zi])
+            integrand = sanitize((kls**2.)*lPvv[zi])
         vint = np.trapz(integrand,kls)
 
         # Get P_ge^2 / P_gg^total or P_ee
@@ -1444,7 +1428,7 @@ def get_ksz_auto_squeezed_m_integrand(
 
         # Get P_vv, and integrate in k
         kls = pksz.kLs
-        integrand = _sanitize((kls**2.)*lPvv[zi])
+        integrand = sanitize((kls**2.)*lPvv[zi])
         vint = np.trapz(integrand,kls)
 
         # Get P_ee, packed as [k,M,z]
