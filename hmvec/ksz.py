@@ -45,10 +45,6 @@ def Ngg(ngalMpc3):
     return (1./ngalMpc3)
 
 
-def pgv(kls,):
-    pass
-
-
 def pge_err_core(pgv_int,kstar,chistar,volume_gpc3,kss,ks_bin_edges,pggtot,Cls):
 
     """
