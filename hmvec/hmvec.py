@@ -457,8 +457,8 @@ class HaloModel(Cosmology):
         name : string
             Name for HOD. Quantities are fetched from name item
             in hods dict.
-        family : hod.HODBase
-            Name of HOD class (e.g. hod.Leauthaud12_HOD).
+        family : hod.HODBase, optional
+            Name of HOD class. Default: hod.Leauthaud12_HOD.
         corr : string, optional
             Either "min" or "max", describing correlations in central-satellite model.
             Default: "max"
@@ -488,7 +488,7 @@ class HaloModel(Cosmology):
         # Make dict entry to store info for new HOD, and store HOD object.
         self.hods[name] = {}
         self.hods[name]["hod"] = family(
-            self.zs, self.ms, params=self.p, param_override=param_override, **kwargs
+            self.zs, self.ms, params=self.p, nzm=self.nzm, param_override=param_override, **kwargs
         )
 
         # Store precomputed HOD quantities.
@@ -657,9 +657,9 @@ class HaloModel(Cosmology):
             return prefactor * self.Pzk[..., np.newaxis, :]
         else:
             # Return P_2h packed as [z,k]
-            if verbose:
-                print("Two-halo consistency1: " , consistency1,integral)
-                print("Two-halo consistency2: " , consistency2,integral2)
+            # if verbose:
+            #     print("Two-halo consistency1: " , consistency1,integral)
+            #     print("Two-halo consistency2: " , consistency2,integral2)
             return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
     def sigma_1h_profiles(self,thetas,Ms,concs,sig_theta=None,delta=200,rho='mean',rho_at_z=True):

@@ -13,7 +13,7 @@ import warnings
 
 from .params import default_params
 from .hmvec import HaloModel
-from . import utils
+from . import utils, hod
 from .utils import sanitize
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
@@ -244,8 +244,13 @@ class kSZ(HaloModel):
         Skip computation of HOD to save time. Default: False.
     hod_name : str, optional,
         Internal identifier for galaxy HOD. Default: 'g'.
+    hod_family : hod.HODBase
+        Name of HOD class to use for galaxy HOD. Default: hod.Leauthaud12_HOD.
     hod_corr : {'max', 'min'}, optional
         Correlations between centrals and satellites in HOD. Default: 'max'.
+    use_hod_default_ngal : bool, optional
+        Use default HOD parameters instead of setting lower mass threshold from input
+        values of ngals_mpc3. Default: False.
     **hod_param_override : dict, optional
         Dictionary of override parameters for electron profile. Default: None.
     mthreshs_override : array_like, optional
@@ -267,7 +272,9 @@ class kSZ(HaloModel):
                  electron_profile_name='e',electron_profile_family='AGN',
                  skip_electron_profile=False,electron_profile_param_override=None,
                  electron_profile_nxs=None,electron_profile_xmax=None,
-                 skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None,
+                 skip_hod=False,hod_name="g",hod_family=hod.Leauthaud12_HOD,hod_corr="max",
+                 use_hod_default_ngal=False,
+                 hod_param_override=None,
                  mthreshs_override=None,
                  verbose=False,
                  b1=None,b2=None,sigz=None):
@@ -318,7 +325,12 @@ class kSZ(HaloModel):
         # Define galaxy HOD
         if not skip_hod:
             if verbose: print('Defining HOD')
-            self.add_hod(hod_name,mthresh=mthreshs_override,ngal=ngals_mpc3,corr=hod_corr,
+            if use_hod_default_ngal:
+                ngal_for_hod = None
+            else:
+                ngal_for_hod = ngals_mpc3
+            self.add_hod(hod_name,family=hod_family,
+                         mthresh=mthreshs_override,ngal=ngal_for_hod,corr=hod_corr,
                          satellite_profile_name='nfw',
                          central_profile_name=None,ignore_existing=False,
                          param_override=hod_param_override)
@@ -579,7 +591,8 @@ def get_ksz_template_signal_snapshot(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=Non
                             num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
                             mdef='vir',nfw_numeric=False,
                             electron_profile_family='AGN',
-                            electron_profile_nxs=None,electron_profile_xmax=None):
+                            electron_profile_nxs=None,electron_profile_xmax=None,
+                            hod_family=hod.Leauthaud12_HOD):
     """
     Get C_ell_That_T, the expected cross-correlation between a kSZ template
     and the CMB temperature.
@@ -593,9 +606,10 @@ def get_ksz_template_signal_snapshot(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=Non
                electron_profile_name='e',electron_profile_family=electron_profile_family,
                skip_electron_profile=False,electron_profile_param_override=fparams,
                electron_profile_nxs=electron_profile_nxs,electron_profile_xmax=electron_profile_xmax,
-               skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None)
+               skip_hod=False,hod_name="g",hod_family=hod_family,hod_corr="max",hod_param_override=None)
 
     # Define kSZ object corresponding to "true" parameters, if specified
+    ## TODO: need to specify HOD params below?
     if params is not None:
         pksz = kSZ([z],[volume_gpc3],[ngal_mpc3],
                kL_max=kL_max,num_kL_bins=num_kL_bins,kS_min=kS_min,kS_max=kS_max,
@@ -674,7 +688,8 @@ def get_ksz_snr(volume_gpc3,z,ngal_mpc3,Cls,bg=None,params=None,
                 num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
                 mdef='vir',nfw_numeric=False,
                 electron_profile_family='AGN',
-                electron_profile_nxs=None,electron_profile_xmax=None,sigz=None):
+                electron_profile_nxs=None,electron_profile_xmax=None,sigz=None,
+                hod_family=hod.Leauthaud12_HOD):
 
     """
     SNR = \int 2pi k_L^2 dk_L dmu (1/(2pi)^3) Pgv(mu,kL)^2 / Pggtot(mu,kL)^2 / Nvv(mu,kL)
@@ -686,7 +701,8 @@ def get_ksz_snr(volume_gpc3,z,ngal_mpc3,Cls,bg=None,params=None,
                electron_profile_name='e',electron_profile_family=electron_profile_family,
                skip_electron_profile=False,electron_profile_param_override=params,
                electron_profile_nxs=electron_profile_nxs,electron_profile_xmax=electron_profile_xmax,
-               skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None,sigz=sigz)
+               skip_hod=False,hod_name="g",hod_family=hod_family,
+               hod_corr="max",hod_param_override=None,sigz=sigz)
     V = volume_gpc3 * 1e9
     ngg = Ngg(ngal_mpc3)
     Nvv = fksz.Nvv(0,Cls)
@@ -1275,7 +1291,8 @@ def get_ksz_auto_squeezed_m_integrand(
     electron_profile_family='AGN',
     electron_profile_nxs=None,
     electron_profile_xmax=None,
-    n_int = 100,
+    hod_family=hod.Leauthaud12_HOD,
+    n_int=100,
     verbose=False,
     pksz_in=None,
     save_cl_integrand=False,
@@ -1331,6 +1348,8 @@ def get_ksz_auto_squeezed_m_integrand(
         Number of samples of electron profile for FFT. Default: None.
     electron_profile_xmax : float, optional
         X_max for electron profile in FFT. Default: None.
+    hod_family : hod.HODBase, optional
+        Name of HOD class. Default: hod.Leauthaud12_HOD.
     n_int : int, optional
         Number of samples to use in Limber integral. Default: 100.
     verbose : bool, optional
@@ -1397,6 +1416,7 @@ def get_ksz_auto_squeezed_m_integrand(
             electron_profile_nxs=electron_profile_nxs,
             electron_profile_xmax=electron_profile_xmax,
             skip_hod=skip_hod,
+            hod_family=hod_family,
             verbose=verbose,
         )
 
