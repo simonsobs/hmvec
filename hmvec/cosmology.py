@@ -140,10 +140,11 @@ class Cosmology(object):
         # f(a) (a/D) D'(a)
         _DA = 0.001
 
-        # If user inputs a=1, shift to a=1-_DA such that derivative doesn't use
-        # a > 1
+        # If user inputs a>1-_DA, shift down by _DA such that derivative doesn't use
+        # a > 1. Similarly with a<_DA
         a_in = a.copy()
-        a_in[a_in == 1] = 1 - _DA
+        a_in[a_in >= 1 - _DA] -= _DA
+        a_in[a_in <=  _DA] += _DA
 
         Dmean = self.D_growth(a_in)
         Dplus = self.D_growth(a_in + _DA)
