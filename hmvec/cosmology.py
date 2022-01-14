@@ -136,6 +136,23 @@ class Cosmology(object):
         _da_interp_type = "camb"
         return _da_interp(a)/_da_interp(1.0)
 
+    def f_growth(self, a):
+        # f(a) (a/D) D'(a)
+        _DA = 0.001
+
+        # If user inputs a=1, shift to a=1-_DA such that derivative doesn't use
+        # a > 1
+        a_in = a.copy()
+        a_in[a_in == 1] = 1 - _DA
+
+        Dmean = self.D_growth(a_in)
+        Dplus = self.D_growth(a_in + _DA)
+        Dminus = self.D_growth(a_in - _DA)
+        dDda = (Dplus - Dminus) / (2 * _DA)
+        f = a_in * dDda / Dmean
+
+        return f
+
     def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
         """
         This function will provide the linear matter power spectrum used in calculation
