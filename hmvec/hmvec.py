@@ -85,16 +85,19 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     return A*((h*m/2.e12)**alpha)*(1+z)**beta
 
 class HaloModel(Cosmology):
-    def __init__(self,zs,ks,ms=None,params=None,mass_function="sheth-torman",
+
+    def __init__(self,zs,ks,ms=None,mus=None,params=None,mass_function="sheth-torman",
                  halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accurate_sigma2=False):
         self.zs = np.asarray(zs)
         self.ks = ks
+        self.mus = mus
         self.accurate_sigma2 = accurate_sigma2
         Cosmology.__init__(self,params,halofit)
 
         self.mdef = mdef
         self.mode = mass_function
         self.hods = {}
+
 
         # Mass function
         if ms is not None:
@@ -117,10 +120,15 @@ class HaloModel(Cosmology):
         x = self.omz(z) - 1.
         d = 18.*np.pi**2. + 82.*x - 39. * x**2.
         return d
-    def rvir(self,m,z):
-        if self.mdef == 'vir':
+
+    def rvir(self,m,z,mdef=None):
+
+        if mdef is None:
+            mdef = self.mdef
+
+        if mdef == 'vir':
             return R_from_M(m,self.rho_critical_z(z),delta=self.deltav(z))
-        elif self.mdef == 'mean':
+        elif mdef == 'mean':
             return R_from_M(m,self.rho_matter_z(z),delta=200.)
 
     def R_of_m(self,ms):
@@ -514,9 +522,265 @@ class HaloModel(Cosmology):
         integrand = self.nzm * (Nc + Ns)
         return np.trapz(integrand, self.ms, axis=-1)
 
-    def get_bg(self, Nc, Ns, ngal):
-        integrand = self.nzm * (Nc + Ns) * self.bh
-        return np.trapz(integrand, self.ms, axis=-1) / ngal
+    def sigma2_FoG(self, m, z):
+        """Compute squared mass-dependent Finger of God damping scale.
+
+        We follow Schaan & White 2021 (2103.01964, discussion between Eqs. 2.7 and 2.8)
+        in taking the damping scale to be sigma_d = sigma_{v,1d} / (aH), where the
+        line-of-sight velocity dispersion is that of a singular isothermal sphere with
+        radius r_vir and mass m.
+
+        Parameters
+        ----------
+        m : array_like, 1d
+            Halo masses to compute for, in Msun.
+        z : array_like, 1d
+            Redshifts to compute for.
+
+        Returns
+        -------
+        sigma_d2 : array_like
+            Sigma_d^2, packed as [z,m].
+        """
+
+        _GNEWTON = 4.30091e-9 # Mpc Msun^-1 km^2 s^-1; value from Wikipedia
+
+        # Compute sigma_v^2, packed as [z,m]. We need this r_vir to be physical,
+        # rather than comoving, but this should be what self.rvir() computes.
+        # Units of sigma_v^2 are km^2 s^-2
+        sigma_v2 = _GNEWTON * m[np.newaxis, :] / (
+            2 * self.rvir(m[np.newaxis, :], z[:, np.newaxis], mdef="vir")
+        )
+        # Compute sigma_d^2 = sigma_v^2 / (aH)^2, packed as [z,m].
+        # hubble_parameter(z) has units of km s^-1 Mpc^-1, so sigma_d2 has units of
+        # Mpc^2
+        sigma_d2 = sigma_v2 * (((1 + z) / self.hubble_parameter(z))**2)[:, np.newaxis]
+
+        return sigma_d2
+
+    def DFoG(self, kmu, func="Schaan"):
+        """Mass-dependent Finger of God damping function.
+
+        We follow Schaan & White 2021 (2103.01964, Eq. 2.7) in taking the damping
+        function to be an exponential with damping scale sigma_d, computed in the
+        sigma2_FoG routine. Lorentzian damping is also implemented
+
+        Parameters
+        ----------
+        kmu : array_like
+            k*mu values to compute for, packed as [k,mu].
+        func : {"Schaan", "Lorentzian"}, optional
+            Form of damping function. Default: "Schaan".
+
+        Returns
+        -------
+        factor : array_like
+            D_FoG(k, m, z, mu), packed as [z,m,k,mu].
+        """
+
+        if func == "Schaan":
+            factor = np.exp(
+                -0.5
+                * kmu[np.newaxis, np.newaxis, :, :] ** 2
+                * self.sigma2_FoG(self.ms, self.zs)[:, :, np.newaxis, np.newaxis]
+            )
+        elif func == "Lorentzian":
+            factor = 1 / (
+                1 + 0.5 * kmu[np.newaxis, np.newaxis, :, :] ** 2
+                * self.sigma2_FoG(self.ms, self.zs)[:, :, np.newaxis, np.newaxis]
+            )
+        else:
+            raise NotImplementedError(
+                "Specified DFoG function (%s) not implemented" % func
+            )
+        return factor
+
+    def get_bg(self, Nc, Ns, ngal, rsd=False, u_name="nfw", vectorize_mu=True):
+        """Galaxy bias, optionally including effects of Fingers of God.
+
+        We follow Schaan & White 2021 (2103.01964, Eq. A.27) in incorporating a
+        mass-dependent Finger of God damping inside the integral over halo mass.
+        Alternatively, this can be ignored, such that b_g is only a function of z
+        instead of z, k, and mu.
+
+        Parameters
+        ----------
+        Nc, Ns : array_like
+            N_c and N_s from a given HOD, packed as [z,m].
+        ngal : array_like
+            Mean galaxy number density, packed as [z].
+        rsd : bool, optional
+            Whether to include Finger of God effects. Affects dimensionality of output.
+            Default: False.
+        u_name : string, optional
+            Internal name for satellite galaxy profile. Default: "nfw".
+        vectorize_mu : bool, optional
+            Whether to vectorize in mu, which is faster than looping over mu but takes
+            more memory. Regardless of this option, we loop over mu if vectorization
+            would take an excessive amount of memory. Default: True.
+
+        Returns
+        -------
+        bg : array_like
+            Galaxy bias. If ignoring RSD, packed as [z]; if including RSD, packed as
+            [z,k,mu].
+        """
+
+        _MAX_INTEGRAND_SIZE = 1e8
+
+        if not rsd:
+            # Get integrand, packed as [z, m]
+            integrand = self.nzm * (Nc + Ns) * self.bh
+            # Integrate in m to get b_g(z)
+            bg = np.trapz(integrand, self.ms, axis=-1) / ngal
+
+        else:
+
+            if self.mus is None:
+                raise RuntimeError("mu array not defined!")
+
+            # Get u(k,m,z) corresponding to satellite profile, packed as [z,m,k]
+            uk = self.uk_profiles[u_name]
+            # If full integrand, packed as [z,m,k,mu] would be too large
+            # to hold in memory at once, loop over mu:
+            if (
+                (np.prod(uk.shape) * self.mu.shape[0] > _MAX_INTEGRAND_SIZE)
+                or not vectorize_mu
+            ):
+                bg = np.zeros((uk.shape[0], uk.shape[2],) + self.mus.shape)
+                for mui, mu in enumerate(self.mu):
+                    # Form n(m) * b(m), packed as [z, m]
+                    integrand = self.nzm * self.bh
+                    # Multiply by (N_c(m) + N_s(m) D_FoG(k*mu)).
+                    # Result is packed as [z,m,k,mu], with a length-1 mu axis.
+                    integrand = (
+                        integrand[:, :, np.newaxis, np.newaxis]
+                        * (
+                            Nc[:, :, np.newaxis, np.newaxis]
+                            + Ns[:, :,  np.newaxis, np.newaxis]
+                            * uk[:, :, :, np.newaxis]
+                            * self.DFoG(
+                                self.ks[:, np.newaxis]
+                                * self.mu[mui : mui + 1][np.newaxis, :]
+                            )
+                        )
+                    )
+                    # Integrate in m, to get b_g(z, k, mu)
+                    bg[:, :, mui : mui + 1] = np.trapz(
+                        integrand, self.ms, axis=1
+                    ) / ngal[:, np.newaxis,  np.newaxis]
+
+            # Otherwise, form whole integrand and integrate all at once
+            else:
+                # Form n(m) * b(m), packed as [z, m]
+                integrand = self.nzm * self.bh
+                # Multiply by (N_c(m) + N_s(m) D_FoG(k*mu)).
+                # Result is packed as [z,m,k,mu].
+                integrand = (
+                    integrand[:, :, np.newaxis, np.newaxis]
+                    * (
+                        Nc[:, :, np.newaxis, np.newaxis]
+                        + Ns[:, :, np.newaxis, np.newaxis]
+                        * uk[:, :, :, np.newaxis]
+                        * self.DFoG(self.ks[:, np.newaxis] * self.mus[np.newaxis, :])
+                    )
+                )
+                # Integrate in m to get b_g(z,k,mu)
+                bg = np.trapz(integrand, self.ms, axis=1) / ngal[
+                    :, np.newaxis,  np.newaxis
+                ]
+
+        return bg
+
+    def get_fgrowth(self, rsd=False, vectorize_mu=True):
+        """Logarithmic growth rate f(z), optionally Finger-of-God effects.
+
+        We follow Schaan & White 2021 (2103.01964, Eq. A.28) in incorporating a
+        mass-dependent Finger of God damping inside an integral over halo mass.
+        Alternatively, this can be ignored, such that f is only a function of z
+        instead of z, k, and mu.
+
+        Parameters
+        ----------
+        rsd : bool, optional
+            Whether to include Finger of God effects. Affects dimensionality of output.
+            Default: False.
+        vectorize_mu : bool, optional
+            Whether to vectorize in mu, which is faster than looping over mu but takes
+            more memory. Regardless of this option, we loop over mu if vectorization
+            would take an excessive amount of memory. Default: True.
+
+        Returns
+        -------
+        f : array_like
+            Logarithmic growth rate. If ignoring RSD, packed as [z]; if including RSD,
+            packed as [z,k,mu].
+        """
+
+        _MAX_INTEGRAND_SIZE = 1e8
+
+        # Compute scale-independent growth rate f(z) = a D'(a) / D(a).
+        fz = self.f_growth(1/(1+self.zs))
+
+        if not rsd:
+            return fz
+
+        else:
+
+            if self.mus is None:
+                raise RuntimeError("mu array not defined!")
+
+            # Get (m / rhobar_m) u_matter(k,m,z), packed as [z,m,k]
+            uk = self._get_matter("nfw")
+
+            # Compute normalization factor, \int dm n(m) (m / rhobar_m),
+            # packed as [z].
+            integrand = self.nzm[:, :] * uk[:, :, 0]
+            norm = np.trapz(integrand, self.ms, axis=1)
+
+            # If full integrand, packed as [z,m,k,mu] would be too large
+            # to hold in memory at once, loop over mu:
+            if (
+                (np.prod(uk.shape) * self.mu.shape[0] > _MAX_INTEGRAND_SIZE)
+                or not vectorize_mu
+            ):
+                f = np.zeros((uk.shape[0], uk.shape[2],) + self.mus.shape)
+                for mui, mu in enumerate(self.mu):
+                    # Form n(m) * (m / rhobar_m) u_matter(k,m,z), packed as [z,m,k]
+                    integrand = self.nzm[:, :, np.newaxis] * uk
+                    # Multiply by D_FoG(k*mu).
+                    # Result is packed as [z,m,k,mu], with a length-1 mu axis.
+                    integrand = (
+                        integrand[:, :, :, np.newaxis]
+                        * self.DFoG(
+                            self.ks[:, np.newaxis]
+                            * self.mu[mui : mui + 1][np.newaxis, :]
+                        )
+                    )
+                    # Integrate in m to get f(z, k, mu) / f_{scale-independent}(z)
+                    f[:, :, mui : mui + 1] = np.trapz(integrand, self.ms, axis=1)
+
+                # Finally, multiply by f_{scale-independent}(z), and divide by
+                # normalization factor
+                f *= (fz / norm)[:, np.newaxis, np.newaxis]
+
+            # Otherwise, form whole integrand and integrate all at once
+            else:
+                # Form n(m) * (m / rhobar_m) u_matter(k,m,z), packed as [z,m,k]
+                integrand = self.nzm[:, :, np.newaxis] * uk
+                # Multiply by D_FoG(k*mu).
+                # Result is packed as [z,m,k,mu].
+                integrand = (
+                    integrand[:, :, np.newaxis, np.newaxis]
+                    * self.DFoG(self.ks[:, np.newaxis] * self.mu[np.newaxis, :])
+                )
+                # Integrate in m to get f(z, k, mu) / f_{scale-independent}(z)
+                f = np.trapz(integrand, self.ms, axis=1)
+                # Finally, multiply by f_{scale-independent}(z)
+                f *= (fz / norm)[:, np.newaxis, np.newaxis]
+
+            return f
+
 
     def _get_hod_common(self,name):
         hod = self.hods[name]
