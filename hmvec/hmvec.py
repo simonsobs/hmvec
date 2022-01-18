@@ -917,7 +917,14 @@ class HaloModel(Cosmology):
 
 
     def get_power(
-        self, name, name2=None, verbose=False, b1=None, b2=None, m_integrand=False
+        self,
+        name,
+        name2=None,
+        verbose=False,
+        b1=None,
+        b2=None,
+        m_integrand=False,
+        rsd=False,
     ):
         """Compute halo model power spectrum for specified profiles.
 
@@ -953,8 +960,10 @@ class HaloModel(Cosmology):
         """
         if name2 is None: name2 = name
         return (
-            self.get_power_1halo(name,name2,m_integrand=m_integrand)
-            + self.get_power_2halo(name,name2,verbose,b1,b2,m_integrand=m_integrand)
+            self.get_power_1halo(name, name2, m_integrand=m_integrand, rsd=rsd)
+            + self.get_power_2halo(
+                name, name2, verbose, b1, b2, m_integrand=m_integrand, rsd=rsd
+            )
         )
 
     def get_power_1halo(self, name="nfw", name2=None, m_integrand=False, rsd=False):
