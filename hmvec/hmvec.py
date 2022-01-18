@@ -654,21 +654,21 @@ class HaloModel(Cosmology):
                     # Multiply by (N_c(m) + N_s(m) D_FoG(k*mu)).
                     # Result is packed as [z,m,k,mu], with a length-1 mu axis.
                     integrand = (
-                        integrand[:, :, np.newaxis, np.newaxis]
+                        integrand[:, :, None, None]
                         * (
-                            Nc[:, :, np.newaxis, np.newaxis]
-                            + Ns[:, :,  np.newaxis, np.newaxis]
-                            * uk[:, :, :, np.newaxis]
+                            Nc[:, :, None, None]
+                            + Ns[:, :,  None, None]
+                            * uk[:, :, :, None]
                             * self.DFoG(
-                                self.ks[:, np.newaxis]
-                                * self.mu[mui : mui + 1][np.newaxis, :]
+                                self.ks[:, None]
+                                * self.mu[mui : mui + 1][None, :]
                             )
                         )
                     )
                     # Integrate in m, to get b_g(z, k, mu)
                     bg[:, :, mui : mui + 1] = np.trapz(
                         integrand, self.ms, axis=1
-                    ) / ngal[:, np.newaxis,  np.newaxis]
+                    ) / ngal[:, None,  None]
 
             # Otherwise, form whole integrand and integrate all at once
             else:
@@ -676,19 +676,14 @@ class HaloModel(Cosmology):
                 integrand = self.nzm * self.bh
                 # Multiply by (N_c(m) + N_s(m) D_FoG(k*mu)).
                 # Result is packed as [z,m,k,mu].
-                integrand = (
-                    integrand[:, :, np.newaxis, np.newaxis]
-                    * (
-                        Nc[:, :, np.newaxis, np.newaxis]
-                        + Ns[:, :, np.newaxis, np.newaxis]
-                        * uk[:, :, :, np.newaxis]
-                        * self.DFoG(self.ks[:, np.newaxis] * self.mus[np.newaxis, :])
-                    )
+                integrand = integrand[:, :, None, None] * (
+                    Nc[:, :, None, None]
+                    + Ns[:, :, None, None]
+                    * uk[:, :, :, None]
+                    * self.DFoG(self.ks[:, None] * self.mus[None, :])
                 )
                 # Integrate in m to get b_g(z,k,mu)
-                bg = np.trapz(integrand, self.ms, axis=1) / ngal[
-                    :, np.newaxis,  np.newaxis
-                ]
+                bg = np.trapz(integrand, self.ms, axis=1) / ngal[:, None,  None]
 
         return bg
 
@@ -716,7 +711,6 @@ class HaloModel(Cosmology):
             Logarithmic growth rate. If ignoring RSD, packed as [z]; if including RSD,
             packed as [z,k,mu].
         """
-
         _MAX_INTEGRAND_SIZE = 1e8
 
         # Compute scale-independent growth rate f(z) = a D'(a) / D(a).
@@ -747,59 +741,168 @@ class HaloModel(Cosmology):
                 f = np.zeros((uk.shape[0], uk.shape[2],) + self.mus.shape)
                 for mui, mu in enumerate(self.mu):
                     # Form n(m) * (m / rhobar_m) u_matter(k,m,z), packed as [z,m,k]
-                    integrand = self.nzm[:, :, np.newaxis] * uk
+                    integrand = self.nzm[:, :, None] * uk
                     # Multiply by D_FoG(k*mu).
                     # Result is packed as [z,m,k,mu], with a length-1 mu axis.
-                    integrand = (
-                        integrand[:, :, :, np.newaxis]
-                        * self.DFoG(
-                            self.ks[:, np.newaxis]
-                            * self.mu[mui : mui + 1][np.newaxis, :]
-                        )
+                    integrand = integrand[:, :, :, None] * self.DFoG(
+                        self.ks[:, None]
+                        * self.mu[mui : mui + 1][None, :]
                     )
                     # Integrate in m to get f(z, k, mu) / f_{scale-independent}(z)
                     f[:, :, mui : mui + 1] = np.trapz(integrand, self.ms, axis=1)
 
                 # Finally, multiply by f_{scale-independent}(z), and divide by
                 # normalization factor
-                f *= (fz / norm)[:, np.newaxis, np.newaxis]
+                f *= (fz / norm)[:, None, None]
 
             # Otherwise, form whole integrand and integrate all at once
             else:
                 # Form n(m) * (m / rhobar_m) u_matter(k,m,z), packed as [z,m,k]
-                integrand = self.nzm[:, :, np.newaxis] * uk
+                integrand = self.nzm[:, :, None] * uk
                 # Multiply by D_FoG(k*mu).
                 # Result is packed as [z,m,k,mu].
                 integrand = (
-                    integrand[:, :, np.newaxis, np.newaxis]
-                    * self.DFoG(self.ks[:, np.newaxis] * self.mu[np.newaxis, :])
+                    integrand[:, :, None, None]
+                    * self.DFoG(self.ks[:, None] * self.mu[None, :])
                 )
                 # Integrate in m to get f(z, k, mu) / f_{scale-independent}(z)
                 f = np.trapz(integrand, self.ms, axis=1)
                 # Finally, multiply by f_{scale-independent}(z)
-                f *= (fz / norm)[:, np.newaxis, np.newaxis]
+                f *= (fz / norm)[:, None, None]
 
             return f
 
 
-    def _get_hod_common(self,name):
+    def _get_hod_common(self, name):
+        """Fetch dict of HOD quantities and u_c, u_s profiles.
+
+        Parameters
+        ----------
+        name : string
+            Internal name for HOD.
+
+        Returns
+        -------
+        hod : dict
+            Dict of precomputed HOD quantities.
+        uc, us : array_like
+            Central and satellite profiles, packed as [z,m,k].
+        """
         hod = self.hods[name]
         cname = hod['central_profile']
         sname = hod['satellite_profile']
         uc = 1 if cname is None else self.uk_profiles[cname]
         us = self.uk_profiles[sname]
-        return hod,uc,us
+        return hod, uc, us
 
-    def _get_hod_square(self,name):
-        hod,uc,us = self._get_hod_common(name)
-        return (2.*uc*us*hod['NcNs'][...,None]+hod['NsNsm1'][...,None]*us**2.)/hod['ngal'][...,None,None]**2.
+    def _get_hod_square(self, name, rsd=False, mui=None):
+        """Fetch HOD-specific factors in P_1h integrand.
 
-    def _get_hod(self,name,lowklim=False):
-        hod,uc,us = self._get_hod_common(name)
+        Without RSD, this computes
+            (2 u_c u_s N_c N_s + u_s^2 N_s^2) / n_gal^2 .
+        Including RSD, this becomes (see Schaan & White 2021 (2103.01964), Eq. A.29)
+            (2 u_c u_s N_c N_c D_FoG + u_s^2 N_s^2 D_FoG^2) / n_gal^2 .
+
+        Parameters
+        ----------
+        name : string
+            Internal name for HOD.
+        rsd : bool, optional
+            Whether to include RSD: Affects dimensionality of output. Default: False.
+        mui : int, optional
+            If specified, we compute for mu = self.mus[mui] instead of all mu's at once.
+            Default: None.
+
+        Returns
+        -------
+        s : array_like
+            Product of factors in P_1h integrand. If ignoring RSD, packed as [z,m,k];
+            if including RSD, packed as [z,m,k,mu].
+        """
+        # uc, us packed as [z,m,k]
+        hod, uc, us = self._get_hod_common(name)
+
+        if rsd:
+            # Make array of k*mu, packed as [k,mu]
+            if mui is None:
+                kmu = self.ks[:, None] * self.mus[None, :]
+            else:
+                kmu = self.ks[:, None] * self.mus[None, mui : mui+1]
+            # Compute (2 u_c u_s N_c N_c D_FoG + u_s^2 N_s^2 D_FoG^2) / n_gal^2,
+            # packed as [z,m,k,mu]
+            if np.asarray(uc).size > 1: uc = uc[..., None]
+            return (
+                2
+                * uc
+                * us[..., None]
+                * hod['NcNs'][..., None, None]
+                * self.DFoG(kmu)
+                + hod['NsNsm1'][..., None, None]
+                * us[..., None] ** 2
+                * self.DFoG(kmu) ** 2
+            ) / hod['ngal'][..., None, None, None] ** 2
+        else:
+            # Compute (2 u_c u_s N_c N_s + u_s^2 N_s^2) / n_gal^2, packed as [z,m,k]
+            return (
+                2 * uc * us * hod['NcNs'][..., None]
+                + hod['NsNsm1'][..., None] * us ** 2
+            ) / hod['ngal'][..., None, None] ** 2
+
+    def _get_hod(self, name, lowklim=False, rsd=False, mui=None):
+        """Fetch HOD-specific factors for single-tracer contribution to P_1h.
+
+        Without RSD, this computes
+            (u_c N_c + u_s N_s) / n_gal .
+        Including RSD, this becomes (see Schaan & White 2021 (2103.01964), Eq. A.29)
+            (u_c N_c + u_s N_s D_FoG) / n_gal .
+
+        Parameters
+        ----------
+        name : string
+            Internal name for HOD.
+        lowklim : bool, optional
+            If True, take low-k limit of profiles and FoG damping. Default: False.
+        rsd : bool, optional
+            Whether to include RSD: Affects dimensionality of output. Default: False.
+        mui : int, optional
+            If specified, we compute for mu = self.mus[mui] instead of all mu's at once.
+            Default: None.
+
+        Returns
+        -------
+        s : array_like
+            Product of factors in P_1h integrand. If ignoring RSD, packed as [z,m,k];
+            if including RSD, packed as [z,m,k,mu].
+        """
+        # uc, us packed as [z,m,k]
+        hod, uc, us = self._get_hod_common(name)
         if lowklim:
             uc = 1
             us = 1
-        return (uc*hod['Nc'][...,None]+us*hod['Ns'][...,None])/hod['ngal'][...,None,None]
+
+        if rsd:
+            # Make array of k*mu, packed as [k,mu]
+            if mui is None:
+                kmu = self.ks[:, None] * self.mus[None, :]
+            else:
+                kmu = self.ks[:, None] * self.mus[None, mui : mui+1]
+            # Compute (u_c N_c + u_s N_s D_FoG), packed as [z,m,k,mu]
+            if np.asarray(uc).size > 1: uc = uc[..., None]
+            if np.asarray(us).size > 1: us = us[..., None]
+            if lowklim:
+                dfog = 1
+            else:
+                dfog = self.DFoG(kmu)
+            return (
+                uc * hod['Nc'][..., None, None]
+                + us * hod['Ns'][..., None, None] * dfog
+            ) / hod['ngal'][..., None, None, None]
+        else:
+            # Compute (u_c N_c + u_s N_s) / n_gal, packed as [z,m,k]
+            return (
+                (uc * hod['Nc'][..., None] + us * hod['Ns'][...,None])
+                / hod['ngal'][..., None, None]
+            )
 
     def _get_matter(self,name,lowklim=False):
         ms = self.ms[...,None]
@@ -816,96 +919,354 @@ class HaloModel(Cosmology):
     def get_power(
         self, name, name2=None, verbose=False, b1=None, b2=None, m_integrand=False
     ):
+        """Compute halo model power spectrum for specified profiles.
+
+        This is the sum of the 1-halo and 2-halo terms.
+
+        Parameters
+        ----------
+        name, name2 : string, optional
+            Internal tracer names. Default: "nfw" for name1, None for name2.
+        verbose : bool, optional
+            Whether to print debugging information. Default: False.
+        b1, b2 : array_like, optional
+            Low-k linear bias for each tracer. If specified, override internal
+            computations of these linear biases. Not applied to factors involving RSD.
+            Default: None.
+        m_integrand : bool, optional
+            Whether to return dP/dm. Affects dimensionality of output.
+            Default: False.
+        rsd : bool, optional
+            Whether to include RSD (Kaiser and FoG effects). RSD is only included in
+            factors computed based on an HOD. Affects dimensionality of output.
+            Default: False.
+
+        Returns
+        -------
+        P : array_like
+            Sum of 1-halo and 2-halo terms. Packing depends on inclusion of RSD and
+            whether m integrand is requested:
+                - No RSD, m integral: [z,k].
+                - No RSD, m integrand: [z,m,k].
+                - RSD, m integral: [z,k,mu].
+                - RSD, m integrand: not implemented, but would be [z,m,k,mu].
+        """
         if name2 is None: name2 = name
         return (
             self.get_power_1halo(name,name2,m_integrand=m_integrand)
             + self.get_power_2halo(name,name2,verbose,b1,b2,m_integrand=m_integrand)
         )
 
-    def get_power_1halo(self, name="nfw", name2=None, m_integrand=False):
+    def get_power_1halo(self, name="nfw", name2=None, m_integrand=False, rsd=False):
+        """Compute P_1h(k,z) for specified profiles.
+
+        Parameters
+        ----------
+        name, name2 : string, optional
+            Internal tracer names. Default: "nfw" for name1, None for name2.
+        m_integrand : bool, optional
+            Whether to return dP_2h/dm. Affects dimensionality of output. Not
+            implemented if RSD is turned on. Default: False.
+        rsd : bool, optional
+            Whether to include RSD (Kaiser and FoG effects). RSD is only included in
+            factors computed based on an HOD. Affects dimensionality of output.
+            Default: False.
+
+        Returns
+        -------
+        P_1h : array_like
+            1-halo term. Packing depends on inclusion of RSD and whether m integrand
+            is requested:
+                - No RSD, m integral: [z,k].
+                - No RSD, m integrand: [z,m,k].
+                - RSD, m integral: [z,k,mu].
+                - RSD, m integrand: not implemented, but would be [z,m,k,mu].
+        """
+        if rsd and m_integrand:
+            raise NotImplementedError("M integrand output not implemented with RSD")
+
+        name2 = name if name2 is None else name2
+        hnames = self.hods.keys()
+
+        if rsd and (name in hnames or name2 in hnames):
+            return self._get_power_1halo_rsd(name=name, name2=name2)
+        else:
+            return self._get_power_1halo_norsd(
+                name=name, name2=name2, m_integrand=m_integrand
+            )
+
+    def _get_power_1halo_norsd(self, name="nfw", name2=None, m_integrand=False):
+        """Compute P_1h(k,z) for specified profiles, without RSD.
+
+        Parameters
+        ----------
+        name, name2 : string, optional
+            Internal tracer names. Default: "nfw" for name1, None for name2.
+        m_integrand : bool, optional
+            Whether to return dP_2h/dm. Affects dimensionality of output.
+            Default: False.
+
+        Returns
+        -------
+        P_1h : array_like
+            1-halo term. Packing depends on whether m integrand is requested:
+                - M integral: [z,k].
+                - M integrand: [z,m,k].
+        """
         name2 = name if name2 is None else name2
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
         hnames = self.hods.keys()
-        pnames =self.pk_profiles.keys()
+        pnames = self.pk_profiles.keys()
+
         if (name in hnames) and (name2 in hnames):
             square_term = self._get_hod_square(name)
         elif (name in pnames) and (name2 in pnames):
             square_term = self._get_pressure(name)**2
         else:
-            square_term=1.
-            for nm in [name,name2]:
+            square_term = 1
+            for nm in [name, name2]:
                 if nm in hnames:
                     square_term *= self._get_hod(nm)
                 elif nm in mnames:
                     square_term *= self._get_matter(nm)
                 elif nm in pnames:
                     square_term *= self._get_pressure(nm)
-                else: raise ValueError(
-                    f"Profile {nm} not computed! Available profiles are {hnames}; {mnames}; {pnames}"
-                )
+                else:
+                    raise ValueError("Profile %s not computed!" % nm)
 
-        integrand = self.nzm[...,None] * square_term
+        integrand = self.nzm[..., None] * square_term
 
-        if not m_integrand:
+        if m_integrand:
+            # Return full integrand, packed as [z,m,k]
+            return (
+                integrand * (
+                    1 - np.exp(-(self.ks / self.p['kstar_damping']) ** 2)
+                )[None, None, :]
+            )
+        else:
             # Integrate in m, and return result packed as [z,k]
             return (
                 np.trapz(integrand,ms,axis=-2)
                 * (1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
             )
+
+    def _get_power_1halo_rsd(self, name="nfw", name2=None):
+        """Compute P_1h(k,z) for specified profiles, including RSD.
+
+        Parameters
+        ----------
+        name, name2 : string, optional
+            Internal tracer names. Default: "nfw" for name1, None for name2.
+
+        Returns
+        -------
+        P_1h : array_like
+            1-halo term, packed as [z,k,mu].
+        """
+        _MAX_INTEGRAND_SIZE = 1e8
+
+        name2 = name if name2 is None else name2
+        mnames = self.uk_profiles.keys()
+        hnames = self.hods.keys()
+        pnames = self.pk_profiles.keys()
+
+        term1 = None
+        term2 = None
+
+        # Fetch matter and/or pressure profiles, if either are desired
+        if name in mnames:
+            term1 = self._get_matter(name)[..., None]
+        elif name in pnames:
+            term1 = self._get_pressure(name)[..., None]
+
+        if name2 in mnames:
+            term2 = self._get_matter(name2)[..., None]
+        elif name2 in pnames:
+            term2 = self._get_pressure(name2)[..., None]
+
+        # If full integrand would be too large to store in memory, loop over mu,
+        # performing m integral separately for each mu
+        integrand_size = len(self.zs) * len(self.ms) * len(self.ks) * len(self.mus)
+        if integrand_size > _MAX_INTEGRAND_SIZE:
+
+            p1h = np.zeros((len(self.zs), len(self.ks), len(self.mus)))
+
+            for mui, mu in enumerate(self.mus):
+                # Get m integrand
+                if (name in hnames) and (name2 in hnames):
+                    square_term = self._get_hod_square(name, rsd=True, mui=mui)
+                elif (name in hnames) and (name2 not in hnames):
+                    square_term = self._get_hod(name, rsd=True, mui=mui) * term2
+                elif (name not in hnames) and (name2 in hnames):
+                    square_term = term1 * self._get_hod(name2, rsd=True, mui=mui)
+                integrand = self.nzm[..., None, None] * square_term
+                # Do m integral
+                p1h[:, :, mui : mui + 1] = np.trapz(integrand, self.ms, axis=1) * (
+                    1 - np.exp(
+                        - (self.ks[None, :, None] / self.p['kstar_damping']) ** 2
+                    )
+                )
+
         else:
-            # Return full integrand, packed as [z,m,k]
-            return (
-                integrand * (
-                    1-np.exp(-(self.ks/self.p['kstar_damping'])**2.)
-                )[np.newaxis, np.newaxis, :]
-            )
+            # Get m integrand
+            if (name in hnames) and (name2 in hnames):
+                square_term = self._get_hod_square(name, rsd=rsd)
+            elif (name in hnames) and (name2 not in hnames):
+                square_term = self._get_hod(name, rsd=rsd) * term2
+            elif (name not in hnames) and (name2 in hnames):
+                square_term = term1 * self._get_hod(name2, rsd=rsd)
+            integrand = self.nzm[..., None, None] * square_term
+            # Do m integral
+            p1h = np.trapz(integrand, ms, axis=1) * (1 - np.exp(
+                - (self.ks[None, :, None] / self.p['kstar_damping']) ** 2
+            ))
+
+        return p1h
+
 
     def get_power_2halo(
-        self,name="nfw",name2=None,verbose=False,b1_in=None,b2_in=None,m_integrand=False
+        self,
+        name="nfw",
+        name2=None,
+        verbose=False,
+        b1_in=None,
+        b2_in=None,
+        m_integrand=False,
+        rsd=False
     ):
+        """Compute P_2h(k,z) for specified profiles.
+
+        This implements a low-k consistency condition that ensures that P_2h is equal
+        to b_A b_B P_lin in the low-k limit, where A and B are the 2 tracers we are
+        computing for.
+
+        Parameters
+        ----------
+        name, name2 : string, optional
+            Internal tracer names. Default: "nfw" for name1, None for name2.
+        verbose : bool, optional
+            Whether to print debugging information. Default: False.
+        b1_in, b2_in : array_like, optional
+            Low-k linear bias for each tracer. If specified, override internal
+            computations of these linear biases. Not applied to factors involving RSD.
+            Default: None.
+        m_integrand : bool, optional
+            Whether to return dP_2h/dm. Affects dimensionality of output.
+            Default: False.
+        rsd : bool, optional
+            Whether to include RSD (Kaiser and FoG effects). RSD is only included in
+            factors computed based on an HOD. Affects dimensionality of output.
+            Default: False.
+
+        Returns
+        -------
+        P_2h : array_like
+            2-halo term. Packing depends on inclusion of RSD and whether m integrand
+            is requested:
+                - No RSD, m integral: [z,k].
+                - No RSD, m integrand: [z,m,k].
+                - RSD, m integral: [z,k,mu].
+                - RSD, m integrand: not implemented, but would be [z,m,k,mu].
+        """
         name2 = name if name2 is None else name2
 
         def _2halointegrand(iterm):
-            return self.nzm[...,None] * iterm * self.bh[...,None]
+            # Compute n(m) * b_h(m) * [Fourier-space profile]
+            return self.nzm[..., None] * iterm * self.bh[..., None]
 
         def _2haloint(iterm):
+            # Compute \int dm n(m) b_h(m) [Fourier-space profile]
             integrand = _2halointegrand(iterm)
-            integral = np.trapz(integrand,self.ms[..., None],axis=-2)
+            integral = np.trapz(integrand, self.ms[..., None], axis=-2)
             return integral
 
         def _get_term(iname):
+            # Get Fourier-space profile, low-k limit of this profile, and linear bias
             if iname in self.uk_profiles.keys():
+                # Matter profile (m / rhobar_m) u(k,m,z), with b=1
                 rterm1 = self._get_matter(iname)
-                rterm01 = self._get_matter(iname,lowklim=True)
+                rterm01 = self._get_matter(iname, lowklim=True)
                 b = 1
             elif iname in self.pk_profiles.keys():
+                # Pressure profile, with b=0 and low-k limit also set to 0
                 rterm1 = self._get_pressure(iname)
-                rterm01 = self._get_pressure(iname,lowklim=True)
+                rterm01 = self._get_pressure(iname, lowklim=True)
                 print ('Check the consistency relation for tSZ')
-                b = rterm01 =0
+                b = rterm01 = 0
             elif iname in self.hods.keys():
+                # Profile from HOD, with b also computed from HOD
                 rterm1 = self._get_hod(iname)
-                rterm01 = self._get_hod(iname,lowklim=True)
-                b = self.get_bg(self.hods[iname]['Nc'],self.hods[iname]['Ns'],self.hods[iname]['ngal'])[:,None]
-            else: raise ValueError
-            return rterm1,rterm01,b
+                rterm01 = self._get_hod(iname, lowklim=True)
+                b = self.get_bg(
+                    self.hods[iname]['Nc'],
+                    self.hods[iname]['Ns'],
+                    self.hods[iname]['ngal']
+                )[:,None]
+            else: raise ValueError("Profile %s not defined!" % iname)
+            return rterm1, rterm01, b
 
+        if rsd and (name not in self.hods.keys() and name2 not in self.hods.keys()):
+            raise RuntimeError("RSD can only be applied to galaxy factors in P_2h!")
 
-        iterm1,iterm01,b1 = _get_term(name)
-        iterm2,iterm02,b2 = _get_term(name2)
-        if b1_in is not None:
-            b1 = b1_in.reshape((b1_in.shape[0],1))
-        if b2_in is not None:
-            b2 = b2_in.reshape((b1_in.shape[0],1))
+        if rsd and m_integrand:
+            raise NotImplementedError("M integrand output not implemented with RSD")
 
-        integral = _2haloint(iterm1)
-        integral2 = _2haloint(iterm2)
+        # Compute effective bias factor for tracer 1
+        if rsd and (name in self.hods.keys()):
+            if verbose: print("Tracer 1: computing b")
+            b1 = self.get_bg(
+                self.hods[name]['Nc'],
+                self.hods[name]['Ns'],
+                self.hods[name]['ngal'],
+                rsd=True,
+                u_name=self.hods[name]['satellite_profile']
+            )
+            if verbose: print("Tracer 1: computing f")
+            f1 = self.get_fgrowth(rsd=True)
+            factor1 = (b1 + f1 * self.mu[np.newaxis, np.newaxis, :] ** 2)
+        else:
+            # Compute get Fourier-space profile for name, name2
+            iterm1, iterm01, b1 = _get_term(name)
+            # Set linear bias factors to inputs, if specified
+            if b1_in is not None:
+                b1 = b1_in.reshape((b1_in.shape[0],1))
 
-        # consistency relation : Correct for part that's missing from low-mass
-        # halos to get P(k->0) = b1*b2*Plinear
-        consistency1 = _2haloint(iterm01)
-        consistency2 = _2haloint(iterm02)
+            # Compute \int dm n(m) b_h(m) [Fourier-space profile] for name, name2
+            integral = _2haloint(iterm1)
+            # For halo bias consistency relation, compute
+            # \int dm n(m) b_h(m) [Fourier-space profile]
+            # using low-k limit of profile
+            consistency1 = _2haloint(iterm01)
+            # Compute bias factor for P_2h
+            factor1 = integral + b1 - consistency1
+            if rsd:
+                factor1 = factor1[..., np.newaxis]
+
+        # Compute effective bias factor for tracer 2
+        if rsd and (name2 in self.hods.keys()):
+            if verbose: print("Tracer 2: computing b")
+            b2 = self.get_bg(
+                self.hods[name2]['Nc'],
+                self.hods[name2]['Ns'],
+                self.hods[name2]['ngal'],
+                rsd=True,
+                u_name=self.hods[name2]['satellite_profile']
+            )
+            if verbose: print("Tracer 2: computing f")
+            f2 = self.get_fgrowth(rsd=True)
+            factor2 = (b2 + f2 * self.mu[np.newaxis, np.newaxis, :] ** 2)
+        else:
+            iterm2, iterm02, b2 = _get_term(name2)
+            if b2_in is not None:
+                b2 = b2_in.reshape((b2_in.shape[0],1))
+
+            integral = _2haloint(iterm2)
+            consistency2 = _2haloint(iterm02)
+            factor2 = integral + b2 - consistency2
+            if rsd:
+                factor2 = factor2[..., None]
+
 
         if m_integrand:
             # Return dP_2h / dM, packed as [z,m,k].
@@ -915,16 +1276,27 @@ class HaloModel(Cosmology):
             # in that integrating it in M gives a result that's pretty close
             # to the full result.
             prefactor = (
-                _2halointegrand(iterm1) * (integral2+b2-consistency2)[..., np.newaxis, :]
-                + (integral+b1-consistency1)[..., np.newaxis, :] * _2halointegrand(iterm2)
+                _2halointegrand(iterm1)
+                * (integral2+b2-consistency2)[..., None, :]
+                + (integral+b1-consistency1)[..., None, :]
+                * _2halointegrand(iterm2)
             )
-            return prefactor * self.Pzk[..., np.newaxis, :]
+            return prefactor * self.Pzk[..., None, :]
+
         else:
-            # Return P_2h packed as [z,k]
-            # if verbose:
-            #     print("Two-halo consistency1: " , consistency1,integral)
-            #     print("Two-halo consistency2: " , consistency2,integral2)
-            return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
+            if rsd:
+                # Result packed as [z,k,mu].
+                return self.Pzk[:, :, None] * factor1 * factor2
+            else:
+                # Subtract the low-k limit from each integral, and then add the linear
+                # bias. This is redundant for P_gg, but for P_mm it ensures that P_2h
+                # is equal to P_lin in the low-k limit.
+                # The resulting P_2h is packed as [z,k]
+                # if verbose:
+                #     print("Two-halo consistency1: " , consistency1,integral)
+                #     print("Two-halo consistency2: " , consistency2,integral2)
+                return self.Pzk * factor1 * factor2
+
 
     def sigma_1h_profiles(self,thetas,Ms,concs,sig_theta=None,delta=200,rho='mean',rho_at_z=True):
         import clusterlensing as cl
