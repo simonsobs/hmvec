@@ -1221,6 +1221,11 @@ class HaloModel(Cosmology):
         if rsd and m_integrand:
             raise NotImplementedError("M integrand output not implemented with RSD")
 
+        # If needed for either tracer, compute F(k,mu,z)
+        if rsd and (name in self.hods.keys() or name2 in self.hods.keys()):
+            if verbose: print("Computing f")
+            fg = self.get_fgrowth(rsd=True)
+
         # Compute effective bias factor for tracer 1
         if rsd and (name in self.hods.keys()):
             if verbose: print("Tracer 1: computing b")
@@ -1231,9 +1236,7 @@ class HaloModel(Cosmology):
                 rsd=True,
                 u_name=self.hods[name]['satellite_profile']
             )
-            if verbose: print("Tracer 1: computing f")
-            f1 = self.get_fgrowth(rsd=True)
-            factor1 = (b1 + f1 * self.mu[np.newaxis, np.newaxis, :] ** 2)
+            factor1 = (b1 + fg * self.mu[np.newaxis, np.newaxis, :] ** 2)
         else:
             # Compute get Fourier-space profile for name, name2
             iterm1, iterm01, b1 = _get_term(name)
@@ -1262,9 +1265,7 @@ class HaloModel(Cosmology):
                 rsd=True,
                 u_name=self.hods[name2]['satellite_profile']
             )
-            if verbose: print("Tracer 2: computing f")
-            f2 = self.get_fgrowth(rsd=True)
-            factor2 = (b2 + f2 * self.mu[np.newaxis, np.newaxis, :] ** 2)
+            factor2 = (b2 + fg * self.mu[np.newaxis, np.newaxis, :] ** 2)
         else:
             iterm2, iterm02, b2 = _get_term(name2)
             if b2_in is not None:
