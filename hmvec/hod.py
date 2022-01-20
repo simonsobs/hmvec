@@ -63,7 +63,7 @@ class HODBase(Cosmology):
         # Store redshifts, halo masses, corr model, halo mass function
         self.zs = zs
         self.ms = ms
-        self.log10mhalo = np.log10(self.ms[None, :])
+        self.log10mhalo = np.log10(self.ms)
         self.corr = corr
         self.nzm = nzm
 
@@ -97,8 +97,8 @@ class HODBase(Cosmology):
 
     def init_mean_occupations(self):
         """Precompute mean occupations of centrals and satellites."""
-        self.Nc = self.avg_Nc(self.log10mhalo, self.zs[:, None])
-        self.Ns = self.avg_Ns(self.log10mhalo, self.zs[:, None])
+        self.Nc = self.avg_Nc(self.log10mhalo, self.zs)
+        self.Ns = self.avg_Ns(self.log10mhalo, self.zs)
         self.NsNsm1 = self.avg_NsNsm1(self.Nc, self.Ns, self.corr)
         self.NcNs = self.avg_NcNs(self.Nc, self.Ns, self.corr)
 
@@ -187,7 +187,8 @@ class Leauthaud12_HOD(HODBase):
     Parameters
     ----------
     mthresh : array_like, optional
-        Array of lower stellar mass threshold values in Msun as function of z.
+        Array of lower stellar mass threshold values in Msun as function of z, packed
+        as [z,m].
         If neither mthresh nor ngal are specified, a z-independent value of 10^10.5 Msun
         is used. Default: None.
     ngal : array_like, optional
@@ -219,8 +220,15 @@ class Leauthaud12_HOD(HODBase):
             nzm=nzm,
         )
 
+        if mthresh is not None:
+            self.log10mstellar_thresh = np.log10(mthresh)
+            if mthresh.ndim == 1:
+                self.log10mstellar_thresh = np.expand_dims(
+                    np.log10(self.log10mstellar_thresh), axis=-1
+                )
+
         # If ngal is specified, need to compute corresponding mthresh
-        if ngal is not None:
+        elif ngal is not None:
 
             # Check for input halo mass function
             if nzm is None:
@@ -258,16 +266,13 @@ class Leauthaud12_HOD(HODBase):
                 hang_check_num_iter=self.p["hod_bisection_search_warn_iter"],
             )
             mthresh = 10 ** (log10mthresh * self.p["hod_Leau12_A_log10mthresh"])
+            self.log10mstellar_thresh = np.log10(mthresh)[:, None]
 
         # If ngal and mthresh are None, use default M_* threshold
-        elif mthresh is None:
-            mthresh = 10 ** self.p["hod_Leau12_log10mstellar_thresh"] * np.ones_like(zs)
-
-        # Do sanity check on mthresh
-        if mthresh.size != zs.size:
-            raise ValueError("mthresh and zs must have same size")
-
-        self.log10mstellar_thresh = np.log10(mthresh[:, None])
+        else:
+            self.log10mstellar_thresh = (
+                self.p["hod_Leau12_log10mstellar_thresh"] * np.ones_like(zs)[:, None]
+            )
 
         # Finally, compute halo occupations
         self.init_mean_occupations()
@@ -299,8 +304,9 @@ class Leauthaud12_HOD(HODBase):
         z : array_like
             Array of redshifts.
         log10mstellar_thresh : array_like, optional
-            Array of log10 of lower stellar mass threshold, as function of z.
-            If not specified, stored value is pulled from class. Default: None.
+            Array of log10 of lower stellar mass threshold, as function of z (packed as
+            [z,log10m]). If not specified, stored value is pulled from class.
+            Default: None.
 
         Returns
         -------
@@ -310,7 +316,14 @@ class Leauthaud12_HOD(HODBase):
         if log10mstellar_thresh is None:
             log10mstellar_thresh = self.log10mstellar_thresh
 
-        log10mstar = Mstellar_halo(z, log10mhalo)
+        if log10mstellar_thresh.ndim != 2:
+            raise RuntimeError(
+                "log10mstellar_thresh must be packed as [z,log10m]!"
+                " Instead, it has shape",
+                log10mstellar_thresh.shape,
+            )
+
+        log10mstar = Mstellar_halo(z, np.tile(log10mhalo, (len(self.zs), 1)))
         num = log10mstellar_thresh - log10mstar
         denom = np.sqrt(2.0) * self.p["hod_Leau12_sig_log_mstellar"]
         return 0.5 * (1.0 - erf(num / denom))
@@ -325,8 +338,9 @@ class Leauthaud12_HOD(HODBase):
         z : array_like
             Array of redshifts.
         log10mstellar_thresh : array_like, optional
-            Array of log10 of lower stellar mass threshold, as function of z.
-            If not specified, stored value is pulled from class. Default: None.
+            Array of log10 of lower stellar mass threshold at each z, packed as
+            [z,log10m]. If not specified, stored value is pulled from class.
+            Default: None.
         N_c : array_like, optional
             Array of N_c, packed as [z,m]. If not specified, computed on the fly.
             Default: None.
@@ -337,10 +351,16 @@ class Leauthaud12_HOD(HODBase):
             Computed N_s values, packed as [z,m].
         """
         masses = 10 ** log10mhalo
-        if log10mstellar_thresh is not None:
-            log10mthresh = Mhalo_stellar(z, log10mstellar_thresh)
-        else:
-            log10mthresh = Mhalo_stellar(z, self.log10mstellar_thresh)
+        if log10mstellar_thresh is None:
+            log10mstellar_thresh = self.log10mstellar_thresh
+
+        if log10mstellar_thresh.ndim != 2:
+            raise RuntimeError(
+                "log10mstellar_thresh must be packed as [z,log10m]!"
+                " Instead, it has shape",
+                log10mstellar_thresh.shape,
+            )
+        log10mthresh = Mhalo_stellar(z, log10mstellar_thresh)
 
         if (
             "hod_Leau12_Msat_override" in self.p.keys()
@@ -395,7 +415,8 @@ class Leauthaud12_HOD(HODBase):
         Parameters
         ----------
         log10mthresh : array_like, optional
-            Array of log10 of stellar mass values, in Msun. Default: None.
+            Array of log10 of stellar mass values, in Msun, packed as [log10m].
+            Default: None.
         zs : array_like, optional
             Array of redshifts. Default: None.
         ms : array_like, optional
@@ -410,16 +431,15 @@ class Leauthaud12_HOD(HODBase):
         ngal : array_like
             Array of n_gal values, as function of z.
         """
-
         if self.nzm is None:
             raise ValueError("Need a stored halo mass function for ngal_from_mthresh")
 
         if (Nc is None) and (Ns is None):
             log10mstellar_thresh = log10mthresh[:, None]
-            Nc = self.avg_Nc(self.log10mhalo, self.zs[:, None], log10mstellar_thresh)
+            Nc = self.avg_Nc(self.log10mhalo, self.zs, log10mstellar_thresh)
             Ns = self.avg_Ns(
                 self.log10mhalo,
-                self.zs[:, None],
+                self.zs,
                 log10mstellar_thresh,
                 Nc,
             )
@@ -467,12 +487,17 @@ class Alam20_HMQ_ELG_HOD(HODBase):
         log10mthresh0 = self.p["hod_Alam20_HMQ_ELG_log10Mc"]
         self.A = (pmax - 1 / Q) / np.max(
             2
-            * self._phi(self.log10mhalo, log10mthresh=log10mthresh0)
-            * self._Phigamma(self.log10mhalo, log10mthresh=log10mthresh0)
+            * self._phi(self.log10mhalo[:, None], log10mthresh=log10mthresh0)
+            * self._Phigamma(self.log10mhalo[:, None], log10mthresh=log10mthresh0)
         )
 
+        if mthresh is not None:
+            self.log10mthresh = np.log10(mthresh)
+            if mthresh.ndim == 1:
+                self.log10mthresh = np.expand_dims(np.log10(self.log10mthresh), axis=-1)
+
         # If ngal is specified, need to compute corresponding mthresh
-        if ngal is not None:
+        elif ngal is not None:
 
             # Check for input halo mass function
             if nzm is None:
@@ -503,17 +528,13 @@ class Alam20_HMQ_ELG_HOD(HODBase):
                 verbose=True,
                 hang_check_num_iter=self.p["hod_bisection_search_warn_iter"],
             )
-            mthresh = 10 ** log10mthresh
+            self.log10mthresh = log10mthresh[:, None]
 
         # If ngal and mthresh are None, use default M_c parameter
-        elif mthresh is None:
-            mthresh = 10 ** self.p["hod_Alam20_HMQ_ELG_log10Mc"] * np.ones_like(zs)
-
-        # Do sanity check on mthresh
-        if mthresh.size != zs.size:
-            raise ValueError("mthresh and zs must have same size")
-
-        self.log10mthresh = np.log10(mthresh[:, None])
+        else:
+            self.log10mthresh = (
+                self.p["hod_Alam20_HMQ_ELG_log10Mc"] * np.ones_like(zs)[:, None]
+            )
 
         # Finally, compute halo occupations
         self.init_mean_occupations()
@@ -567,21 +588,21 @@ class Alam20_HMQ_ELG_HOD(HODBase):
             2
             # * self.p["hod_Alam20_HMQ_ELG_A"]
             * self.A
-            * self._phi(self.log10mhalo, log10mthresh=log10mthresh)
-            * self._Phigamma(self.log10mhalo, log10mthresh=log10mthresh)
+            * self._phi(log10mhalo[None, :], log10mthresh=log10mthresh)
+            * self._Phigamma(log10mhalo[None, :], log10mthresh=log10mthresh)
         )
         term2 = (
             1
             / (2 * self.p["hod_Alam20_HMQ_ELG_Q"])
-            * (1 + erf((self.log10mhalo - log10mthresh) / 0.01))
+            * (1 + erf((log10mhalo[None, :] - log10mthresh) / 0.01))
         )
 
         return term1 + term2
 
     def avg_Ns(self, log10mhalo, z, log10mthresh=None):
-        masses = 10 ** log10mhalo[0]
+        masses = 10 ** log10mhalo
         if log10mthresh is None:
-            log10mthresh = self.log10mthresh[:, 0]
+            log10mthresh = self.log10mthresh
 
         kappa = self.p["hod_Alam20_HMQ_ELG_kappa"]
         alpha = self.p["hod_Alam20_HMQ_ELG_alpha"]
@@ -589,8 +610,11 @@ class Alam20_HMQ_ELG_HOD(HODBase):
         mthresh = 10 ** log10mthresh
 
         # TODO: rewrite this part more pythonically
+        # Make empty Ns array, packed as [m,z]
         Ns = np.zeros((masses.shape[0], mthresh.shape[0]))
+        # Loop over z
         for i in range(Ns.shape[1]):
+            # Make mask to select masses greater than threshold
             mask = masses > mthresh[i]
             Ns[:, i][mask] = (
                 (masses[masses > mthresh[i]] - kappa * mthresh[i]) / M1
@@ -612,8 +636,8 @@ class Alam20_HMQ_ELG_HOD(HODBase):
 
         if (Ncs is None) and (Nss is None):
             log10mthresh = log10mthresh[:, None]
-            Ncs = self.avg_Nc(self.log10mhalo, self.zs[:, None], log10mthresh)
-            Nss = self.avg_Ns(self.log10mhalo, self.zs[:, None], log10mthresh)
+            Ncs = self.avg_Nc(self.log10mhalo, self.zs, log10mthresh)
+            Nss = self.avg_Ns(self.log10mhalo, self.zs, log10mthresh)
 
         integrand = self.nzm * (Ncs + Nss)
         return np.trapz(integrand, ms, axis=-1)
@@ -652,8 +676,13 @@ class Alam20_ErfBase_HOD(HODBase):
             nzm=nzm,
         )
 
+        if mthresh is not None:
+            self.log10mthresh = np.log10(mthresh)
+            if mthresh.ndim == 1:
+                self.log10mthresh = np.expand_dims(np.log10(self.log10mthresh), axis=-1)
+
         # If ngal is specified, need to compute corresponding mthresh
-        if ngal is not None:
+        elif ngal is not None:
 
             # Check for input halo mass function
             if nzm is None:
@@ -684,19 +713,14 @@ class Alam20_ErfBase_HOD(HODBase):
                 verbose=True,
                 hang_check_num_iter=self.p["hod_bisection_search_warn_iter"],
             )
-            mthresh = 10 ** log10mthresh
+            self.log10mthresh = log10mthresh[:, None]
 
         # If ngal and mthresh are None, use default M_c parameter
-        elif mthresh is None:
-            mthresh = 10 ** self.p[
-                "hod_Alam20_HMQ_%s_log10Mc" % self.tracer
-            ] * np.ones_like(zs)
-
-        # Do sanity check on mthresh
-        if mthresh.size != zs.size:
-            raise ValueError("mthresh and zs must have same size")
-
-        self.log10mthresh = np.log10(mthresh[:, None])
+        else:
+            self.log10mthresh = (
+                self.p["hod_Alam20_HMQ_%s_log10Mc" % self.tracer]
+                * np.ones_like(zs)[:, None]
+            )
 
         # Finally, compute halo occupations
         self.init_mean_occupations()
@@ -728,7 +752,7 @@ class Alam20_ErfBase_HOD(HODBase):
             0.5
             * self.p["hod_Alam20_HMQ_%s_pmax" % self.tracer]
             * erfc(
-                (log10mthresh - self.log10mhalo)
+                (log10mthresh - log10mhalo[None, :])
                 / (
                     2 ** 0.5
                     * np.log10(np.e)
@@ -738,9 +762,9 @@ class Alam20_ErfBase_HOD(HODBase):
         )
 
     def avg_Ns(self, log10mhalo, z, log10mthresh=None):
-        masses = 10 ** log10mhalo[0]
+        masses = 10 ** log10mhalo
         if log10mthresh is None:
-            log10mthresh = self.log10mthresh[:, 0]
+            log10mthresh = self.log10mthresh
 
         kappa = self.p["hod_Alam20_HMQ_%s_kappa" % self.tracer]
         alpha = self.p["hod_Alam20_HMQ_%s_alpha" % self.tracer]
@@ -748,8 +772,11 @@ class Alam20_ErfBase_HOD(HODBase):
         mthresh = 10 ** log10mthresh
 
         # TODO: rewrite this part more pythonically
+        # Make empty Ns array, packed as [m,z]
         Ns = np.zeros((masses.shape[0], mthresh.shape[0]))
+        # Loop over z
         for i in range(Ns.shape[1]):
+            # Make mask to select masses greater than threshold
             mask = masses > mthresh[i]
             Ns[:, i][mask] = (
                 (masses[masses > mthresh[i]] - kappa * mthresh[i]) / M1
@@ -771,8 +798,8 @@ class Alam20_ErfBase_HOD(HODBase):
 
         if (Ncs is None) and (Nss is None):
             log10mthresh = log10mthresh[:, None]
-            Ncs = self.avg_Nc(self.log10mhalo, self.zs[:, None], log10mthresh)
-            Nss = self.avg_Ns(self.log10mhalo, self.zs[:, None], log10mthresh)
+            Ncs = self.avg_Nc(self.log10mhalo, self.zs, log10mthresh)
+            Nss = self.avg_Ns(self.log10mhalo, self.zs, log10mthresh)
 
         integrand = self.nzm * (Ncs + Nss)
         return np.trapz(integrand, ms, axis=-1)
