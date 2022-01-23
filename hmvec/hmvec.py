@@ -496,7 +496,12 @@ class HaloModel(Cosmology):
         # Make dict entry to store info for new HOD, and store HOD object.
         self.hods[name] = {}
         self.hods[name]["hod"] = family(
-            self.zs, self.ms, params=self.p, nzm=self.nzm, param_override=param_override, **kwargs
+            self.zs,
+            self.ms,
+            params=self.p,
+            nzm=self.nzm,
+            param_override=param_override,
+            **kwargs
         )
 
         # Store precomputed HOD quantities.
@@ -1271,9 +1276,9 @@ class HaloModel(Cosmology):
             if b2_in is not None:
                 b2 = b2_in.reshape((b2_in.shape[0],1))
 
-            integral = _2haloint(iterm2)
+            integral2 = _2haloint(iterm2)
             consistency2 = _2haloint(iterm02)
-            factor2 = integral + b2 - consistency2
+            factor2 = integral2 + b2 - consistency2
             if rsd:
                 factor2 = factor2[..., None]
 
