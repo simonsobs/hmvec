@@ -36,6 +36,9 @@ def vectorized_bisection_search(x,inv_func,ybounds,monotonicity,rtol=1e-4,verbos
             print("WARNING: Bisection search has done more than ", hang_check_num_iter,
                   " loops. Still searching...")
             warned = True
+            print("\tynow:", ynow)
+            print("\txnow:", xnow)
+            print("\tmtol:", mtol)
     if verbose: print("Bisection search converged in ", i, " iterations.")
     return ynow
 
