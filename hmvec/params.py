@@ -132,4 +132,11 @@ default_params = {
     'hod_Alam20_HMQ_QSO_kappa': 1.0,
     'hod_Alam20_HMQ_QSO_alpha': 0.39,
     'hod_Alam20_HMQ_QSO_pmax': 0.033,
+
+    # Zheng2005 HOD
+    'hod_Zheng05_log10Mth': 12.712,
+    'hod_Zheng05_sigmalogM': 0.287,
+    'hod_Zheng05_log10Mcut': 12.95,
+    'hod_Zheng05_log10M1': 13.62,
+    'hod_Zheng05_alpha': 0.98,
 }

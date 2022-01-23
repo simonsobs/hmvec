@@ -819,3 +819,173 @@ class Alam20_QSO_HOD(Alam20_ErfBase_HOD):
     @property
     def tracer(self):
         return "QSO"
+
+
+class Zheng05_HOD(HODBase):
+    """Class for the HOD from Zheng et al. 2005 (astro-ph/0408564).
+
+    Note that when using ngal to determine mthresh, the bisection search often fails
+    to converge if rtol=1e-4, so overriding the value of hod_bisection_search_rtol
+    to something higher (e.g. 1e-2) may be necessary.
+    """
+
+    def __init__(
+        self,
+        zs,
+        ms,
+        params=None,
+        param_override=None,
+        halofit=None,
+        corr="max",
+        nzm=None,
+        mthresh=None,
+        ngal=None,
+    ):
+
+        # Run base initialization
+        super().__init__(
+            zs,
+            ms,
+            params=params,
+            param_override=param_override,
+            halofit=halofit,
+            corr=corr,
+            nzm=nzm,
+        )
+
+        if mthresh is not None:
+            self.log10mthreshC = np.log10(mthresh)
+            self.log10mthreshS = self.log10mthreshC
+            # self.log10mthreshS = self.p["hod_Zheng05_log10Mcut"] * np.ones_like(
+            #     self.log10mthreshC
+            # )
+            if mthresh.ndim == 1:
+                self.log10mthreshC = np.expand_dims(self.log10mthreshC, axis=-1)
+                self.log10mthreshS = np.expand_dims(self.log10mthreshS, axis=-1)
+
+        # If ngal is specified, need to compute corresponding mthresh
+        elif ngal is not None:
+
+            # Check for input halo mass function
+            if nzm is None:
+                raise ValueError("nzm must be specified if ngal is specified")
+            self.nzm = nzm
+
+            # Check input parameters
+            if ngal.size != zs.size:
+                raise ValueError("ngal and zs must have same size")
+            if mthresh is not None:
+                raise ValueError("Can only specify one of ngal or mthresh")
+
+            # Define n_gal(m_thresh) function
+            nfunc = lambda ilog10mthresh: self.ngal_from_mthresh(
+                ilog10mthresh, self.zs, self.ms
+            )
+
+            # Compute m_thresh from input n_gal
+            log10mthresh = utils.vectorized_bisection_search(
+                ngal,
+                nfunc,
+                [
+                    self.p["hod_bisection_search_min_log10mthresh"],
+                    self.p["hod_bisection_search_max_log10mthresh"],
+                ],
+                "decreasing",
+                rtol=self.p["hod_bisection_search_rtol"],
+                verbose=True,
+                hang_check_num_iter=self.p["hod_bisection_search_warn_iter"],
+            )
+            self.log10mthreshC = log10mthresh[:, None]
+            self.log10mthreshS = self.log10mthreshC
+
+        # If ngal and mthresh are None, use default M_c parameter
+        else:
+            self.log10mthreshC = (
+                self.p["hod_Zheng05_log10Mth"] * np.ones_like(zs)[:, None]
+            )
+            self.log10mthreshS = self.p["hod_Zheng05_log10Mcut"] * np.ones_like(
+                self.log10mthreshC
+            )
+
+        # Finally, compute halo occupations
+        self.init_mean_occupations()
+
+    @property
+    def tracer(self):
+        pass
+
+    @property
+    def hod_params(self):
+        return [
+            "hod_bisection_search_min_log10mthresh",
+            "hod_bisection_search_max_log10mthresh",
+            "hod_bisection_search_rtol",
+            "hod_bisection_search_warn_iter",
+            "hod_Zheng05_log10Mth",
+            "hod_Zheng05_sigmalogM",
+            "hod_Zheng05_log10Mcut",
+            "hod_Zheng05_log10M1",
+            "hod_Zheng05_alpha",
+        ]
+
+    def avg_Nc(self, log10mhalo, z, log10mthresh=None):
+        if log10mthresh is None:
+            log10mthresh = self.log10mthreshC
+
+        # TODO: rewrite this part more pythonically
+        # Make empty Nc array, packed as [m,z]
+        Nc = np.zeros((log10mhalo.shape[0], log10mthresh.shape[0]))
+        # Loop over z
+        for i in range(Nc.shape[1]):
+            # Make mask to select masses greater than threshold
+            mask = log10mhalo > log10mthresh[i]
+            Nc[:, i][mask] = 0.5 * (
+                1
+                + erf(
+                    (log10mhalo[mask] - log10mthresh[i])
+                    / self.p["hod_Zheng05_sigmalogM"]
+                )
+            )
+        Nc = Nc.T
+
+        return Nc
+
+    def avg_Ns(self, log10mhalo, z, log10mthresh=None):
+        masses = 10 ** log10mhalo
+        if log10mthresh is None:
+            log10mthresh = self.log10mthreshS
+
+        alpha = self.p["hod_Zheng05_alpha"]
+        M1 = 10 ** self.p["hod_Zheng05_log10M1"]
+        mthresh = 10 ** log10mthresh
+
+        # TODO: rewrite this part more pythonically
+        # Make empty Ns array, packed as [m,z]
+        Ns = np.zeros((masses.shape[0], mthresh.shape[0]))
+        # Loop over z
+        for i in range(Ns.shape[1]):
+            # Make mask to select masses greater than threshold
+            mask = masses > mthresh[i]
+            Ns[:, i][mask] = ((masses[mask] - mthresh[i]) / M1) ** alpha
+        Ns = Ns.T
+
+        return Ns
+
+    def ngal_from_mthresh(
+        self,
+        log10mthresh=None,
+        zs=None,
+        ms=None,
+        Ncs=None,
+        Nss=None,
+    ):
+        if self.nzm is None:
+            raise ValueError("Need a stored halo mass function for ngal_from_mthresh")
+
+        if (Ncs is None) and (Nss is None):
+            log10mthresh = log10mthresh[:, None]
+            Ncs = self.avg_Nc(self.log10mhalo, self.zs, log10mthresh)
+            Nss = self.avg_Ns(self.log10mhalo, self.zs, log10mthresh)
+
+        integrand = self.nzm * (Ncs + Nss)
+        return np.trapz(integrand, ms, axis=-1)
