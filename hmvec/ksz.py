@@ -432,12 +432,18 @@ class kSZ(HaloModel):
         if not skip_hod:
             # Compute P_gg and P_ge, packed as [z,k] without RSD or [z,k,mu] with RSD.
             if verbose: print("Calculating small scale Pgg and Pge...")
-            self.sPgg = self.get_power(
-                hod_name, name2=hod_name, verbose=verbose, b1=b1, b2=b1, rsd=rsd
+            self.sPgg_1h = self.get_power_1halo(hod_name, name2=hod_name, rsd=rsd)
+            self.sPge_1h = self.get_power_1halo(
+                hod_name, name2=electron_profile_name, rsd=rsd
             )
-            self.sPge = self.get_power(
-                hod_name, name2=electron_profile_name, verbose=verbose, b1=b1, rsd=rsd
+            self.sPgg_2h = self.get_power_2halo(
+                hod_name, name2=hod_name, verbose=verbose, b1_in=b1, b2_in=b1, rsd=rsd
             )
+            self.sPge_2h = self.get_power_2halo(
+                hod_name, name2=electron_profile_name, verbose=verbose, b1_in=b1, rsd=rsd
+            )
+            self.sPgg = self.sPgg_1h + self.sPgg_2h
+            self.sPge = self.sPge_1h + self.sPge_2h
 
             # Incorporate photo-z uncertainty
             if self.sigz is not None:
