@@ -188,9 +188,8 @@ class Leauthaud12_HOD(HODBase):
     ----------
     mthresh : array_like, optional
         Array of lower stellar mass threshold values in Msun as function of z, packed
-        as [z,m].
-        If neither mthresh nor ngal are specified, a z-independent value of 10^10.5 Msun
-        is used. Default: None.
+        as [z,m]. Overrides ngal. If neither mthresh nor ngal are specified, a
+        z-independent value of 10^10.5 Msun is used. Default: None.
     ngal : array_like, optional
         Used to set mthresh by inverting the n_gal(m_*) relation. Should also be a
         function of z. Default: None.
@@ -220,6 +219,7 @@ class Leauthaud12_HOD(HODBase):
             nzm=nzm,
         )
 
+        # mthresh overrides ngal, if both are specified
         if mthresh is not None:
             self.log10mstellar_thresh = np.log10(mthresh)
             if mthresh.ndim == 1:
@@ -821,12 +821,15 @@ class Alam20_QSO_HOD(Alam20_ErfBase_HOD):
         return "QSO"
 
 
-class Zheng05_HOD(HODBase):
+class Zheng05Base_HOD(HODBase):
     """Class for the HOD from Zheng et al. 2005 (astro-ph/0408564).
 
     Note that when using ngal to determine mthresh, the bisection search often fails
     to converge if rtol=1e-4, so overriding the value of hod_bisection_search_rtol
     to something higher (e.g. 1e-2) may be necessary.
+
+    This class specifies everything except for the normalization of N_sat. A derived
+    class needs to be defined for that.
     """
 
     def __init__(
@@ -911,22 +914,8 @@ class Zheng05_HOD(HODBase):
         self.init_mean_occupations()
 
     @property
-    def tracer(self):
-        pass
-
-    @property
     def hod_params(self):
-        return [
-            "hod_bisection_search_min_log10mthresh",
-            "hod_bisection_search_max_log10mthresh",
-            "hod_bisection_search_rtol",
-            "hod_bisection_search_warn_iter",
-            "hod_Zheng05_log10Mth",
-            "hod_Zheng05_sigmalogM",
-            "hod_Zheng05_log10Mcut",
-            "hod_Zheng05_log10M1",
-            "hod_Zheng05_alpha",
-        ]
+        pass
 
     def avg_Nc(self, log10mhalo, z, log10mthresh=None):
         if log10mthresh is None:
@@ -951,25 +940,7 @@ class Zheng05_HOD(HODBase):
         return Nc
 
     def avg_Ns(self, log10mhalo, z, log10mthresh=None):
-        masses = 10 ** log10mhalo
-        if log10mthresh is None:
-            log10mthresh = self.log10mthreshS
-
-        alpha = self.p["hod_Zheng05_alpha"]
-        M1 = 10 ** self.p["hod_Zheng05_log10M1"]
-        mthresh = 10 ** log10mthresh
-
-        # TODO: rewrite this part more pythonically
-        # Make empty Ns array, packed as [m,z]
-        Ns = np.zeros((masses.shape[0], mthresh.shape[0]))
-        # Loop over z
-        for i in range(Ns.shape[1]):
-            # Make mask to select masses greater than threshold
-            mask = masses > mthresh[i]
-            Ns[:, i][mask] = ((masses[mask] - mthresh[i]) / M1) ** alpha
-        Ns = Ns.T
-
-        return Ns
+        pass
 
     def ngal_from_mthresh(
         self,
@@ -989,3 +960,87 @@ class Zheng05_HOD(HODBase):
 
         integrand = self.nzm * (Ncs + Nss)
         return np.trapz(integrand, ms, axis=-1)
+
+
+class Zheng05M1_HOD(Zheng05Base_HOD):
+    """Class for the HOD from Zheng et al. 2005 (astro-ph/0408564).
+
+    We use the Zheng (i.e. M_1) parameterization for amplitude of N_sat.
+    """
+
+    @property
+    def hod_params(self):
+        return [
+            "hod_bisection_search_min_log10mthresh",
+            "hod_bisection_search_max_log10mthresh",
+            "hod_bisection_search_rtol",
+            "hod_bisection_search_warn_iter",
+            "hod_Zheng05_log10Mth",
+            "hod_Zheng05_sigmalogM",
+            "hod_Zheng05_log10Mcut",
+            "hod_Zheng05_log10M1",
+            "hod_Zheng05_alpha",
+        ]
+
+    def avg_Ns(self, log10mhalo, z, log10mthresh=None):
+        masses = 10 ** log10mhalo
+        if log10mthresh is None:
+            log10mthresh = self.log10mthreshS
+
+        mthresh = 10 ** log10mthresh
+        alpha = self.p["hod_Zheng05_alpha"]
+        M1 = 10 ** self.p["hod_Zheng05_log10M1"]
+
+        # TODO: rewrite this part more pythonically
+        # Make empty Ns array, packed as [m,z]
+        Ns = np.zeros((masses.shape[0], mthresh.shape[0]))
+        # Loop over z
+        for i in range(Ns.shape[1]):
+            # Make mask to select masses greater than threshold
+            mask = masses > mthresh[i]
+            Ns[:, i][mask] = ((masses[mask] - mthresh[i]) / M1) ** alpha
+        Ns = Ns.T
+
+        return Ns
+
+
+class Zheng05beta_HOD(Zheng05Base_HOD):
+    """Class for the HOD from Zheng et al. 2005 (astro-ph/0408564).
+
+    We use the beta parameterization for amplitude of N_sat, i.e. M_1 = 10^beta M_cut.
+    """
+
+    @property
+    def hod_params(self):
+        return [
+            "hod_bisection_search_min_log10mthresh",
+            "hod_bisection_search_max_log10mthresh",
+            "hod_bisection_search_rtol",
+            "hod_bisection_search_warn_iter",
+            "hod_Zheng05_log10Mth",
+            "hod_Zheng05_sigmalogM",
+            "hod_Zheng05_log10Mcut",
+            "hod_Zheng05_beta",
+            "hod_Zheng05_alpha",
+        ]
+
+    def avg_Ns(self, log10mhalo, z, log10mthresh=None):
+        masses = 10 ** log10mhalo
+        if log10mthresh is None:
+            log10mthresh = self.log10mthreshS
+
+        mthresh = 10 ** log10mthresh
+        alpha = self.p["hod_Zheng05_alpha"]
+        M1 = 10 ** self.p["hod_Zheng05_beta"] * mthresh
+
+        # TODO: rewrite this part more pythonically
+        # Make empty Ns array, packed as [m,z]
+        Ns = np.zeros((masses.shape[0], mthresh.shape[0]))
+        # Loop over z
+        for i in range(Ns.shape[1]):
+            # Make mask to select masses greater than threshold
+            mask = masses > mthresh[i]
+            Ns[:, i][mask] = ((masses[mask] - mthresh[i]) / M1[i]) ** alpha
+        Ns = Ns.T
+
+        return Ns

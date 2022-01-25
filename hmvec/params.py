@@ -138,5 +138,6 @@ default_params = {
     'hod_Zheng05_sigmalogM': 0.287,
     'hod_Zheng05_log10Mcut': 12.95,
     'hod_Zheng05_log10M1': 13.62,
+    'hod_Zheng05_beta': 13.62 - 12.95,
     'hod_Zheng05_alpha': 0.98,
 }
