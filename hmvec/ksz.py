@@ -192,8 +192,15 @@ class kSZ(HaloModel):
     zs : array_like
         Array of redshifts to compute at.
     volumes_gpc3, ngals_mpc3 : array_like
-        Arrays of comoving volume (in Gpc^3) and galaxy number density (in Mpc^3)
-        corresponding to redshifts in zs.
+        Array of comoving volume (in Gpc^3) corresponding to redshifts in zs.
+    ngals_mpc3 : array_like, optional
+        Array of galaxy number density (in Mpc^3) corresponding to redshifts in zs.
+        If not specified, n_gal computed from HOD is used. Default: None
+    use_hod_default_ngal : bool, optional
+        Use default HOD parameters instead of setting lower mass threshold from input
+        values of ngals_mpc3. Default: False.
+    mthreshs_override : array_like, optional
+        Array of mass thresholds to use instead of ngals_mpc3 in HOD. Default: None.
     rsd : bool, optional
         Whether to use RSD in halo model computations. Default: False.
     kL_max : float, optional
@@ -250,13 +257,8 @@ class kSZ(HaloModel):
         Name of HOD class to use for galaxy HOD. Default: hod.Leauthaud12_HOD.
     hod_corr : {'max', 'min'}, optional
         Correlations between centrals and satellites in HOD. Default: 'max'.
-    use_hod_default_ngal : bool, optional
-        Use default HOD parameters instead of setting lower mass threshold from input
-        values of ngals_mpc3. Default: False.
     **hod_param_override : dict, optional
         Dictionary of override parameters for electron profile. Default: None.
-    mthreshs_override : array_like, optional
-        Array of mass thresholds to use instead of ngal in HOD. Default: None.
     verbose : bool, optional
         Print progress of computations. Default: False.
     b1 : float, optional
@@ -271,7 +273,9 @@ class kSZ(HaloModel):
         self,
         zs,
         volumes_gpc3,
-        ngals_mpc3,
+        ngals_mpc3=None,
+        use_hod_default_ngal=False,
+        mthreshs_override=None,
         rsd=False,
         kL_max=0.1,
         num_kL_bins=100,
@@ -296,9 +300,7 @@ class kSZ(HaloModel):
         hod_name="g",
         hod_family=hod.Leauthaud12_HOD,
         hod_corr="max",
-        use_hod_default_ngal=False,
         hod_param_override=None,
-        mthreshs_override=None,
         verbose=False,
         b1=None,
         b2=None,
@@ -312,10 +314,14 @@ class kSZ(HaloModel):
 
         # Define comoving volume and galaxy number density at each redshift
         volumes_gpc3 = np.atleast_1d(volumes_gpc3)
-        ngals_mpc3 = np.asarray(ngals_mpc3)
-        if (len(zs) != len(volumes_gpc3)) or (len(zs) != len(ngals_mpc3)):
-            raise ValueError("zs, volumes_gpc3, and ngals_mpc3 must have same length")
+        if len(zs) != len(volumes_gpc3):
+            raise ValueError("zs and volumes_gpc3 must have same length")
+
         self.ngals_mpc3 = ngals_mpc3
+        if self.ngals_mpc3 is not None:
+            self.ngals_mpc3 = np.asarray(self.ngals_mpc3)
+            if len(zs) != len(self.ngals_mpc3):
+                raise ValueError("zs and ngals_mpc3 must have same length")
 
         # Store rsd preference
         self.rsd = rsd
@@ -375,7 +381,7 @@ class kSZ(HaloModel):
             if use_hod_default_ngal:
                 ngal_for_hod = None
             else:
-                ngal_for_hod = ngals_mpc3
+                ngal_for_hod = self.ngals_mpc3
             self.add_hod(
                 hod_name,
                 family=hod_family,
@@ -387,6 +393,9 @@ class kSZ(HaloModel):
                 ignore_existing=False,
                 param_override=hod_param_override,
             )
+            if self.ngals_mpc3 is None:
+                self.ngals_mpc3 = self.hods[hod_name]['ngal']
+
             if verbose: print('Defining HOD: finished')
 
         # Set quantities needed for photo-z uncertainty calculations
@@ -489,7 +498,7 @@ class kSZ(HaloModel):
                 # functions of [z,k_L,mu]
                 bg = self.hods['g']['bg'][zindex]
                 self.bgs.append(bg)
-                ngg = Ngg(ngals_mpc3[zindex])
+                ngg = Ngg(self.ngals_mpc3[zindex])
                 flPgg = self.lPgg(zindex,bg1=bg,bg2=bg,rsd=rsd)[0,:] + ngg
                 flPgv = self.lPgv(zindex,bg=bg,rsd=rsd)[0,:]
                 # Construct integrand (without prefactor) as function of tabulated k_L
@@ -1051,7 +1060,7 @@ def get_ksz_auto_squeezed(
     ells,
     volume_gpc3,
     zs,
-    ngals_mpc3,
+    ngals_mpc3=None,
     rsd=False,
     bgs=None,
     params=None,
@@ -1102,8 +1111,10 @@ def get_ksz_auto_squeezed(
     ells : array_like
         Array of ell values to compute C_ell at.
     volumes_gpc3, ngals_mpc3 : array_like
-        Arrays of comoving volume (in Gpc^3) and galaxy number density (in Mpc^3)
-        corresponding to redshifts in zs.
+        Array of comoving volume (in Gpc^3) corresponding to redshifts in zs.
+    ngals_mpc3 : array_like, optional
+        Array of galaxy number density (in Mpc^3) corresponding to redshifts in zs.
+        If not specified, n_gal computed from HOD is used. Default: None
     zs : array_like
         Array of redshifts to compute at.
     rsd : bool, optional
@@ -1202,11 +1213,6 @@ def get_ksz_auto_squeezed(
     # Make array for volumes, for feeding to kSZ object
     volumes_gpc3 = volume_gpc3 * np.ones_like(zs)
 
-    # If different galaxy number density for velocity template is not specified,
-    # set equal to density for electron template
-    if ngals_mpc3_for_v is None:
-        ngals_mpc3_for_v = ngals_mpc3
-
     # If not computing for a kSZ template, skip HOD computation to save time
     if template:
         skip_hod = False
@@ -1221,7 +1227,7 @@ def get_ksz_auto_squeezed(
         pksz = kSZ(
             zs,
             volumes_gpc3,
-            ngals_mpc3,
+            ngals_mpc3=ngals_mpc3,
             rsd=rsd,
             kL_max=k_max,                 # Same k_max for kL and kS
             num_kL_bins=num_k_bins,
@@ -1251,6 +1257,12 @@ def get_ksz_auto_squeezed(
             mthreshs_override=mthreshs_override,
             use_hod_default_ngal=use_hod_default_ngal
         )
+
+    # Update ngal. Also, if different galaxy number density for velocity template is not
+    # specified, set equal to density for electron template
+    ngals_mpc3 = pksz.ngals_mpc3
+    if ngals_mpc3_for_v is None:
+        ngals_mpc3_for_v = ngals_mpc3
 
     # Get k_short values that P_{q_perp} integrand is evaluated at
     ks = pksz.kS
