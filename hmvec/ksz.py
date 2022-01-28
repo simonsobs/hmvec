@@ -1316,18 +1316,20 @@ def get_ksz_auto_squeezed(
         if rsd or (pksz.sigz is not None):
             lPgv = np.zeros((len(zs), len(pksz.ks), len(pksz.mus)))
             lPgg = np.zeros_like(lPgv)
+            lPggtot = np.zeros_like(lPgv)
 
             for zi, z in enumerate(zs):
                 # lPgv() and lPgg() returns results as [mu,k], so we need to transpose
                 lPgv[zi] = pksz.lPgv(zi, bg=bgs[zi], rsd=rsd).T
                 lPgg[zi] = pksz.lPgg(zi, bgs[zi], bgs[zi], rsd=rsd).T
                 if pgg_noise_function is None:
-                    lPgg[zi] += 1/ngals_mpc3_for_v[zi]
+                    lPggtot[zi] = lPgg[zi] + 1/ngals_mpc3_for_v[zi]
                 else:
-                    lPgg[zi] += pgg_noise_function(z, pksz.kLs)[..., None]
+                    lPggtot[zi] = lPgg[zi] +pgg_noise_function(z, pksz.kLs)[..., None]
         else:
             lPgv = np.zeros((len(zs), len(pksz.ks)))
             lPgg = np.zeros_like(lPgv)
+            lPggtot = np.zeros_like(lPgv)
 
             for zi, z in enumerate(zs):
                 # lPgv() and lPgg() returns results as [mu,k], but each mu has the same
@@ -1335,9 +1337,9 @@ def get_ksz_auto_squeezed(
                 lPgv[zi] = pksz.lPgv(zi, bg=bgs[zi], rsd=False)[0]
                 lPgg[zi] = pksz.lPgg(zi, bgs[zi], bgs[zi], rsd=False)[0]
                 if pgg_noise_function is None:
-                    lPgg[zi] += 1/ngals_mpc3_for_v[zi]
+                    lPggtot[zi] = lPgg[zi] + 1/ngals_mpc3_for_v[zi]
                 else:
-                    lPgg[zi] += pgg_noise_function(z, pksz.kLs)
+                    lPggtot[zi] = lPgg[zi] + pgg_noise_function(z, pksz.kLs)
 
         # lPgv0 = pksz.lPgv(zindex=0,bg=bgs[0])[0,:]
         # lPgv = np.zeros((len(zs), lPgv0.shape[0]), dtype=lPgv0.dtype)
@@ -1360,6 +1362,7 @@ def get_ksz_auto_squeezed(
         spec_dict['sPge'] = sPge
         spec_dict['lPgv'] = lPgv
         spec_dict['lPgg'] = lPgg
+        spec_dict['lPggtot'] = lPggtot
 
     # P_{q_r} will be packed as [k,z]
     if verbose: print('Computing P_{q_r} on grid in k,z')
