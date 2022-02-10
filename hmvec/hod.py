@@ -23,8 +23,6 @@ class HODBase(Cosmology):
         - hod_params
         - avg_Nc
         - avg_Ns
-        - avg_NsNsm1
-        - avg_NcNs
     Also, __init__ of subclass must call init_mean_occupations() as final step.
 
     Parameters
@@ -100,7 +98,9 @@ class HODBase(Cosmology):
         self.Nc = self.avg_Nc(self.log10mhalo, self.zs)
         self.Ns = self.avg_Ns(self.log10mhalo, self.zs)
         self.NsNsm1 = self.avg_NsNsm1(self.Nc, self.Ns, self.corr)
+        self.NsNsm1Nsm2 = self.avg_NsNsm1Nsm2(self.Nc, self.Ns, self.corr)
         self.NcNs = self.avg_NcNs(self.Nc, self.Ns, self.corr)
+        self.NcNsNsm1 = self.avg_NcNsNsm1(self.Nc, self.Ns, self.corr)
 
     @property
     def hod_params(self):
@@ -116,7 +116,7 @@ class HODBase(Cosmology):
         pass
 
     def avg_NsNsm1(self, Nc, Ns, corr="max"):
-        """<N_s N_s | m_h>.
+        """<N_s (N_s - 1) | m_h>.
 
         Parameters
         ----------
@@ -124,15 +124,15 @@ class HODBase(Cosmology):
             Arrays of Nc and Ns, packed as [z,m].
         corr : string, optional
             Either "min" or "max", describing correlations in central-satellite model.
-            Default: "max"
+            Default: "max".
 
         Returns
         -------
-        NsNs : array_like
-            N_s N_s term, packed as [z,m].
+        NsNsm1 : array_like
+            N_s (N_s - 1) term, packed as [z,m].
         """
         if corr not in ["min", "max"]:
-            raise ValueError("Invalid corr argument (%s) passed to avg_NcNs!" % corr)
+            raise ValueError("Invalid corr argument (%s) passed to avg_NsNsm1!" % corr)
 
         if corr == "max":
             ret = Ns ** 2.0 / Nc
@@ -140,6 +140,34 @@ class HODBase(Cosmology):
             return ret
         elif corr == "min":
             return Ns ** 2.0
+
+    def avg_NsNsm1Nsm2(self, Nc, Ns, corr="max"):
+        """<N_s (N_s - 1) (N_s - 2) | m_h>.
+
+        Parameters
+        ----------
+        Nc, Ns : array_like
+            Arrays of Nc and Ns, packed as [z,m].
+        corr : string, optional
+            Either "min" or "max", describing correlations in central-satellite model.
+            Default: "max".
+
+        Returns
+        -------
+        NsNsm1Nsm2 : array_like
+            N_s (N_s - 1) (N_s - 2) term, packed as [z,m].
+        """
+        if corr not in ["min", "max"]:
+            raise ValueError(
+                "Invalid corr argument (%s) passed to avg_NsNsm1Nsm2!" % corr
+            )
+
+        if corr == "max":
+            ret = Ns ** 3.0 / Nc ** 2.0
+            ret[np.isclose(Nc, 0.0)] = 0  # FIXME: is this kosher?
+            return ret
+        elif corr == "min":
+            return Ns ** 3.0
 
     def avg_NcNs(self, Nc, Ns, corr="max"):
         """<N_c N_s | m_h>.
@@ -164,6 +192,34 @@ class HODBase(Cosmology):
             return Ns
         elif corr == "min":
             return Ns * Nc
+
+    def avg_NcNsNsm1(self, Nc, Ns, corr="max"):
+        """<N_c N_s (N_s - 1) | m_h>.
+
+        Parameters
+        ----------
+        Nc, Ns : array_like
+            Arrays of Nc and Ns, packed as [z,m].
+        corr : string, optional
+            Either "min" or "max", describing correlations in central-satellite model.
+            Default: "max"
+
+        Returns
+        -------
+        NcNsNsm1 : array_like
+            N_c N_s (N_s - 1) term, packed as [z,m].
+        """
+        if corr not in ["min", "max"]:
+            raise ValueError(
+                "Invalid corr argument (%s) passed to avg_NcNsNsm1!" % corr
+            )
+
+        if corr == "max":
+            ret = Ns ** 2.0 / Nc
+            ret[np.isclose(Nc, 0.0)] = 0  # FIXME: is this kosher?
+            return ret
+        elif corr == "min":
+            return Ns ** 2.0 * Nc
 
     def compute_ngal(self):
         """Compute n_g(z).

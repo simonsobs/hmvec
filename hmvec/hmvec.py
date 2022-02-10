@@ -511,7 +511,9 @@ class HaloModel(Cosmology):
         self.hods[name]['Nc'] = self.hods[name]['hod'].Nc
         self.hods[name]['Ns'] = self.hods[name]['hod'].Ns
         self.hods[name]['NsNsm1'] = self.hods[name]['hod'].NsNsm1
+        self.hods[name]['NsNsm1Nsm2'] = self.hods[name]['hod'].NsNsm1Nsm2
         self.hods[name]['NcNs'] = self.hods[name]['hod'].NcNs
+        self.hods[name]['NcNsNsm1'] = self.hods[name]['hod'].NcNsNsm1
         self.hods[name]['ngal'] = self.get_ngal(
             self.hods[name]['Nc'], self.hods[name]['Ns']
         )
@@ -1311,6 +1313,515 @@ class HaloModel(Cosmology):
                 #     print("Two-halo consistency1: " , consistency1,integral)
                 #     print("Two-halo consistency2: " , consistency2,integral2)
                 return self.Pzk * factor1 * factor2
+
+    def get_bispectrum(
+        self,
+        name="g",
+        name2=None,
+        name3=None,
+        b1_in=None,
+        verbose=False,
+        zi=None
+    ):
+        """Compute halo model bispectrum for specified profiles
+
+        Currently only implemented for B_ggg, without RSD.
+
+        Parameters
+        ----------
+        name, name2, name3 : string, optional
+            Internal tracer names. Default: "g" for name1, None for name2 and name3.
+        b1_in : array_like, optional
+            Low-k linear bias. If specified, override internal computations of linear
+            bias. Default: None.
+        verbose : bool, optional
+            Whether to print debugging information. Default: False.
+        zi : int, optional
+            If specified, only compute bispectrum for redshift corresponding to
+            self.zs[zi]. Affects dimensionality of output. Default: None.
+
+        Returns
+        -------
+        B : array_like
+            Bispectrum, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if zi is
+            specified.
+        """
+        return (
+            self.get_bispectrum_3halo(
+                name, name2=name2, name3=name3, b1_in=b1_in, zi=zi
+            )
+            + self.get_bispectrum_2halo(
+                name, name2=name2, name3=name3, b1_in=b1_in, verbose=verbose, zi=zi
+            )
+            + self.get_bispectrum_1halo(
+                name, name2=name2, name3=name3, verbose=verbose, zi=zi
+            )
+        )
+
+    def get_bispectrum_3halo(
+        self,
+        name="g",
+        name2=None,
+        name3=None,
+        b1_in=None,
+        zi=None
+    ):
+        """Compute B_3h(k1,k2,k3,z) for specified profiles.
+
+        Currently only implemented for B_ggg, without RSD.
+
+        Parameters
+        ----------
+        name, name2, name3 : string, optional
+            Internal tracer names. Default: "g" for name1, None for name2 and name3.
+        b1_in : array_like, optional
+            Low-k linear bias. If specified, override internal computations of linear
+            bias. Default: None.
+        zi : int, optional
+            If specified, only compute bispectrum for redshift corresponding to
+            self.zs[zi]. Affects dimensionality of output. Default: None.
+
+        Returns
+        -------
+        B_3h : array_like
+            3-halo term, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if zi is
+            specified.
+        """
+        name2 = name if name2 is None else name2
+        name3 = name if name3 is None else name3
+
+        def _3halointegrand(iterm):
+            # Compute n(m) * b_h(m) * [Fourier-space profile]
+            if zi is None:
+                return self.nzm[..., None] * iterm * self.bh[..., None]
+            else:
+                return self.nzm[zi, :, None] * iterm * self.bh[zi, :, None]
+
+        def _3haloint(iterm):
+            # Compute \int dm n(m) b_h(m) [Fourier-space profile]
+            integrand = _3halointegrand(iterm)
+            integral = np.trapz(integrand, self.ms[..., None], axis=-2)
+            return integral
+
+        def _get_term(iname):
+            # Get Fourier-space profile, low-k limit of this profile, and linear bias.
+            # Profile from HOD, with b also computed from HOD.
+            # Output of _get_hod() includes 1/ngal factor
+            rterm1 = self._get_hod(iname)
+            rterm01 = self._get_hod(iname, lowklim=True)
+            b = self.get_bg(
+                self.hods[iname]['Nc'],
+                self.hods[iname]['Ns'],
+                self.hods[iname]['ngal']
+            )[:,None]
+
+            return rterm1, rterm01, b
+
+        if (
+            (name not in self.hods.keys())
+            or (name2 not in self.hods.keys())
+            or (name3 not in self.hods.keys())
+        ):
+            raise NotImplementedError(
+                "Bispectrum only implemented for galaxy autos! "
+                "name = %s, name2 = %s, name3 = %s" % (name, name2, name3)
+            )
+
+        if (name != name2) or (name != name3):
+            raise NotImplementedError("Bispectrum only implemented for tracer autos!")
+
+        # Compute effective bias factor
+        ## Get Fourier-space profile
+        iterm1, iterm01, b1 = _get_term(name)
+        if zi is not None:
+            iterm1 = iterm1[zi, ...]
+            iterm01 = iterm01[zi, ...]
+            b1 = b1[zi]
+        ## Set linear bias factors to inputs, if specified
+        if b1_in is not None:
+            b1 = b1_in.reshape((b1_in.shape[0],1))
+            if zi is not None:
+                b1 = b1[zi, ...]
+        ## Compute \int dm n(m) b_h(m) [Fourier-space profile
+        integral = _3haloint(iterm1)
+        ## For halo bias consistency relation, compute
+        ## \int dm n(m) b_h(m) [Fourier-space profile]
+        ## using low-k limit of profile
+        consistency1 = _3haloint(iterm01)
+        ## Compute bias factor
+        factor1 = integral + b1 - consistency1
+
+        if zi is None:
+            return (
+                self.get_bispectrum_matter_tree()
+                * factor1[:, :, None, None]
+                * factor1[:, None, :, None]
+                * factor1[:, None, None, :]
+            )
+        else:
+            return (
+                self.get_bispectrum_matter_tree(zi=zi)
+                * factor1[:, None, None]
+                * factor1[None, :, None]
+                * factor1[None, None, :]
+            )
+
+    def get_bispectrum_matter_tree(self, zi=None):
+        """Compute tree-level matter bispectrum.
+
+        This is evaluated at every (k1,k2,k3) triplet for k_i in self.ks.
+
+        Parameters
+        ----------
+        zi : int, optional
+            If specified, only compute bispectrum for redshift corresponding to
+            self.zs[zi]. Affects dimensionality of output. Default: None.
+
+        Returns
+        -------
+        B : array_like
+            Tree-level bispectrum, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if
+            zi is specified.
+        """
+
+        def _F2(k1, k2, k3):
+            costheta12 = 0.5 * (k3 ** 2 - k1 ** 2 - k2 ** 2) / (k1 * k2)
+            return (
+                5.0 / 7
+                + 0.5 * costheta12 * (k1 / k2 + k2 / k1)
+                + 2.0 / 7 * costheta12 ** 2
+            )
+
+        # Get coordinate meshes for k1, k2, k3 and flatten each mesh
+        k1_mesh, k2_mesh, k3_mesh = np.meshgrid(
+            self.ks, self.ks, self.ks, indexing="ij"
+        )
+        # k1, k2, k3 = k1.flatten(), k2.flatten(), k3.flatten()
+
+        # Get required permutations of F_2 kernel
+        F2_123 = _F2(k1_mesh, k2_mesh, k3_mesh)
+        F2_231 = _F2(k2_mesh, k3_mesh, k1_mesh)
+        F2_312 = _F2(k3_mesh, k1_mesh, k2_mesh)
+
+        # Compute B_tree
+        if zi is None:
+            B = 2 * (
+                F2_123[None, :, :, :]
+                * self.Pzk[:, :, None, None] # P(k1)
+                * self.Pzk[:, None, :, None] # P(k2)
+                + F2_231[None, :, :, :]
+                * self.Pzk[:, None, :, None] # P(k2)
+                * self.Pzk[:, None, None, :] # P(k3)
+                + F2_312[None, :, :, :]
+                * self.Pzk[:, None, None, :] # P(k3)
+                * self.Pzk[:, :, None, None] # P(k1)
+            )
+        else:
+            B = 2 * (
+                F2_123
+                * self.Pzk[zi, :, None, None] # P(k1)
+                * self.Pzk[zi, None, :, None] # P(k2)
+                + F2_231
+                * self.Pzk[zi, None, :, None] # P(k2)
+                * self.Pzk[zi, None, None, :] # P(k3)
+                + F2_312
+                * self.Pzk[zi, None, None, :] # P(k3)
+                * self.Pzk[zi, :, None, None] # P(k1)
+            )
+
+        return B
+
+
+    def get_bispectrum_2halo(
+        self, name="g", name2=None, name3=None, b1_in=None, verbose=False, zi=None
+    ):
+        """Compute B_2h(k1,k2,k3,z) for specified profiles.
+
+        Parameters
+        ----------
+        name, name2, name3 : string, optional
+            Internal tracer names. Default: "g" for name1, None for name2 and name3.
+        b1_in : array_like, optional
+            Low-k linear bias. If specified, override internal computations of linear
+            bias. Default: None.
+        verbose : bool, optional
+            Whether to print debugging information. Default: False.
+        zi : int, optional
+            If specified, only compute bispectrum for redshift corresponding to
+            self.zs[zi]. Affects dimensionality of output. Default: None.
+
+        Returns
+        -------
+        B_2h : array_like
+            2-halo term, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if
+            zi is specified.
+        """
+        name2 = name if name2 is None else name2
+        name3 = name if name3 is None else name3
+
+        if (
+            (name not in self.hods.keys())
+            or (name2 not in self.hods.keys())
+            or (name3 not in self.hods.keys())
+        ):
+            raise NotImplementedError("Bispectrum only implemented for galaxy autos!")
+
+        if (name != name2) or (name != name3):
+            raise NotImplementedError("Bispectrum only implemented for tracer autos!")
+
+        def _3halointegrand(iterm):
+            # Compute n(m) * b_h(m) * [Fourier-space profile]
+            if zi is None:
+                return self.nzm[..., None] * iterm * self.bh[..., None]
+            else:
+                return self.nzm[zi, :, None] * iterm * self.bh[zi, :, None]
+
+        def _3haloint(iterm):
+            # Compute \int dm n(m) b_h(m) [Fourier-space profile]
+            integrand = _3halointegrand(iterm)
+            integral = np.trapz(integrand, self.ms[..., None], axis=-2)
+            return integral
+
+        def _get_term(iname):
+            # Get Fourier-space profile, low-k limit of this profile, and linear bias.
+                # Profile from HOD, with b also computed from HOD
+            rterm1 = self._get_hod(iname)
+            rterm01 = self._get_hod(iname, lowklim=True)
+            b = self.get_bg(
+                self.hods[iname]['Nc'],
+                self.hods[iname]['Ns'],
+                self.hods[iname]['ngal']
+            )[:,None]
+
+            return rterm1, rterm01, b
+
+        # Compute bias factor as for 3h term, as function of k
+        if verbose:
+            print("Computing effective bias factor")
+        ## Get Fourier-space profile
+        iterm1, iterm01, b1 = _get_term(name)
+        if zi is not None:
+            iterm1 = iterm1[zi, ...]
+            iterm01 = iterm01[zi, ...]
+            b1 = b1[zi]
+        ## Set linear bias factors to inputs, if specified
+        if b1_in is not None:
+            b1 = b1_in.reshape((b1_in.shape[0],1))
+            if zi is not None:
+                b1 = b1[zi, ...]
+        ## Compute \int dm n(m) b_h(m) [Fourier-space profile
+        integral = _3haloint(iterm1)
+        ## For halo bias consistency relation, compute
+        ## \int dm n(m) b_h(m) [Fourier-space profile]
+        ## using low-k limit of profile
+        consistency1 = _3haloint(iterm01)
+        ## Compute bias factor
+        factor1 = integral + b1 - consistency1
+
+        # Compute NcNs term, as function of k
+        if verbose:
+            print("Computing NcNs term")
+        ## Get uc, us packed as [z,m,k]
+        hod, uc, us = self._get_hod_common(name)
+        if uc != 1:
+            raise NotImplementedError("Bispectrum not implemented for nontrivial u_c!")
+        ## Compute m integrand, packed as [z,m,k] or [m,k] for specific z
+        if zi is None:
+            integrand = (
+                self.nzm[:, :, None]
+                * self.bh[:, :, None]
+                * hod['NcNs'][:, :, None]
+                * us
+                / hod['ngal'][:, None, None]
+            )
+        else:
+            integrand = (
+                self.nzm[zi, :, None]
+                * self.bh[zi, :, None]
+                * hod['NcNs'][zi, :, None]
+                * us[zi]
+                / hod['ngal'][zi, None, None]
+            )
+        ## Integrate in m, and apply low-k damping
+        ncns_term = np.trapz(integrand, self.ms, axis=-2)
+        del integrand
+        lowk_damping = 1 - np.exp(-(self.ks/self.p['kstar_damping']) ** 2.)
+        if zi is None:
+            ncns_term *= lowk_damping[None, :]
+        else:
+            ncns_term *= lowk_damping
+
+        # Compute NsNsm1 term, as function of k1,k2
+        if verbose:
+            print("Computing NsNsm1 term")
+        ## Compute m integrand, packed as [z,m,k1,k2]
+        if zi is None:
+            integrand = (
+                self.nzm[:, :, None, None]
+                * self.bh[:, :, None, None]
+                * hod['NsNsm1'][:, :, None, None]
+                * us[:, :, :, None]
+                * us[:, :, None, :]
+                / hod['ngal'][:, None, None, None]
+            )
+        else:
+            integrand = (
+                self.nzm[zi, :, None, None]
+                * self.bh[zi, :, None, None]
+                * hod['NsNsm1'][zi, :, None, None]
+                * us[zi, :, :, None]
+                * us[zi, :, None, :]
+                / hod['ngal'][zi, None, None, None]
+            )
+        ## Integrate in m, and apply low-k damping
+        nsnsm1_term = np.trapz(integrand, self.ms, axis=-3)
+        del integrand
+        if zi is None:
+            nsnsm1_term *= lowk_damping[None, :, None] * lowk_damping[None, None, :]
+        else:
+            nsnsm1_term *= lowk_damping[:, None] * lowk_damping[None, :]
+
+        # Accumulate 3 permutations, packed as [z,k1,k2,k3]
+        if verbose:
+            print("Computing B")
+
+        if zi is None:
+            B = (
+                (
+                    ncns_term[:, :, None, None]
+                    + ncns_term[:, None, :, None]
+                    + nsnsm1_term[:, :, :, None]
+                ) * factor1[:, None, None, :] * self.Pzk[:, None, None, :]
+                + (
+                    ncns_term[:, None, :, None]
+                    + ncns_term[:, None, None, :]
+                    + nsnsm1_term[:, None, :, :]
+                ) * factor1[:, :, None, None] * self.Pzk[:, :, None, None]
+                + (
+                    ncns_term[:, None, None, :]
+                    + ncns_term[:, :, None, None]
+                    + nsnsm1_term[:, :, None, :]
+                ) * factor1[:, None, :, None] * self.Pzk[:, None, :, None]
+            )
+        else:
+            B = (
+                (
+                    ncns_term[:, None, None]
+                    + ncns_term[None, :, None]
+                    + nsnsm1_term[:, :, None]
+                ) * factor1[None, None, :] * self.Pzk[zi, None, None, :]
+                + (
+                    ncns_term[None, :, None]
+                    + ncns_term[None, None, :]
+                    + nsnsm1_term[None, :, :]
+                ) * factor1[:, None, None] * self.Pzk[zi, :, None, None]
+                + (
+                    ncns_term[None, None, :]
+                    + ncns_term[:, None, None]
+                    + nsnsm1_term[:, None, :]
+                ) * factor1[None, :, None] * self.Pzk[zi, None, :, None]
+            )
+
+        return B
+
+
+    def get_bispectrum_1halo(
+        self, name="g", name2=None, name3=None, verbose=False, zi=None
+    ):
+        """Compute B_1h(k1,k2,k3,z) for specified profiles.
+
+        Parameters
+        ----------
+        name, name2, name3 : string, optional
+            Internal tracer names. Default: "g" for name1, None for name2 and name3.
+        verbose : bool, optional
+            Whether to print debugging information. Default: False.
+        zi : int, optional
+            If specified, only compute bispectrum for redshift corresponding to
+            self.zs[zi]. Affects dimensionality of output. Default: None.
+
+        Returns
+        -------
+        B_1h : array_like
+            1-halo term, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if
+            zi is specified.
+        """
+        name2 = name if name2 is None else name2
+        name3 = name if name3 is None else name3
+
+        if (
+            (name not in self.hods.keys())
+            or (name2 not in self.hods.keys())
+            or (name3 not in self.hods.keys())
+        ):
+            raise NotImplementedError("Bispectrum only implemented for galaxy autos!")
+
+        if (name != name2) or (name != name3):
+            raise NotImplementedError("Bispectrum only implemented for tracer autos!")
+
+        # Get uc, us packed as [z,m,k]
+        hod, uc, us = self._get_hod_common(name)
+        if uc != 1:
+            raise NotImplementedError("Bispectrum not implemented for nontrivial u_c!")
+
+        b1h = []
+
+        # Loop over z, for memory reasons
+        for zii, z in enumerate(self.zs):
+            if zi is not None and zii != zi:
+                continue
+
+            if verbose:
+                print("Computing for redshift index %d (z = %g)" % (zii, z))
+                if zii == 0:
+                    print(
+                        "\tIntegrand shape:",
+                        (
+                            hod['NcNsNsm1'].shape[1],
+                            len(self.ks),
+                            len(self.ks),
+                            len(self.ks)
+                        )
+                    )
+            # Compute integrand, packed as [m,k1,k2,k3]
+            if verbose:
+                print("\tComputing NcNsNsm1 term")
+            integrand = (
+                hod['NcNsNsm1'][zii, :, None, None, None]
+                * (
+                    us[zii, :, :, None, None] * us[zii, :, None, :, None]
+                    + us[zii, :, None, :, None] * us[zii, :, None, None, :]
+                    + us[zii, :, None, None, :] * us[zii, :, :, None, None]
+                )
+            )
+            if verbose:
+                print("\tComputing NsNsm1Nsm2 term")
+            integrand += (
+                hod['NsNsm1Nsm2'][zii, :, None, None, None]
+                * us[zii, :, :, None, None]
+                * us[zii, :, None, :, None]
+                * us[zii, :, None, None, :]
+            )
+            integrand
+            integrand *= self.nzm[zii, :, None, None, None]
+
+            # Integrate in m, and append to b1h
+            lowk_damping = 1 - np.exp(-(self.ks/self.p['kstar_damping']) ** 2.)
+            b1h.append(
+                np.trapz(integrand,self.ms,axis=0)
+                * lowk_damping[:, None, None]
+                * lowk_damping[None, :, None]
+                * lowk_damping[None, None, :]
+            )
+
+        # Divide final result by n_gal^3
+        if zi is None:
+            b1h = np.asarray(b1h) / hod['ngal'][:, None, None, None] ** 3
+        else:
+            b1h = np.asarray(b1h[0]) / hod['ngal'][zi, None, None, None] ** 3
+
+        return b1h
+
 
 
     def sigma_1h_profiles(self,thetas,Ms,concs,sig_theta=None,delta=200,rho='mean',rho_at_z=True):
