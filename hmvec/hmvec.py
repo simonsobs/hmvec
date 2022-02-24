@@ -1165,8 +1165,9 @@ class HaloModel(Cosmology):
             Whether to print debugging information. Default: False.
         b1_in, b2_in : array_like, optional
             Low-k linear bias for each tracer. If specified, override internal
-            computations of these linear biases. Not applied to factors involving RSD.
-            Default: None.
+            computations of these linear biases. If using RSD and computing for
+            galaxies, adjust overall normalization of b_g(z,k,mu) to equal the input
+            bias in the low-k limit. Default: None.
         m_integrand : bool, optional
             Whether to return dP_2h/dm. Affects dimensionality of output.
             Default: False.
@@ -1186,6 +1187,8 @@ class HaloModel(Cosmology):
                 - RSD, m integrand: not implemented, but would be [z,m,k,mu].
         """
         name2 = name if name2 is None else name2
+        if b2_in is None:
+            b2_in = b1_in
 
         def _2halointegrand(iterm):
             # Compute n(m) * b_h(m) * [Fourier-space profile]
@@ -1243,6 +1246,8 @@ class HaloModel(Cosmology):
                 rsd=True,
                 u_name=self.hods[name]['satellite_profile']
             )
+            if b1_in is not None:
+                b1 *= (b1_in[:, None] / b1[:, 0])[:, None, :]
             factor1 = (b1 + fg * self.mu[np.newaxis, np.newaxis, :] ** 2)
         else:
             # Compute get Fourier-space profile for name, name2
@@ -1272,6 +1277,8 @@ class HaloModel(Cosmology):
                 rsd=True,
                 u_name=self.hods[name2]['satellite_profile']
             )
+            if b2_in is not None:
+                b2 *= (b2_in[:, None] / b2[:, 0])[:, None, :]
             factor2 = (b2 + fg * self.mu[np.newaxis, np.newaxis, :] ** 2)
         else:
             iterm2, iterm02, b2 = _get_term(name2)
