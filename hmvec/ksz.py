@@ -1429,8 +1429,10 @@ def get_ksz_auto_squeezed(
     cl = np.zeros(ells.shape[0])
     for iell, ell in enumerate(ells):
 
-        # Set chi_min based on k=30Mpc^-1, and chi_max from max redshift
-        chi_min = ell / _LIMBER_KMAX
+        # Set chi_min from min redshift, or from k=30Mpc^-1 if the lowest redshift
+        # translates to k>30Mpc^-1
+        chi_min = max(pksz.results.comoving_radial_distance(zs[0]), ell / _LIMBER_KMAX)
+        # Set chi_max from max redshift
         chi_max = pksz.results.comoving_radial_distance(zs[-1])
         chi_int = np.geomspace(chi_min, chi_max, n_int)
         k_int = ell/chi_int
