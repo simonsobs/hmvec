@@ -1187,8 +1187,6 @@ class HaloModel(Cosmology):
                 - RSD, m integrand: not implemented, but would be [z,m,k,mu].
         """
         name2 = name if name2 is None else name2
-        if b2_in is None:
-            b2_in = b1_in
 
         def _2halointegrand(iterm):
             # Compute n(m) * b_h(m) * [Fourier-space profile]
