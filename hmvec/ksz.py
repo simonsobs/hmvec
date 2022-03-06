@@ -1006,7 +1006,7 @@ def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
     # Resulting interpolating function automatically sorts arguments if
     # arrays are fed in, but we'll only call iPqperp with one (z,k) pair
     # at a time, so we'll be fine.
-    iPqperp = interp2d(zs, ks, Pqperp)
+    iPqperp = interp2d(zs, ks, Pqperp, fill_value=0.)
 
     # Compute C_ell integral at each ell
     if verbose: print('Computing C_ell')
@@ -1422,7 +1422,7 @@ def get_ksz_auto_squeezed(
     # The resulting interpolating function automatically sorts arguments if
     # arrays are fed in, but we'll only call iPqperp with one (z,k) pair
     # at a time, so we'll be fine.
-    iPqr = interp2d(zs, ks, Pqr)
+    iPqr = interp2d(zs, ks, Pqr, fill_value=0.)
 
     # Compute C_ell integral at each ell
     if verbose: print('Computing C_ell')
@@ -1716,7 +1716,7 @@ def get_ksz_auto_squeezed_m_integrand(
         nm = len(log10ms)
         if verbose and (ilogm % (nm // 10) == 0):
             print(f"\tComputing for M {ilogm} / {len(log10ms)}")
-        iPqr = interp2d(zs, log10ks, Pqr[:, ilogm, :])
+        iPqr = interp2d(zs, log10ks, Pqr[:, ilogm, :], fill_value=0.)
 
         # Compute C_ell integral at each ell
         for iell,ell in enumerate(ells):
