@@ -501,6 +501,7 @@ class HaloModel(Cosmology):
             params=self.p,
             nzm=self.nzm,
             param_override=param_override,
+            corr=corr,
             **kwargs
         )
 
