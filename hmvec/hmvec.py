@@ -89,7 +89,7 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
 
 class HaloModel(Cosmology):
     def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
-                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
+                 fnl=0., halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
         self.zs = np.asarray(zs)
         self.ks = ks
         Cosmology.__init__(self,params,halofit)
@@ -99,6 +99,7 @@ class HaloModel(Cosmology):
         self.ms = ms
         self.hods = {}
         self.cib_params = {}
+        self.fnl = fnl
 
         # Mass function
         if ms is not None: self.init_mass_function(ms)
@@ -161,25 +162,37 @@ class HaloModel(Cosmology):
         elif self.mode=="tinker":
             nus = deltac/np.sqrt(sigma2)
             fnus = tinker.f_nu(nus,self.zs[:,None])
-            # return nus, fnus                 # debugging    
             return nus * fnus # note that f is actually nu*fnu !
         else:
             raise NotImplementedError
 
     def get_bh(self):
         sigma2 = self.sigma2
-        deltac = self.p['st_deltac']
+        
+        #Gaussian Linear Halo Bias
         if self.mode=="sheth-torman":
+            deltac = self.p['st_deltac']
             A = self.p['st_A']
             a = self.p['st_a']
             p = self.p['st_p']
-            return 1. + (1./deltac)*((a*deltac**2./sigma2)-1.) + (2.*p/deltac)/(1.+(a*deltac**2./sigma2)**p)
+            bh_gauss = 1. + (1./deltac)*((a*deltac**2./sigma2)-1.) + (2.*p/deltac)/(1.+(a*deltac**2./sigma2)**p)
         elif self.mode=="tinker":
+            deltac = tinker.constants['deltac']
             nus = deltac/np.sqrt(sigma2)
-            # return nus, tinker.bias(nus)          # debugging
-            return tinker.bias(nus)
+            bh_gauss = tinker.bias(nus)
         else:
             raise NotImplementedError
+        
+        #Non-Gaussian Contribution
+        # from Moritz Munchmeyer et al. : https://arxiv.org/pdf/1810.13424.pdf
+        tk = self.Tk(self.ks)
+        Dz = self.D_growth(1/(1+self.zs))
+        H0 = self.h_of_z(0.)
+        alpha = 2 * self.ks**2 * tk[None, None, ...] * Dz[..., None, None] / (3 * self.om0 * H0**2)
+        betaf = 2 * deltac * (bh_gauss - 1) 
+        bh_ng = self.fnl * betaf[..., None] / alpha
+
+        return bh_gauss[..., None] + bh_ng
 
     def concentration(self,mode='duffy'):
         ms = self.ms
@@ -508,8 +521,8 @@ class HaloModel(Cosmology):
     def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
 
     def get_bg(self,Nc,Ns,ngal):
-        integrand = self.nzm * (Nc+Ns) * self.bh
-        return np.trapz(integrand,self.ms,axis=-1)/ngal
+        integrand = self.nzm[..., None] * (Nc+Ns) * self.bh
+        return np.trapz(integrand,self.ms,axis=-2)/ngal
 
 
     def _get_hod_common(self,name):
@@ -819,7 +832,7 @@ class HaloModel(Cosmology):
             nu_obs = self._freqtest(nu_obs)
             
         def _2haloint(iterm):
-            integrand = self.nzm[...,None] * iterm * self.bh[...,None]
+            integrand = self.nzm[...,None] * iterm * self.bh
             integral = np.trapz(integrand,ms,axis=-2)
             return integral
 
