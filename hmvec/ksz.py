@@ -1076,6 +1076,7 @@ def get_ksz_auto_squeezed(
     electron_profile_nxs=None,
     electron_profile_xmax=None,
     hod_family=hod.Leauthaud12_HOD,
+    hod_corr="max",
     n_int = 100,
     verbose=False,
     template=False,
@@ -1150,6 +1151,8 @@ def get_ksz_auto_squeezed(
         X_max for electron profile in FFT. Default: None.
     hod_family : hod.HODBase
         Name of HOD class to use for galaxy HOD. Default: hod.Leauthaud12_HOD.
+    hod_corr : {'max', 'min'}, optional
+        Correlations between centrals and satellites in HOD. Default: 'max'.
     n_int : int, optional
         Number of samples to use in Limber integral. Default: 100.
     verbose : bool, optional
@@ -1245,6 +1248,7 @@ def get_ksz_auto_squeezed(
             electron_profile_name='e',
             electron_profile_family=electron_profile_family,
             hod_family=hod_family,
+            hod_corr=hod_corr,
             skip_electron_profile=False,
             electron_profile_param_override=params,
             electron_profile_nxs=electron_profile_nxs,
