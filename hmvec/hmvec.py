@@ -6,7 +6,7 @@ import camb
 from camb import model
 import numpy as np
 from . import tinker,utils,hod
-from .cosmology import Cosmology
+from .cosmology import Cosmology, R_from_M
 
 import scipy.constants as constants
 from .params import default_params, battaglia_defaults
@@ -1986,11 +1986,6 @@ class HaloModel(Cosmology):
             integrand = rhomz * bhs * Ps / (1+zlens)**3. / sigmac / DAz**2 * j0(ells*theta) * ells / 2./ np.pi
             ints.append( np.trapz(integrand,ells) )
         return np.asarray(ints)
-
-"""
-Mass function
-"""
-def R_from_M(M,rho,delta): return (3.*M/4./np.pi/delta/rho)**(1./3.)
 
 
 """

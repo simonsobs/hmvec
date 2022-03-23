@@ -433,3 +433,23 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
         if zevals.size==1: Cells[i] = interpolated * prefactor
         else: Cells[i] = np.trapz(interpolated*prefactor,zevals)
     return Cells
+
+
+def R_from_M(M, rho, delta):
+    """Compute halo mass to radius.
+
+    Parameters
+    ----------
+    M : float
+        Halo mass in Msun.
+    rho : float
+        Mean background density.
+    delta : float
+        Threshold above rho that defines halo.
+
+    Returns
+    -------
+    R : float
+        Halo radius.
+    """
+    return (3. * M / 4. / np.pi / delta / rho) ** (1. / 3.)

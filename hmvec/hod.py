@@ -1,8 +1,7 @@
 from .params import default_params
 from . import utils
-from .cosmology import Cosmology
+from .cosmology import Cosmology, R_from_M
 from .mstar_mhalo import Mstellar_halo, Mhalo_stellar
-from .hmvec import R_from_M
 
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
