@@ -57,6 +57,8 @@ default_params = {
     'duffy_A_mean':10.14, # for M200rhomeanz
     'duffy_alpha_mean':-0.081,
     'duffy_beta_mean':-1.01,
+    'maccio_HI_cHI0': 28.65,
+    'maccio_HI_gamma': 1.45,
     'nfw_integral_numxs':40000, # not sufficient
     'nfw_integral_xmax':200,
     'electron_density_profile_integral_numxs':5000,

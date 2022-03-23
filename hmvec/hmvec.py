@@ -84,6 +84,35 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     h = default_params['H0'] / 100. if h is None else h
     return A*((h*m/2.e12)**alpha)*(1+z)**beta
 
+def maccio_HI_concentration(m, z, c_HI0=None, gamma=None):
+    """Maccio et al. 2007 concentration-mass relation, adapted to HI.
+
+    We use the form fitted to HI profiles in Padmanabhan et al. 2017 (1611.06235),
+    Eq. 3.
+
+    Parameters
+    ----------
+    m : array_like
+        Halo masses to evaluate at. Must be broadcastable against z.
+    z : array_like
+        Redshifts to evaluate at. Must be broadcastable against m.
+    c_HI0, gamma: float, optional
+        Fit parameters in c-m relation. If not specified, use fitted values from paper.
+        Default: None.
+
+    Returns
+    -------
+    c_HI : array_like
+        HI concentrations, with shape determined by broadcasting m and z against each
+        other.
+    """
+    # Use values from Table 3 of 1611.06235
+    c_HI0 = default_params["maccio_HI_cHI0"] if c_HI0 is None else c_HI0
+    gamma = default_params["maccio_HI_gamma"] if gamma is None else gamma
+
+    return c_HI0 * (m / 1e11) ** -0.109 * 4 / (1 + z) ** gamma
+
+
 class HaloModel(Cosmology):
 
     def __init__(self,zs,ks,ms=None,mus=None,params=None,mass_function="sheth-torman",
@@ -201,9 +230,20 @@ class HaloModel(Cosmology):
         else:
             raise NotImplementedError
 
-    def concentration(self,mode='duffy'):
+    def concentration(self, mode='duffy'):
+        """Compute concentration-mass relation.
+
+        Parameters
+        ----------
+        mode : one of {'duffy', 'maccio_HI'}, optional
+            Which c-m relation to use. Default: 'duffy'.
+
+        Returns
+        -------
+        Concentration values, packed as [z,m].
+        """
         ms = self.ms
-        if mode=='duffy':
+        if mode == 'duffy':
             if self.mdef == 'mean':
                 A = self.p['duffy_A_mean']
                 alpha = self.p['duffy_alpha_mean']
@@ -212,9 +252,15 @@ class HaloModel(Cosmology):
                 A = self.p['duffy_A_vir']
                 alpha = self.p['duffy_alpha_vir']
                 beta = self.p['duffy_beta_vir']
-            return duffy_concentration(ms[None,:],self.zs[:,None],A,alpha,beta,self.h)
+            return duffy_concentration(
+                ms[None, :], self.zs[:, None], A, alpha, beta, self.h
+            )
+        elif mode == 'maccio_HI':
+            return maccio_HI_concentration(ms[None, :], self.zs[:, None])
         else:
-            raise NotImplementedError
+            raise NotImplementedError(
+                "Concentration-mass relation %s not implemented!" % mode
+            )
 
     def get_nzm(self):
         sigma2 = self.sigma2
@@ -474,7 +520,7 @@ class HaloModel(Cosmology):
         ukouts : array_like
             Output Fourier-space profiles, packed as [z,m,k].
         """
-        if name not in ["padmanabhan17":
+        if name not in ["padmanabhan17"]:
             raise NotImplementedError("HI profile %s not implemented!" % name)
 
         if not ignore_existing and name in self.uk_profiles.keys():
@@ -487,7 +533,7 @@ class HaloModel(Cosmology):
 
             if not numeric:
                 # Halo concentrations, packed as [z,m]
-                con = self.concentration()
+                con = self.concentration(mode="maccio_HI")
                 # Halo masses, packed as [m]
                 ms = self.ms
                 # Virial radii, packed as [z,m]

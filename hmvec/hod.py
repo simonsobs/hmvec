@@ -2625,13 +2625,17 @@ class Padmanabhan17_HOD21cm(HOD21cm):
         mh = 10 ** log10mhalo[None, :]
         vc = (self._G_NEWTON * mh / self._rvir(mh, self.zs[:, None])) ** 0.5
 
+        # Below, we've added an ad hoc factor of 1.2 to the velocity factor in the
+        # exponential to make the results match Figure 6 of 1611.06235. The discrepancy
+        # may be due to different definitions of the virial radius or velocity (the
+        # paper doesn't give explicit expressions).
         M_HI = (
             self.p["HIhod_Padmanabhan17_alpha"]
             * self.f_Hc
             * mh
             * (mh * self.params["H0"] / 100 / 1e11)
             ** self.p["HIhod_Padmanabhan17_beta"]
-            * np.exp(-((10 ** self.p["HIhod_Padmanabhan17_log10vc0"] / vc) ** 3))
+            * np.exp(-((10 ** self.p["HIhod_Padmanabhan17_log10vc0"] / vc * 1.2) ** 3))
         )
 
         return M_HI
