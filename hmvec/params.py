@@ -65,6 +65,8 @@ default_params = {
     'electron_pressure_profile_integral_xmax':20,
     'battaglia_gas_gamma':-0.2,
     'battaglia_gas_family': 'AGN',
+    'HI_integral_numxs': 40000,
+    'HI_integral_xmax': 200,
 
     'battaglia_pres_gamma' : -0.3,
     'battaglia_pres_alpha' : 1.,
@@ -219,4 +221,10 @@ default_params = {
     'hod_Harikane17_log10Msat': 14.23,
     'hod_Harikane17_beta': 14.23 - 12.22,
     'hod_Harikane17_alpha': 1.0,
+
+    # Padmanabhan17 HI mass-halo mass relation
+    'HIhod_Padmanabhan17_alpha': 0.09,
+    'HIhod_Padmanabhan17_log10vc0': 1.56,
+    'HIhod_Padmanabhan17_beta': -0.58,
+    'HIhod_Padmanabhan17_gamma': 1.45,
 }

@@ -1,7 +1,7 @@
 import sys,os
 import numpy as np
 from scipy.special import erf
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, RectBivariateSpline
 import camb
 from camb import model
 import numpy as np
@@ -444,6 +444,67 @@ class HaloModel(Cosmology):
             self.uk_profiles[name] = ukouts.copy()
 
         return self.ks,ukouts
+
+    def add_HI_profile(
+        self, name, numeric=False, nxs=None, xmax=None, ignore_existing=False
+    ):
+        """Precompute and store Fourier transform of HI density profile.
+
+        Parameters
+        ----------
+        name : one of {"padmanabhan17"}, optional
+            Name for HI profile. Default: "padmanabhan17".
+        numeric : bool, optional
+            Whether to use analytical form of Fourier-space profile (False), or evaluate
+            FFT of position-space profile (True). Default: False.
+        nxs : integer, optional
+            Number of radial samples to use for FFT, linearly spaced from 0 to xmax.
+            If not specified, value taken from "HI_integral_numxs" entry of params dict.
+        xmax : float, optional
+            Maximum dimensionless radius to use in FFT, scaled accordingly for a given
+            profiles (e.g. for padmanabhan17, x = r / r_s). If not specified, value
+            taken from "HI_integral_xmax" entry of params dict.
+        ignore_existing : bool, optional
+            Whether to overwrite existing profile with given name. Default: False
+
+        Returns
+        -------
+        ks : array_like
+            Array of k values (in Mpc^-1) that u(k) is evaluated at.
+        ukouts : array_like
+            Output Fourier-space profiles, packed as [z,m,k].
+        """
+        if name not in ["padmanabhan17":
+            raise NotImplementedError("HI profile %s not implemented!" % name)
+
+        if not ignore_existing and name in self.uk_profiles.keys():
+            raise ValueError("Profile %s already exists!" % name)
+
+        if nxs is None: nxs = self.p["HI_integral_numxs"]
+        if xmax is None: xmax = self.p["HI_integral_xmax"]
+
+        if name == "padmanabhan17":
+
+            if not numeric:
+                # Halo concentrations, packed as [z,m]
+                con = self.concentration()
+                # Halo masses, packed as [m]
+                ms = self.ms
+                # Virial radii, packed as [z,m]
+                rvir = self.rvir(ms[None, :], self.zs[:, None])
+                # Scale radii, packed as [z,m]
+                rs = rvir / con
+
+                # Eq. 7 of 1611.06235, normalized to unity at k=0
+                x = self.ks[None, None, :] * rs[:, :, None] * (1 + self.zs[:,None,None])
+                self.uk_profiles[name] = (1 + x ** 2) ** -2
+
+            else:
+                raise NotImplementedError(
+                    "Numeric transform of Padmanabhan17 HI profile not implemented!"
+                )
+
+        return self.ks, self.uk_profiles[name]
 
     def add_hod(
         self,
@@ -1900,6 +1961,70 @@ def rhoscale_nfw(mdelta,rdelta,cdelta):
 def rho_nfw_x(x,rhoscale): return rhoscale/x/(1.+x)**2.
 
 def rho_nfw(r,rhoscale,rs): return rho_nfw_x(r/rs,rhoscale)
+
+def rhoHI_vn18(r, alphastar, r0, rho0=None):
+    """Compute position-space HI density profile from Villaescusa-Navarro et al. 2018
+    (1804.09180).
+
+    Parameters
+    ----------
+    r : array_like
+        1d array of radii to evaluate at, in Mpc.
+    alphastar, r0 : array_like
+        Arrays of alpha_* and r_0 parameters to evaluate at. Typically, these
+        will be evaluated at different redshifts and/or halo masses.
+    rho0 : array_like, optional
+        1d array of rho_0 parameter to evaluate at, with same shape as alphastar and r0.
+        If not specified, we use rho_0=1.
+
+    Returns
+    -------
+    rho : array_like
+        rho_HI values, packed as [r,...]).
+    """
+    # TODO: there must be a better way to do this...
+    r_newshape = (len(r), ) + tuple(np.ones(len(alphastar.shape), dtype=int))
+    r = r.reshape(r_newshape)
+
+    rho = r ** -alphastar[None, ...] * np.exp(-r0[None, ...] / r)
+
+    if rho0 is not None:
+        rho *= rho0[None, ...]
+
+    return rho
+
+
+def rhoHI_vn18_x(x, alphastar, r0, rho0=None):
+    """Compute position-space HI density profile from Villaescusa-Navarro et al. 2018
+    (1804.09180), as function of x=r/r0.
+
+    Parameters
+    ----------
+    x : array_like
+        1d array of dimensionless to evaluate at.
+    alphastar, r0 : array_like
+        1d arrays of alpha_* and r_0 parameters to evaluate at. Typically, these
+        will be evaluated at different halo masses.
+    rho0 : array_like, optional
+        1d array of rho_0 parameter to evaluate at, with same shape as alphastar and r0.
+        If not specified, we use rho_0=1.
+
+    Returns
+    -------
+    rho : array_like
+        rho_HI values, packed as [x,...].
+    """
+    # TODO: there must be a better way to do this...
+    x_newshape = (len(x), ) + tuple(np.ones(len(alphastar.shape), dtype=int))
+    x = x.reshape(x_newshape)
+
+    rho = (x * r0[None, ...]) ** -alphastar[None, ...] * np.exp(-1 / x)
+
+    if rho0 is not None:
+        rho *= rho0[None, ...]
+
+    return rho
+
 
 def mdelta_from_mdelta(M1,C1,delta_rhos1,delta_rhos2,vectorized=True):
     """

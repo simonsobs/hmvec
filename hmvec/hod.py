@@ -2,6 +2,7 @@ from .params import default_params
 from . import utils
 from .cosmology import Cosmology
 from .mstar_mhalo import Mstellar_halo, Mhalo_stellar
+from .hmvec import R_from_M
 
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
@@ -2349,3 +2350,288 @@ class Harikane17beta_HOD(Harikane17Base_HOD):
         Ns = Ns.T
 
         return Ns
+
+
+class HOD21cm(HODBase):
+    """Base class for HOD for 21cm intensity mapping.
+
+    We map HI HODs onto the galaxy number density HOD formalism defined in HODBase by:
+        - setting N_c to 0
+        - setting N_s to to HI mass-halo mass relation M_HI(M_h)
+        - always assuming the "minimally-correlated" assumption about centrals and
+          satellites
+        - setting n_gal to rho_HI.
+    The second and fourth choices result in the N-halo terms having the same dimensions
+    as for the galaxy HOD, since any factor of N_s is always accompanied by 1/rho_HI.
+
+    The following methods must be defined by subclasses:
+        - avg_rhoHI
+    Also, __init__ method of subclass must call init_mean_occupations() as final step.
+    """
+
+    def M_HI(self, log10mhalo, z):
+        pass
+
+    def avg_Nc(self, log10mhalo, z, **kwargs):
+        """<N_c | m_h>."""
+        return np.zeros((len(z), len(log10mhalo)), dtype=np.float64)
+
+    def avg_Ns(self, log10mhalo, z, **kwargs):
+        """<N_s | m_h>"""
+        return self.M_HI(log10mhalo, z)
+
+    def avg_NsNsm1(self, Nc, Ns, corr="min"):
+        """<N_s (N_s - 1) | m_h>.
+
+        Parameters
+        ----------
+        Nc, Ns : array_like
+            Arrays of Nc and Ns, packed as [z,m].
+        corr : string, optional
+            Ignored in 21cm HOD.
+
+        Returns
+        -------
+        NsNsm1 : array_like
+            N_s (N_s - 1) term, packed as [z,m].
+        """
+        return Ns ** 2.0
+
+    def avg_NsNsm1Nsm2(self, Nc, Ns, corr="min"):
+        """<N_s (N_s - 1) (N_s - 2) | m_h>.
+
+        Parameters
+        ----------
+        Nc, Ns : array_like
+            Arrays of Nc and Ns, packed as [z,m].
+        corr : string, optional
+            Ignored in 21cm HOD.
+
+        Returns
+        -------
+        NsNsm1Nsm2 : array_like
+            N_s (N_s - 1) (N_s - 2) term, packed as [z,m].
+        """
+        return Ns ** 3.0
+
+    def avg_NcNs(self, Nc, Ns, corr="min"):
+        """<N_c N_s | m_h>.
+
+        Parameters
+        ----------
+        Nc, Ns : array_like
+            Arrays of Nc and Ns, packed as [z,m].
+        corr : string, optional
+            Ignored in 21cm HOD.
+
+        Returns
+        -------
+        NcNs : array_like
+            N_c N_s term, packed as [z,m].
+        """
+        return Nc
+
+    def avg_NcNsNsm1(self, Nc, Ns, corr="max"):
+        """<N_c N_s (N_s - 1) | m_h>.
+
+        Parameters
+        ----------
+        Nc, Ns : array_like
+            Arrays of Nc and Ns, packed as [z,m].
+        corr : string, optional
+            Ignored in 21cm HOD.
+
+        Returns
+        -------
+        NcNsNsm1 : array_like
+            N_c N_s (N_s - 1) term, packed as [z,m].
+        """
+        return Nc
+
+
+class VN18_HOD21cm(HOD21cm):
+    """21cm HOD with M_HI(M_h) relation from Villaescusa-Navarro et al. 2018
+    (1804.09180).
+    """
+
+    # z values for FoF-SO M_HI-M_h relation from paper
+    _MHI_MH_Z = np.array(
+        [
+            0.0,
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+        ]
+    )
+    # alpha values
+    _MHI_MH_ALPHA = np.array(
+        [
+            0.16,
+            0.43,
+            0.51,
+            0.69,
+            0.61,
+            0.59,
+        ]
+    )
+    # M_0 values, converted from h^-1 Msun to Msun
+    _MHI_MH_M0 = np.array([4.1e10, 1.8e10, 1.5e10, 3.7e9, 4.5e9, 4.1e9]) / 0.67
+    # M_min values, converted from h^-1 Msun to Msun
+    _MHI_MH_MMIN = np.array([2.4e12, 8.6e11, 4.6e11, 9.6e10, 7.6e10, 5.4e10]) / 0.67
+
+    def __init__(
+        self,
+        zs,
+        ms,
+        params=None,
+        param_override=None,
+        halofit=None,
+        corr="max",
+        nzm=None,
+        mthresh=None,
+        ngal=None,
+    ):
+
+        # Run base initialization
+        super().__init__(
+            zs,
+            ms,
+            params=params,
+            param_override=param_override,
+            halofit=halofit,
+            corr=corr,
+            nzm=nzm,
+        )
+
+        # Make linear interpolating functions for M_HI-M_h model parameters
+        self._alpha = interp1d(
+            self._MHI_MH_Z, self._MHI_MH_ALPHA, bounds_error=False, fill_value=0.0
+        )
+        self._M0 = interp1d(
+            self._MHI_MH_Z, self._MHI_MH_M0, bounds_error=False, fill_value=0.0
+        )
+        self._Mmin = interp1d(
+            self._MHI_MH_Z, self._MHI_MH_MMIN, bounds_error=False, fill_value=1.0
+        )
+
+        # Finally, compute halo occupations
+        self.init_mean_occupations()
+
+    @property
+    def hod_params(self):
+        return []
+
+    def M_HI(self, log10mhalo, z):
+        """Compute M_HI-m_h relation.
+
+        Parameters
+        ----------
+        log10mhalo : array_like
+            Array of log10(m_h) values.
+        z : array_like
+            Array of redshifts.
+
+        Returns
+        -------
+        M_HI : array_like
+            Computed M_HI values in units of Msun, packed as [z,m].
+        """
+        x = 10 ** log10mhalo[None, :] / self._Mmin(z)[:, None]
+        M_HI = (
+            self._M0(z)[:, None] * x ** self._alpha(z)[:, None] * np.exp(-(x ** -0.35))
+        )
+
+        return M_HI
+
+
+class Padmanabhan17_HOD21cm(HOD21cm):
+    """21cm HOD with M_HI(M_h) relation from Padmanabhan et al. 2017 (1611.06235)."""
+
+    # From Wikipedia: G = 4.3e-3 pc Msun^-1 km^2 s^-2.
+    # Below value is converted to Mpc Msun^-1 km^2 s^-2
+    _G_NEWTON = 4.3e-3 * 1e-6
+
+    def __init__(
+        self,
+        zs,
+        ms,
+        params=None,
+        param_override=None,
+        halofit=None,
+        corr="max",
+        nzm=None,
+        mthresh=None,
+        ngal=None,
+    ):
+
+        # Run base initialization
+        super().__init__(
+            zs,
+            ms,
+            params=params,
+            param_override=param_override,
+            halofit=halofit,
+            corr=corr,
+            nzm=nzm,
+        )
+
+        # Formula from below Eq. 1 in 1804.10627
+        self.f_Hc = (
+            self.params["ombh2"]
+            * (1 - self.params["Yp"])
+            / (self.params["ombh2"] + self.params["omch2"])
+        )
+
+        # Finally, compute halo occupations
+        self.init_mean_occupations()
+
+    @property
+    def hod_params(self):
+        return [
+            "HIhod_Padmanabhan17_alpha",
+            "HIhod_Padmanabhan17_log10vc0",
+            "HIhod_Padmanabhan17_beta",
+            "HIhod_Padmanabhan17_gamma",
+        ]
+
+    def _deltav(self, z):
+        # Copy-pasted from hmvec.py - TODO: move from hmvec.py to cosmology.py
+        x = self.omz(z) - 1.0
+        d = 18.0 * np.pi ** 2.0 + 82.0 * x - 39.0 * x ** 2.0
+        return d
+
+    def _rvir(self, m, z):
+        # Copy-pasted from hmvec.py - TODO: change scope of rvir() so we only need it
+        # in one place
+        return R_from_M(m, self.rho_critical_z(z), delta=self._deltav(z))
+
+    def M_HI(self, log10mhalo, z):
+        """Compute M_HI-m_h relation.
+
+        Parameters
+        ----------
+        log10mhalo : array_like
+            Array of log10(m_h) values.
+        z : array_like
+            Array of redshifts.
+
+        Returns
+        -------
+        M_HI : array_like
+            Computed M_HI values in units of Msun, packed as [z,m].
+        """
+        mh = 10 ** log10mhalo[None, :]
+        vc = (self._G_NEWTON * mh / self._rvir(mh, self.zs[:, None])) ** 0.5
+
+        M_HI = (
+            self.p["HIhod_Padmanabhan17_alpha"]
+            * self.f_Hc
+            * mh
+            * (mh * self.params["H0"] / 100 / 1e11)
+            ** self.p["HIhod_Padmanabhan17_beta"]
+            * np.exp(-((10 ** self.p["HIhod_Padmanabhan17_log10vc0"] / vc) ** 3))
+        )
+
+        return M_HI
