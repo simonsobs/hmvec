@@ -19,7 +19,6 @@ import scipy
 from scipy.integrate import simps
 from scipy.integrate import quad
 import time
-# from matplotlib import pyplot as plt
 """
 
 General vectorized FFT-based halo model implementation
@@ -91,7 +90,7 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
 
 class HaloModel(Cosmology):
     def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
-                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
+                 fnl=0., halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False):
         self.zs = np.asarray(zs)
         self.ks = ks
         Cosmology.__init__(self,params,halofit)
@@ -102,6 +101,7 @@ class HaloModel(Cosmology):
         self.hods = {}
         self.cib_params = {}
         self.flux_cuts = {}
+        self.fnl = fnl
 
         # Mass function
         if ms is not None: self.init_mass_function(ms)
@@ -164,25 +164,37 @@ class HaloModel(Cosmology):
         elif self.mode=="tinker":
             nus = deltac/np.sqrt(sigma2)
             fnus = tinker.f_nu(nus,self.zs[:,None])
-            # return nus, fnus                 # debugging    
             return nus * fnus # note that f is actually nu*fnu !
         else:
             raise NotImplementedError
 
     def get_bh(self):
         sigma2 = self.sigma2
-        deltac = self.p['st_deltac']
+        
+        #Gaussian Linear Halo Bias
         if self.mode=="sheth-torman":
+            deltac = self.p['st_deltac']
             A = self.p['st_A']
             a = self.p['st_a']
             p = self.p['st_p']
-            return 1. + (1./deltac)*((a*deltac**2./sigma2)-1.) + (2.*p/deltac)/(1.+(a*deltac**2./sigma2)**p)
+            bh_gauss = 1. + (1./deltac)*((a*deltac**2./sigma2)-1.) + (2.*p/deltac)/(1.+(a*deltac**2./sigma2)**p)
         elif self.mode=="tinker":
+            deltac = tinker.constants['deltac']
             nus = deltac/np.sqrt(sigma2)
-            # return nus, tinker.bias(nus)          # debugging
-            return tinker.bias(nus)
+            bh_gauss = tinker.bias(nus)
         else:
             raise NotImplementedError
+        
+        #Non-Gaussian Contribution
+        # from Moritz Munchmeyer et al. : https://arxiv.org/pdf/1810.13424.pdf
+        tk = self.Tk(self.ks)
+        Dz = self.D_growth(1/(1+self.zs))
+        H0 = self.h_of_z(0.)
+        alpha = 2 * self.ks**2 * tk[None, None, ...] * Dz[..., None, None] / (3 * self.om0 * H0**2)
+        betaf = 2 * deltac * (bh_gauss - 1) 
+        bh_ng = self.fnl * betaf[..., None] / alpha
+
+        return bh_gauss[..., None] + bh_ng
 
     def concentration(self,mode='duffy'):
         ms = self.ms
@@ -458,12 +470,12 @@ class HaloModel(Cosmology):
         self.hods[name]['central_profile'] = central_profile_name
         self.hods[name]['log10mthresh'] = np.log10(mthresh[:,None])
 
-    def set_cibParams(self, name, **params):
+    def set_cibParams(self, name=None, **params):
         """
         Values for parameters of CIB model. To use a pre-existing set of parameters, simply specify 'name'. To tweak a pre-existing set, specify the preset and add the different parameter values as keyword arguments.
         
         Required Arguments:
-        name [string] : Name of parameter set. Presets: 'planck13' and 'vierro'
+        name [string] : Name of parameter set. Presets: 'planck13' and 'viero'
 
         Keyword Arguments:
         alpha [float] : SED - z evolution of dust temperature 
@@ -486,8 +498,8 @@ class HaloModel(Cosmology):
             self.cib_params['Td_o'] = 24.4
             self.cib_params['logM_eff'] = 12.6
             self.cib_params['var'] = 0.5
-            self.cib_params['L_o'] = 5e-8
-        elif name.lower() == 'vierro':      # Vierro et al
+            self.cib_params['L_o'] = 6.4e-8
+        elif name.lower() == 'viero':      # Viero et al
             self.cib_params['alpha'] = 0.2
             self.cib_params['beta'] = 1.6
             self.cib_params['gamma'] = 1.7      # not in Viero, so using Planck13
@@ -495,7 +507,9 @@ class HaloModel(Cosmology):
             self.cib_params['Td_o'] = 20.7
             self.cib_params['logM_eff'] = 12.3
             self.cib_params['var'] = 0.3
-            self.cib_params['L_o'] = 5e-8
+            self.cib_params['L_o'] = 6.4e-8
+        elif name==None and len(params)!=8:
+            raise Exception("New sets of parameters require exactly 8 parameters")
         else:
             raise NotImplementedError("Need valid parameter set name")    
 
@@ -534,8 +548,8 @@ class HaloModel(Cosmology):
     def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
 
     def get_bg(self,Nc,Ns,ngal):
-        integrand = self.nzm * (Nc+Ns) * self.bh
-        return np.trapz(integrand,self.ms,axis=-1)/ngal
+        integrand = self.nzm[..., None] * (Nc+Ns) * self.bh
+        return np.trapz(integrand,self.ms,axis=-2)/ngal
 
 
     def _get_hod_common(self,name):
@@ -581,7 +595,7 @@ class HaloModel(Cosmology):
             satmf (str, optional): Subhalo mass function. Defaults to 'Tinker'.
 
         Returns:
-            [array]: flux on whole z,m,k grid
+            (array): flux observed from source on z,m,k grid
         """
         chis = self.comoving_radial_distance(self.zs)
         fcen = 0.0
@@ -752,13 +766,13 @@ class HaloModel(Cosmology):
         if len(freq) > 2:
             raise ValueError('Only 1 pair of frequencies to cross at a time')
         elif len(freq) == 1  and  freq.ndim == 1:
-            freqarray = np.array([freq, freq])
+            return np.array([freq, freq])
         elif len(freq) == 1  and  freq.ndim == 2:
-            freqarray = np.array([freq[0], freq[0]])
+            return np.array([freq[0], freq[0]])
         elif freq.ndim != 2:
             raise ValueError('Need a 2D array for the frequency')
-
-        return freqarray
+        else:
+            return freq
     
     
     """
@@ -776,7 +790,7 @@ class HaloModel(Cosmology):
         if name2 is None: name2 = name1
         
         if name1.lower() == 'cib' or name2.lower() == 'cib':
-            nu_obs = _freqtest(nu_obs)
+            nu_obs = self._freqtest(nu_obs)
             return self.get_power_1halo(name1,name2, nu_obs, subhalos, cibinteg, satmf) + self.get_power_2halo(name1,name2,verbose, nu_obs, subhalos, cibinteg, satmf)
         else:
             return self.get_power_1halo(name1,name2) + self.get_power_2halo(name1,name2,verbose)
@@ -792,7 +806,7 @@ class HaloModel(Cosmology):
         '''
         name2 = name if name2 is None else name2
         if name.lower() == 'cib' or name2.lower() == 'cib':
-            nu_obs = _freqtest(nu_obs)
+            nu_obs = self._freqtest(nu_obs)
 
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
@@ -816,7 +830,7 @@ class HaloModel(Cosmology):
                     square_term *= self._get_matter(nm)
                 elif nm in pnames:
                     square_term *= self._get_pressure(nm)
-                elif name.lower()=='cib':
+                elif nm.lower()=='cib':
                     square_term *= self._get_cib(nu_obs[0], subhalos, cibinteg, satmf)
                 else: raise ValueError
 
@@ -834,10 +848,10 @@ class HaloModel(Cosmology):
         '''
         name2 = name if name2 is None else name2
         if name.lower() == 'cib' or name2.lower() == 'cib':
-            nu_obs = _freqtest(nu_obs)
+            nu_obs = self._freqtest(nu_obs)
             
         def _2haloint(iterm):
-            integrand = self.nzm[...,None] * iterm * self.bh[...,None]
+            integrand = self.nzm[...,None] * iterm * self.bh
             integral = np.trapz(integrand,ms,axis=-2)
             return integral
 
@@ -889,7 +903,7 @@ class HaloModel(Cosmology):
         kennicutt = 1.7e-10     #solar mass / year / solar luminosity
 
         if freq_range is None:
-            freq_range = np.array([300e9, 37.5e12])
+            freq_range = np.array([300e9, 37.5e12])     #8-1000 microns
         
         sfr = kennicutt * (self.get_fcen(freq_range) + self.get_fsat(freq_range, satmf=satmf)) * 4*np.pi
 
