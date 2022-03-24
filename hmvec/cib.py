@@ -283,10 +283,32 @@ def luminosity(z, M, Nks, nu, params, nuframe='obs'):
 
 if __name__ == "__main__":
     #Testing
-    lamdarange = np.array([8.0e-6, 1000.0e-6])
-    nurange = 3.0e8 / lamdarange
-    nurange = np.array([545.])*1e9
-    redshifts = np.linspace(0.01, 6, 200)
+    # lamdarange = np.array([8.0e-6, 1000.0e-6])
+    # nurange = 3.0e8 / lamdarange
+    # nurange = np.array([545.])*1e9
+    
+    #Setup Grid
+    Nz = 100                                 # num of redshifts
+    Nm = 500                                 # num of masses
+    Nk = 1000                                # num of wavenumbers
+    redshifts = np.linspace(0.01, 6, Nz)             
+    masses = np.geomspace(1.0e10, 1.0e16, Nm)          
+    ks = np.geomspace(1.0e-3, 100.0, Nk)              # wavenumbers
+    
+    cib_params = {}
+    cib_params['alpha'] = 0.36
+    cib_params['beta'] = 1.75
+    cib_params['gamma'] = 1.7
+    cib_params['delta'] = 3.6
+    cib_params['Td_o'] = 24.4
+    cib_params['logM_eff'] = 12.6
+    cib_params['var'] = 0.5
+    cib_params['L_o'] = 6.4e-8
+    
     # redshifts = np.array([2.0])
-    sed = capitalTheta(nurange, 'obs', redshifts, alpha=0.36, beta=1.75, gamma=1.7, T_o=24.4, plot=True)
+    # sed = capitalTheta(nurange, 'obs', redshifts, alpha=0.36, beta=1.75, gamma=1.7, T_o=24.4, plot=True)
     # print(sed)
+
+    L = luminosity(redshifts, masses, Nk, [545e9], cib_params)
+    np.save('lum545', L)
+    

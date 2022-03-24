@@ -473,7 +473,7 @@ class HaloModel(Cosmology):
         Values for parameters of CIB model. To use a pre-existing set of parameters, simply specify 'name'. To tweak a pre-existing set, specify the preset and add the different parameter values as keyword arguments. To use a completely newly set of parameters, don't give a name and give all of the new parameters.
         
         Required Arguments:
-        name [string] : Name of parameter set. Presets: 'planck13' and 'vierro'
+        name [string] : Name of parameter set. Presets: 'planck13' and 'viero'
 
         Keyword Arguments:
         alpha [float] : SED - z evolution of dust temperature 
@@ -497,7 +497,7 @@ class HaloModel(Cosmology):
             self.cib_params['logM_eff'] = 12.6
             self.cib_params['var'] = 0.5
             self.cib_params['L_o'] = 6.4e-8
-        elif name.lower() == 'vierro':      # Vierro et al
+        elif name.lower() == 'viero':      # Viero et al
             self.cib_params['alpha'] = 0.2
             self.cib_params['beta'] = 1.6
             self.cib_params['gamma'] = 1.7      # not in Viero, so using Planck13
@@ -880,10 +880,12 @@ class HaloModel(Cosmology):
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
     
-    def get_sfrd(self, freq_range):
+    def get_sfrd(self, freq_range=[8,1000]):
         kennicutt = 1.7e-10
+        freq_range = np.array(freq_range)
+        freq_range = 3.0e8 / (freq_range * 1e-6)
 
-        sfr = kennicutt * cib.luminosity(self.zs, self.ms, len(self.ks), freq_range, 'rest', **self.cib_params)
+        sfr = kennicutt * cib.luminosity(self.zs, self.ms, len(self.ks), freq_range, self.cib_params)
 
         return np.trapz(self.nzm * sfr[:,:,0], self.ms, axis=-1)
         
