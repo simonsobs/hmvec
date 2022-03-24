@@ -9,6 +9,7 @@ import astropy.constants as const
 from . import tinker,utils
 from .cosmology import Cosmology
 from . import cib
+import warnings
 
 import scipy.constants as constants
 from .params import default_params, battaglia_defaults
@@ -100,6 +101,7 @@ class HaloModel(Cosmology):
         self.ms = ms
         self.hods = {}
         self.cib_params = {}
+        self.flux_cuts = {}
 
         # Mass function
         if ms is not None: self.init_mass_function(ms)
@@ -456,9 +458,9 @@ class HaloModel(Cosmology):
         self.hods[name]['central_profile'] = central_profile_name
         self.hods[name]['log10mthresh'] = np.log10(mthresh[:,None])
 
-    def set_cibParams(self, name=None, **params):
+    def set_cibParams(self, name, **params):
         """
-        Values for parameters of CIB model. To use a pre-existing set of parameters, simply specify 'name'. To tweak a pre-existing set, specify the preset and add the different parameter values as keyword arguments. To use a completely newly set of parameters, don't give a name and give all of the new parameters.
+        Values for parameters of CIB model. To use a pre-existing set of parameters, simply specify 'name'. To tweak a pre-existing set, specify the preset and add the different parameter values as keyword arguments.
         
         Required Arguments:
         name [string] : Name of parameter set. Presets: 'planck13' and 'vierro'
@@ -494,8 +496,6 @@ class HaloModel(Cosmology):
             self.cib_params['logM_eff'] = 12.3
             self.cib_params['var'] = 0.3
             self.cib_params['L_o'] = 5e-8
-        elif name==None and len(params)!=8:
-            raise Exception("New sets of parameters require exactly 8 parameters")
         else:
             raise NotImplementedError("Need valid parameter set name")    
 
@@ -505,6 +505,31 @@ class HaloModel(Cosmology):
                 raise ValueError(f'"{key}" is not a valid CIB parameter. Note that parameter names are case sensitive') 
             self.cib_params[key] = params[key]
 
+    def set_fluxcuts(self, name, freqcuts=None):
+        """
+        Sets the flux cuts from a specific experiment. Can use a preset, modify a preset, or give your own set of flux cuts entirely (in the case of the latter, you still must give a 'name').
+
+        Required Arguments:
+            name [str]: Name of a preset of flux cuts
+
+        Keyword Arguments:
+            freqcuts [dict] : Flux cuts. Keys are the frequencies and values are the flux cuts in Jy.
+        """
+        #Preset Flux Cuts
+        if name.lower() == 'planck13':        # Planck 2013 in GHz
+            self.flux_cuts[100] = 400e-3          # Jy
+            self.flux_cuts[143] = 350e-3
+            self.flux_cuts[217] = 225e-3
+            self.flux_cuts[353] = 315e-3
+            self.flux_cuts[545] = 350e-3
+            self.flux_cuts[857] = 710e-3
+            self.flux_cuts[3000] = 1000e-3
+        else:
+            warnings.warn("There's no fl1ux cut preset with that name")
+
+        #Specific Cuts
+        if freqcuts is not None:
+            self.flux_cuts.update(freqcuts)
 
     def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
 
@@ -565,9 +590,9 @@ class HaloModel(Cosmology):
 
         #Luminosities
         if cenflag:
-            fcen = self._get_fcen(nu_obs)
+            fcen = self.get_fcen(nu_obs)
         if satflag:
-            fsat = self._get_fsat(nu_obs, satmf=satmf)
+            fsat = self.get_fsat(nu_obs, satmf=satmf)
         assert cenflag==True or satflag==True, "Pick a flux source: centrals and/or satellites"
 
         #Flux
@@ -576,29 +601,17 @@ class HaloModel(Cosmology):
 
         return np.einsum('ijk,i->ijk', ftot, decay)
 
-
-    def _get_fcen(self, nu):
+    def get_fcen(self, nu):
         '''Function of M and z, but defined over whole z,M,k grid'''
         return cib.luminosity(self.zs, self.ms, len(self.ks), nu, self.cib_params) / (4.0*np.pi)
 
-        # Lcen = cib.luminosity(self.zs, self.ms, len(self.ks), nu) / (4.0*np.pi)
-        
-        # #Flux Cut
-        # maxflux
-        # prefactor = (1+self.zs) / (4*np.pi * self.comoving_radial_distance(zs)**2)
-        # flux = Lcen * prefactor[:, np.newaxis, np.newaxis]
-        # fmask = np.where(flux <= maxflux, 1, 0)
-
-        # return Lcen * fmask
-
-    def _get_fsat(self, freq, cibinteg='trap', satmf='Tinker'):
+    def get_fsat(self, freq, cibinteg='trap', satmf='Tinker'):
         '''Function of M and z, but defined over whole z,M,k grid'''
 
         def integ(m, M):
             return sdndm(m, M, satmf) * cib.capitalSigma(m, self.cib_params['logM_eff'], self.cib_params['var'])
 
         #Integrate Subhalo Masses
-#         import pdb; pdb.set_trace()
         Nsatm = len(self.ms) + 1
         Mmin = 1e10
         satms = np.geomspace(Mmin, self.ms, num=Nsatm, axis=-1)
@@ -607,7 +620,6 @@ class HaloModel(Cosmology):
         elif cibinteg.lower() == 'simps':
             fsat_m = simps(integ(satms, self.ms[...,None]), satms, axis=-1)
         else: raise NotImplementedError('Invalid subhalo integration method (cibinteg)')
-#         pdb.set_trace()
         
         #Get Redshift Dependencies
         a = self.cib_params['alpha']
@@ -625,12 +637,15 @@ class HaloModel(Cosmology):
 
         return fsat / (4.0*np.pi)
 
+    def _cut_flux(self, L, freq):
+        totflux = self.get_flux(freq)
+
     def _get_cib(self, freq, satflag=True, cibinteg='trap', satmf='Tinker'):
         '''Assumes central galaxies are at the center of the halo'''
         uhalo = self.uk_profiles['nfw']
-        fcen = self._get_fcen(freq)
+        fcen = self.get_fcen(freq)
         if satflag:
-            fsat = self._get_fsat(freq, cibinteg, satmf)
+            fsat = self.get_fsat(freq, cibinteg, satmf)
         else:
             fsat = 0.
         return fcen + uhalo*fsat
@@ -639,10 +654,10 @@ class HaloModel(Cosmology):
         '''Assumes central galaxies are at the center of the halo'''
         if satflag:
             uhalo = self.uk_profiles['nfw']
-            fcen1 = self._get_fcen(freq[0])
-            fcen2 = self._get_fcen(freq[1])
-            fsat1 = self._get_fsat(freq[0], cibinteg, satmf)
-            fsat2 = self._get_fsat(freq[1], cibinteg, satmf)
+            fcen1 = self.get_fcen(freq[0])
+            fcen2 = self.get_fcen(freq[1])
+            fsat1 = self.get_fsat(freq[0], cibinteg, satmf)
+            fsat2 = self.get_fsat(freq[1], cibinteg, satmf)
 
             return (fcen1*fsat2*uhalo) + (fcen2*fsat1*uhalo) + (fsat1*fsat2*uhalo*uhalo)
         else:
@@ -734,13 +749,13 @@ class HaloModel(Cosmology):
 
     def _freqtest(self, freq):
         """ Tests formatting of CIB frequencies """
-        if len(nu_obs) > 2:
+        if len(freq) > 2:
             raise ValueError('Only 1 pair of frequencies to cross at a time')
-        elif len(nu_obs) == 1  and  nu_obs.ndim == 1:
+        elif len(freq) == 1  and  freq.ndim == 1:
             freqarray = np.array([freq, freq])
-        elif len(nu_obs) == 1  and  nu_obs.ndim == 2:
+        elif len(freq) == 1  and  freq.ndim == 2:
             freqarray = np.array([freq[0], freq[0]])
-        elif nu_obs.ndim != 2:
+        elif freq.ndim != 2:
             raise ValueError('Need a 2D array for the frequency')
 
         return freqarray
@@ -870,10 +885,13 @@ class HaloModel(Cosmology):
         return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
 
     
-    def get_sfrd(self, freq_range):
-        kennicutt = 1.7e-10
+    def get_sfrd(self, freq_range=None, satmf='Tinker'):
+        kennicutt = 1.7e-10     #solar mass / year / solar luminosity
 
-        sfr = kennicutt * cib.luminosity(self.zs, self.ms, len(self.ks), freq_range, 'rest', **self.cib_params)
+        if freq_range is None:
+            freq_range = np.array([300e9, 37.5e12])
+        
+        sfr = kennicutt * (self.get_fcen(freq_range) + self.get_fsat(freq_range, satmf=satmf)) * 4*np.pi
 
         return np.trapz(self.nzm * sfr[:,:,0], self.ms, axis=-1)
         
