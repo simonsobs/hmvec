@@ -9,4 +9,5 @@ kszSignal.py
 specs.ini
 commented.py
 .vscode/
-.ipynb_checkpoints
+*.ipynb_checkpoints*
+*__pycache__*
