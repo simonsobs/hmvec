@@ -251,7 +251,7 @@ class kSZ(HaloModel):
         X_max for electron profile in FFT. Default: None.
     skip_hod : bool, optional
         Skip computation of HOD to save time. Default: False.
-    hod_name : str, optional,
+    hod_name : str, optional
         Internal identifier for galaxy HOD. Default: 'g'.
     hod_family : hod.HODBase
         Name of HOD class to use for galaxy HOD. Default: hod.Leauthaud12_HOD.
@@ -259,6 +259,8 @@ class kSZ(HaloModel):
         Correlations between centrals and satellites in HOD. Default: 'max'.
     **hod_param_override : dict, optional
         Dictionary of override parameters for electron profile. Default: None.
+    satellite_profile_name : str, optional
+        Internal identifier for satellite galaxy profile. Default: 'nfw'.
     verbose : bool, optional
         Print progress of computations. Default: False.
     b1 : float, optional
@@ -301,6 +303,7 @@ class kSZ(HaloModel):
         hod_family=hod.Leauthaud12_HOD,
         hod_corr="max",
         hod_param_override=None,
+        satellite_profile_name="nfw",
         verbose=False,
         b1=None,
         b2=None,
@@ -382,13 +385,23 @@ class kSZ(HaloModel):
                 ngal_for_hod = None
             else:
                 ngal_for_hod = self.ngals_mpc3
+
+            if satellite_profile_name != 'nfw':
+                try:
+                    self.add_HI_profile(name=satellite_profile_name)
+                except:
+                    raise ValueError(
+                        "Couldn't initialize satellite profile %s"
+                        % satellite_profile_name
+                    )
+
             self.add_hod(
                 hod_name,
                 family=hod_family,
                 mthresh=mthreshs_override,
                 ngal=ngal_for_hod,
                 corr=hod_corr,
-                satellite_profile_name='nfw',
+                satellite_profile_name=satellite_profile_name,
                 central_profile_name=None,
                 ignore_existing=False,
                 param_override=hod_param_override,
@@ -1077,6 +1090,7 @@ def get_ksz_auto_squeezed(
     electron_profile_xmax=None,
     hod_family=hod.Leauthaud12_HOD,
     hod_corr="max",
+    satellite_profile_name="nfw",
     n_int = 100,
     verbose=False,
     template=False,
@@ -1153,6 +1167,8 @@ def get_ksz_auto_squeezed(
         Name of HOD class to use for galaxy HOD. Default: hod.Leauthaud12_HOD.
     hod_corr : {'max', 'min'}, optional
         Correlations between centrals and satellites in HOD. Default: 'max'.
+    satellite_profile_name : str, optional
+        Internal identifier for satellite galaxy profile. Default: 'nfw'.
     n_int : int, optional
         Number of samples to use in Limber integral. Default: 100.
     verbose : bool, optional
@@ -1249,6 +1265,7 @@ def get_ksz_auto_squeezed(
             electron_profile_family=electron_profile_family,
             hod_family=hod_family,
             hod_corr=hod_corr,
+            satellite_profile_name=satellite_profile_name,
             skip_electron_profile=False,
             electron_profile_param_override=params,
             electron_profile_nxs=electron_profile_nxs,
