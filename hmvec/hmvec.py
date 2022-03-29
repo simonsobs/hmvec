@@ -498,7 +498,7 @@ class HaloModel(Cosmology):
 
         Parameters
         ----------
-        name : one of {"padmanabhan17"}, optional
+        name : one of {"padmanabhan17", "vn18"}, optional
             Name for HI profile. Default: "padmanabhan17".
         numeric : bool, optional
             Whether to use analytical form of Fourier-space profile (False), or evaluate
@@ -520,7 +520,7 @@ class HaloModel(Cosmology):
         ukouts : array_like
             Output Fourier-space profiles, packed as [z,m,k].
         """
-        if name not in ["padmanabhan17"]:
+        if name not in ["padmanabhan17", "vn18"]:
             raise NotImplementedError("HI profile %s not implemented!" % name)
 
         if not ignore_existing and name in self.uk_profiles.keys():
@@ -541,13 +541,63 @@ class HaloModel(Cosmology):
                 # Scale radii, packed as [z,m]
                 rs = rvir / con
 
-                # Eq. 7 of 1611.06235, normalized to unity at k=0
+                # Eq. 7 of 1611.06235, normalized to unity at k=0.
+                # uk_profiles[name] is packed as [z,m,k]
                 x = self.ks[None, None, :] * rs[:, :, None] * (1 + self.zs[:,None,None])
                 self.uk_profiles[name] = (1 + x ** 2) ** -2
 
             else:
                 raise NotImplementedError(
                     "Numeric transform of Padmanabhan17 HI profile not implemented!"
+                )
+
+        elif name == "vn18":
+
+            if numeric:
+                # r_0 parameter values from "Model 1" section of Table 2 of 1804.09180
+                _R0_Z = np.array([0., 1., 2., 3., 4., 5.])
+                _R0_LOG10MH = (
+                    np.array([9, 10, 11, 12, 13, 14]) - np.log10(0.67)
+                ) # log10(M / Msun)
+                _R0_LOG10_VALS = np.array([
+                    [-3.59, -3.59, -2.8, -2.32, -1.71, -1.91], # z=0
+                    [-2.5, -3.72, -3.3, -2.32, -1.77, -1.71], # z=1
+                    [-3.2, -3.64, -2.75, -2.18, -1.74, -1.74], # z=2
+                    [-3.63, -3.1, -2.52, -2.09, -2.09, -2.09], # z=3
+                    [-3.3, -2.46, -2.32, -2.04, -2.04, -2.04], # z=4
+                    [-2.9, -2.28, -2.18, -2.02, -2.02, -2.02], # z=5
+                ]) - np.log10(0.67) # log10(val / Mpc)
+
+                # Define interpolating function for r_0 as function of z,m
+                log10r0_interp = RectBivariateSpline(_R0_Z, _R0_LOG10MH, _R0_LOG10_VALS)
+                def r0_interp(z, m):
+                    return 10 ** log10r0_interp.ev(z, np.log10(m))
+
+                # Dimensionless cutoff for profile integrals, taken to be 5 times
+                # default c-M relation
+                cmax = 5 * self.concentration()
+
+                # Scale radii, packed as [z,m]
+                z_mesh, m_mesh = np.meshgrid(self.zs, self.ms)
+                r0 = r0_interp(
+                    z_mesh.flatten(), m_mesh.flatten()
+                ).reshape(z_mesh.shape).T[..., None]
+
+                ks, ukouts = generic_profile_fft(
+                    lambda x: rho_nfw_x(x,rhoscale=1),
+                    cmax,
+                    r0,
+                    self.zs,
+                    self.ks,
+                    xmax,
+                    nxs
+                )
+                ukouts /= ukouts[:, :, 0][:, :, None]
+                self.uk_profiles[name] = ukouts.copy()
+
+            else:
+                raise NotImplementedError(
+                    "Analytical transform of VN18 HI profile does not exist!"
                 )
 
         return self.ks, self.uk_profiles[name]
@@ -2003,7 +2053,7 @@ def rho_nfw_x(x,rhoscale): return rhoscale/x/(1.+x)**2.
 
 def rho_nfw(r,rhoscale,rs): return rho_nfw_x(r/rs,rhoscale)
 
-def rhoHI_vn18(r, alphastar, r0, rho0=None):
+def rhoHI_vn18(r, r0, rho0=None):
     """Compute position-space HI density profile from Villaescusa-Navarro et al. 2018
     (1804.09180).
 
@@ -2011,11 +2061,11 @@ def rhoHI_vn18(r, alphastar, r0, rho0=None):
     ----------
     r : array_like
         1d array of radii to evaluate at, in Mpc.
-    alphastar, r0 : array_like
-        Arrays of alpha_* and r_0 parameters to evaluate at. Typically, these
-        will be evaluated at different redshifts and/or halo masses.
+    r0 : array_like
+        Array of r_0 parameters to evaluate at. Typically, these will be evaluated at
+        different redshifts and/or halo masses.
     rho0 : array_like, optional
-        1d array of rho_0 parameter to evaluate at, with same shape as alphastar and r0.
+        1d array of rho_0 parameter to evaluate at, with same shape as r0.
         If not specified, we use rho_0=1.
 
     Returns
@@ -2023,11 +2073,13 @@ def rhoHI_vn18(r, alphastar, r0, rho0=None):
     rho : array_like
         rho_HI values, packed as [r,...]).
     """
+    _ALPHASTAR = 3.0
+
     # TODO: there must be a better way to do this...
-    r_newshape = (len(r), ) + tuple(np.ones(len(alphastar.shape), dtype=int))
+    r_newshape = (len(r), ) + tuple(np.ones(len(r0.shape), dtype=int))
     r = r.reshape(r_newshape)
 
-    rho = r ** -alphastar[None, ...] * np.exp(-r0[None, ...] / r)
+    rho = r ** (-1 * _ALPHASTAR) * np.exp(-r0[None, ...] / r)
 
     if rho0 is not None:
         rho *= rho0[None, ...]
@@ -2043,11 +2095,11 @@ def rhoHI_vn18_x(x, alphastar, r0, rho0=None):
     ----------
     x : array_like
         1d array of dimensionless to evaluate at.
-    alphastar, r0 : array_like
-        1d arrays of alpha_* and r_0 parameters to evaluate at. Typically, these
-        will be evaluated at different halo masses.
+    r0 : array_like
+        Array of r_0 parameters to evaluate at. Typically, these will be evaluated at
+        different redshifts and/or halo masses.
     rho0 : array_like, optional
-        1d array of rho_0 parameter to evaluate at, with same shape as alphastar and r0.
+        1d array of rho_0 parameter to evaluate at, with same shape as r0.
         If not specified, we use rho_0=1.
 
     Returns
@@ -2055,11 +2107,13 @@ def rhoHI_vn18_x(x, alphastar, r0, rho0=None):
     rho : array_like
         rho_HI values, packed as [x,...].
     """
+    _ALPHASTAR = 3.0
+
     # TODO: there must be a better way to do this...
-    x_newshape = (len(x), ) + tuple(np.ones(len(alphastar.shape), dtype=int))
+    x_newshape = (len(x), ) + tuple(np.ones(len(r0.shape), dtype=int))
     x = x.reshape(x_newshape)
 
-    rho = (x * r0[None, ...]) ** -alphastar[None, ...] * np.exp(-1 / x)
+    rho = (x * r0[None, ...]) ** (-1 * _ALPHASTAR) * np.exp(-1 / x)
 
     if rho0 is not None:
         rho *= rho0[None, ...]
