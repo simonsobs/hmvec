@@ -390,10 +390,13 @@ class kSZ(HaloModel):
                 try:
                     self.add_HI_profile(name=satellite_profile_name)
                 except:
-                    raise ValueError(
-                        "Couldn't initialize satellite profile %s"
-                        % satellite_profile_name
-                    )
+                    try:
+                        self.add_HI_profile(name=satellite_profile_name, numeric=True)
+                    except:
+                        raise ValueError(
+                            "Couldn't initialize satellite profile %s"
+                            % satellite_profile_name
+                        )
 
             self.add_hod(
                 hod_name,
@@ -1325,8 +1328,12 @@ def get_ksz_auto_squeezed(
                 sPgg_for_e[zi] += 1/ngals_mpc3[zi]
                 sPgg_for_v[zi] += 1/ngals_mpc3_for_v[zi]
             else:
-                sPgg_for_e[zi] += pgg_noise_function(z, ks)
-                sPgg_for_v[zi] += pgg_noise_function(z, ks)
+                if rsd:
+                    sPgg_for_e[zi] += pgg_noise_function(z, ks)[..., None]
+                    sPgg_for_v[zi] += pgg_noise_function(z, ks)[..., None]
+                else:
+                    sPgg_for_e[zi] += pgg_noise_function(z, ks)
+                    sPgg_for_v[zi] += pgg_noise_function(z, ks)
         sPge = pksz.sPge
 
         # Get large-scale P_gv and P_gg (packed as [z,k] without RSD, or [z,k,mu] with
@@ -1346,7 +1353,7 @@ def get_ksz_auto_squeezed(
                 if pgg_noise_function is None:
                     lPggtot[zi] = lPgg[zi] + 1/ngals_mpc3_for_v[zi]
                 else:
-                    lPggtot[zi] = lPgg[zi] +pgg_noise_function(z, pksz.kLs)[..., None]
+                    lPggtot[zi] = lPgg[zi] + pgg_noise_function(z, pksz.kLs)[..., None]
         else:
             lPgv = np.zeros((len(zs), len(pksz.ks)))
             lPgg = np.zeros_like(lPgv)
@@ -1438,6 +1445,8 @@ def get_ksz_auto_squeezed(
 
         # Multiply by numerical prefactor and integral from above
         Pqr[:,zi] *= (6*np.pi**2)**-1 * vint
+
+    spec_dict['Pqr'] = Pqr
 
     # Make 2d interpolating function for P_{q_r}, with arguments z,k.
     # The resulting interpolating function automatically sorts arguments if
