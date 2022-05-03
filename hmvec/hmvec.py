@@ -927,7 +927,7 @@ class HaloModel(Cosmology):
                 # Multiply by D_FoG(k*mu).
                 # Result is packed as [z,m,k,mu].
                 integrand = (
-                    integrand[:, :, None, None]
+                    integrand[:, :, :, None]
                     * self.DFoG(self.ks[:, None] * self.mu[None, :])
                 )
                 # Integrate in m to get f(z, k, mu) / f_{scale-independent}(z)
@@ -1285,14 +1285,14 @@ class HaloModel(Cosmology):
         else:
             # Get m integrand
             if (name in hnames) and (name2 in hnames):
-                square_term = self._get_hod_square(name, rsd=rsd)
+                square_term = self._get_hod_square(name, rsd=True)
             elif (name in hnames) and (name2 not in hnames):
-                square_term = self._get_hod(name, rsd=rsd) * term2
+                square_term = self._get_hod(name, rsd=True) * term2
             elif (name not in hnames) and (name2 in hnames):
-                square_term = term1 * self._get_hod(name2, rsd=rsd)
+                square_term = term1 * self._get_hod(name2, rsd=True)
             integrand = self.nzm[..., None, None] * square_term
             # Do m integral
-            p1h = np.trapz(integrand, ms, axis=1) * (1 - np.exp(
+            p1h = np.trapz(integrand, self.ms, axis=1) * (1 - np.exp(
                 - (self.ks[None, :, None] / self.p['kstar_damping']) ** 2
             ))
 
