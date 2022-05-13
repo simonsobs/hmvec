@@ -760,13 +760,15 @@ class HaloModel(Cosmology):
             )
         return factor
 
-    def get_bg(self, Nc, Ns, ngal, rsd=False, u_name="nfw", vectorize_mu=True):
+    def get_bg(
+        self, Nc, Ns, ngal, lowklim=False, fog=False, u_name="nfw", vectorize_mu=True
+    ):
         """Galaxy bias, optionally including effects of Fingers of God.
 
         We follow Schaan & White 2021 (2103.01964, Eq. A.27) in incorporating a
         mass-dependent Finger of God damping inside the integral over halo mass.
-        Alternatively, this can be ignored, such that b_g is only a function of z
-        instead of z, k, and mu.
+        If this is ignored, b_g is only a function of z if lowklim=True or a function of
+        z and k if lowklim=False.
 
         Parameters
         ----------
@@ -774,7 +776,10 @@ class HaloModel(Cosmology):
             N_c and N_s from a given HOD, packed as [z,m].
         ngal : array_like
             Mean galaxy number density, packed as [z].
-        rsd : bool, optional
+        lowklim : bool, optional
+            Whether to take b_g to be scale-independent, or incorporate the halo profile
+            u(k,m) in the computation of b_g. Default: False.
+        fog : bool, optional
             Whether to include Finger of God effects. Affects dimensionality of output.
             Default: False.
         u_name : string, optional
@@ -787,17 +792,30 @@ class HaloModel(Cosmology):
         Returns
         -------
         bg : array_like
-            Galaxy bias. If ignoring RSD, packed as [z]; if including RSD, packed as
-            [z,k,mu].
+            Galaxy bias. If ignoring RSD, packed as [z] in low-k limit or [z,k] if not;
+            if including RSD, packed as [z,k,mu].
         """
 
         _MAX_INTEGRAND_SIZE = 1e8
 
-        if not rsd:
-            # Get integrand, packed as [z, m]
-            integrand = self.nzm * (Nc + Ns) * self.bh
-            # Integrate in m to get b_g(z)
-            bg = np.trapz(integrand, self.ms, axis=-1) / ngal
+        if not fog:
+
+            if lowklim:
+                # Get integrand, packed as [z, m]
+                integrand = self.nzm * (Nc + Ns) * self.bh
+                # Integrate in m to get b_g(z)
+                bg = np.trapz(integrand, self.ms, axis=-1) / ngal
+
+            else:
+                # Get u(k,m,z) corresponding to satellite profile, packed as [z,m,k]
+                uk = self.uk_profiles[u_name]
+
+                # Get integrand, packed as [z,m,k]
+                integrand = self.nzm * (Nc + Ns) * self.bh
+                integrand = integrand[:, :, None] * uk
+
+                # Integrate in m, to get b_g(z, k, mu)
+                bg = np.trapz(integrand, self.ms, axis=1) / ngal[:, None]
 
         else:
 
@@ -816,7 +834,7 @@ class HaloModel(Cosmology):
                 for mui, mu in enumerate(self.mu):
                     # Form n(m) * b(m), packed as [z, m]
                     integrand = self.nzm * self.bh
-                    # Multiply by (N_c(m) + N_s(m) D_FoG(k*mu)).
+                    # Multiply by (N_c(m) + N_s(m) u(k,m,z) D_FoG(k*mu)).
                     # Result is packed as [z,m,k,mu], with a length-1 mu axis.
                     integrand = (
                         integrand[:, :, None, None]
@@ -852,7 +870,7 @@ class HaloModel(Cosmology):
 
         return bg
 
-    def get_fgrowth(self, rsd=False, vectorize_mu=True):
+    def get_fgrowth(self, fog=False, vectorize_mu=True):
         """Logarithmic growth rate f(z), optionally Finger-of-God effects.
 
         We follow Schaan & White 2021 (2103.01964, Eq. A.28) in incorporating a
@@ -862,7 +880,7 @@ class HaloModel(Cosmology):
 
         Parameters
         ----------
-        rsd : bool, optional
+        fog : bool, optional
             Whether to include Finger of God effects. Affects dimensionality of output.
             Default: False.
         vectorize_mu : bool, optional
@@ -881,7 +899,7 @@ class HaloModel(Cosmology):
         # Compute scale-independent growth rate f(z) = a D'(a) / D(a).
         fz = self.f_growth(1/(1+self.zs))
 
-        if not rsd:
+        if not fog:
             return fz
 
         else:
@@ -960,10 +978,10 @@ class HaloModel(Cosmology):
         us = self.uk_profiles[sname]
         return hod, uc, us
 
-    def _get_hod_square(self, name, rsd=False, mui=None):
+    def _get_hod_square(self, name, fog=False, mui=None):
         """Fetch HOD-specific factors in P_1h integrand.
 
-        Without RSD, this computes
+        Without FoG, this computes
             (2 u_c u_s N_c N_s + u_s^2 N_s^2) / n_gal^2 .
         Including RSD, this becomes (see Schaan & White 2021 (2103.01964), Eq. A.29)
             (2 u_c u_s N_c N_c D_FoG + u_s^2 N_s^2 D_FoG^2) / n_gal^2 .
@@ -972,8 +990,8 @@ class HaloModel(Cosmology):
         ----------
         name : string
             Internal name for HOD.
-        rsd : bool, optional
-            Whether to include RSD: Affects dimensionality of output. Default: False.
+        fog : bool, optional
+            Whether to include FoG. Affects dimensionality of output. Default: False.
         mui : int, optional
             If specified, we compute for mu = self.mus[mui] instead of all mu's at once.
             Default: None.
@@ -982,12 +1000,12 @@ class HaloModel(Cosmology):
         -------
         s : array_like
             Product of factors in P_1h integrand. If ignoring RSD, packed as [z,m,k];
-            if including RSD, packed as [z,m,k,mu].
+            if including FoG, packed as [z,m,k,mu].
         """
         # uc, us packed as [z,m,k]
         hod, uc, us = self._get_hod_common(name)
 
-        if rsd:
+        if fog:
             # Make array of k*mu, packed as [k,mu]
             if mui is None:
                 kmu = self.ks[:, None] * self.mus[None, :]
@@ -1013,7 +1031,7 @@ class HaloModel(Cosmology):
                 + hod['NsNsm1'][..., None] * us ** 2
             ) / hod['ngal'][..., None, None] ** 2
 
-    def _get_hod(self, name, lowklim=False, rsd=False, mui=None):
+    def _get_hod(self, name, lowklim=False, fog=False, mui=None):
         """Fetch HOD-specific factors for single-tracer contribution to P_1h.
 
         Without RSD, this computes
@@ -1027,8 +1045,8 @@ class HaloModel(Cosmology):
             Internal name for HOD.
         lowklim : bool, optional
             If True, take low-k limit of profiles and FoG damping. Default: False.
-        rsd : bool, optional
-            Whether to include RSD: Affects dimensionality of output. Default: False.
+        fog : bool, optional
+            Whether to include FoG. Affects dimensionality of output. Default: False.
         mui : int, optional
             If specified, we compute for mu = self.mus[mui] instead of all mu's at once.
             Default: None.
@@ -1045,7 +1063,7 @@ class HaloModel(Cosmology):
             uc = 1
             us = 1
 
-        if rsd:
+        if fog:
             # Make array of k*mu, packed as [k,mu]
             if mui is None:
                 kmu = self.ks[:, None] * self.mus[None, :]
@@ -1090,6 +1108,7 @@ class HaloModel(Cosmology):
         b2=None,
         m_integrand=False,
         rsd=False,
+        fog=False
     ):
         """Compute halo model power spectrum for specified profiles.
 
@@ -1110,8 +1129,11 @@ class HaloModel(Cosmology):
             Default: False.
         rsd : bool, optional
             Whether to include RSD (Kaiser and FoG effects). RSD is only included in
-            factors computed based on an HOD. Affects dimensionality of output.
-            Default: False.
+            factors computed based on an HOD. Kaiser effect is always included, but
+            FoG is controlled separately by fog parameter. Affects dimensionality of
+            output. Default: False.
+        fog : bool, optional
+            Whether to include FoG. Default: False.
 
         Returns
         -------
@@ -1123,15 +1145,18 @@ class HaloModel(Cosmology):
                 - RSD, m integral: [z,k,mu].
                 - RSD, m integrand: not implemented, but would be [z,m,k,mu].
         """
+        if fog and not rsd:
+            raise ValueError("Cannot include FoG without RSD!")
+
         if name2 is None: name2 = name
         return (
-            self.get_power_1halo(name, name2, m_integrand=m_integrand, rsd=rsd)
+            self.get_power_1halo(name, name2, m_integrand=m_integrand, fog=fog)
             + self.get_power_2halo(
-                name, name2, verbose, b1, b2, m_integrand=m_integrand, rsd=rsd
+                name, name2, verbose, b1, b2, m_integrand=m_integrand, rsd=rsd, fog=fog
             )
         )
 
-    def get_power_1halo(self, name="nfw", name2=None, m_integrand=False, rsd=False):
+    def get_power_1halo(self, name="nfw", name2=None, m_integrand=False, fog=False):
         """Compute P_1h(k,z) for specified profiles.
 
         Parameters
@@ -1141,9 +1166,9 @@ class HaloModel(Cosmology):
         m_integrand : bool, optional
             Whether to return dP_2h/dm. Affects dimensionality of output. Not
             implemented if RSD is turned on. Default: False.
-        rsd : bool, optional
-            Whether to include RSD (Kaiser and FoG effects). RSD is only included in
-            factors computed based on an HOD. Affects dimensionality of output.
+        fog : bool, optional
+            Whether to include Finger of God effect (only included in
+            factors computed based on an HOD). Affects dimensionality of output.
             Default: False.
 
         Returns
@@ -1151,26 +1176,26 @@ class HaloModel(Cosmology):
         P_1h : array_like
             1-halo term. Packing depends on inclusion of RSD and whether m integrand
             is requested:
-                - No RSD, m integral: [z,k].
-                - No RSD, m integrand: [z,m,k].
-                - RSD, m integral: [z,k,mu].
-                - RSD, m integrand: not implemented, but would be [z,m,k,mu].
+                - No FoG, m integral: [z,k].
+                - No FoG, m integrand: [z,m,k].
+                - FoG, m integral: [z,k,mu].
+                - FoG, m integrand: not implemented, but would be [z,m,k,mu].
         """
-        if rsd and m_integrand:
-            raise NotImplementedError("M integrand output not implemented with RSD")
+        if fog and m_integrand:
+            raise NotImplementedError("M integrand output not implemented with FoG")
 
         name2 = name if name2 is None else name2
         hnames = self.hods.keys()
 
-        if rsd and (name in hnames or name2 in hnames):
-            return self._get_power_1halo_rsd(name=name, name2=name2)
+        if fog and (name in hnames or name2 in hnames):
+            return self._get_power_1halo_fog(name=name, name2=name2)
         else:
-            return self._get_power_1halo_norsd(
+            return self._get_power_1halo_nofog(
                 name=name, name2=name2, m_integrand=m_integrand
             )
 
-    def _get_power_1halo_norsd(self, name="nfw", name2=None, m_integrand=False):
-        """Compute P_1h(k,z) for specified profiles, without RSD.
+    def _get_power_1halo_nofog(self, name="nfw", name2=None, m_integrand=False):
+        """Compute P_1h(k,z) for specified profiles, without FoG.
 
         Parameters
         ----------
@@ -1194,14 +1219,14 @@ class HaloModel(Cosmology):
         pnames = self.pk_profiles.keys()
 
         if (name in hnames) and (name2 in hnames):
-            square_term = self._get_hod_square(name)
+            square_term = self._get_hod_square(name, fog=False)
         elif (name in pnames) and (name2 in pnames):
             square_term = self._get_pressure(name)**2
         else:
             square_term = 1
             for nm in [name, name2]:
                 if nm in hnames:
-                    square_term *= self._get_hod(nm)
+                    square_term *= self._get_hod(nm, fog=False)
                 elif nm in mnames:
                     square_term *= self._get_matter(nm)
                 elif nm in pnames:
@@ -1225,8 +1250,8 @@ class HaloModel(Cosmology):
                 * (1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
             )
 
-    def _get_power_1halo_rsd(self, name="nfw", name2=None):
-        """Compute P_1h(k,z) for specified profiles, including RSD.
+    def _get_power_1halo_fog(self, name="nfw", name2=None):
+        """Compute P_1h(k,z) for specified profiles, including FoG.
 
         Parameters
         ----------
@@ -1269,11 +1294,11 @@ class HaloModel(Cosmology):
             for mui, mu in enumerate(self.mus):
                 # Get m integrand
                 if (name in hnames) and (name2 in hnames):
-                    square_term = self._get_hod_square(name, rsd=True, mui=mui)
+                    square_term = self._get_hod_square(name, fog=True, mui=mui)
                 elif (name in hnames) and (name2 not in hnames):
-                    square_term = self._get_hod(name, rsd=True, mui=mui) * term2
+                    square_term = self._get_hod(name, fog=True, mui=mui) * term2
                 elif (name not in hnames) and (name2 in hnames):
-                    square_term = term1 * self._get_hod(name2, rsd=True, mui=mui)
+                    square_term = term1 * self._get_hod(name2, fog=True, mui=mui)
                 integrand = self.nzm[..., None, None] * square_term
                 # Do m integral
                 p1h[:, :, mui : mui + 1] = np.trapz(integrand, self.ms, axis=1) * (
@@ -1285,11 +1310,11 @@ class HaloModel(Cosmology):
         else:
             # Get m integrand
             if (name in hnames) and (name2 in hnames):
-                square_term = self._get_hod_square(name, rsd=True)
+                square_term = self._get_hod_square(name, fog=True)
             elif (name in hnames) and (name2 not in hnames):
-                square_term = self._get_hod(name, rsd=True) * term2
+                square_term = self._get_hod(name, fog=True) * term2
             elif (name not in hnames) and (name2 in hnames):
-                square_term = term1 * self._get_hod(name2, rsd=True)
+                square_term = term1 * self._get_hod(name2, fog=True)
             integrand = self.nzm[..., None, None] * square_term
             # Do m integral
             p1h = np.trapz(integrand, self.ms, axis=1) * (1 - np.exp(
@@ -1307,7 +1332,8 @@ class HaloModel(Cosmology):
         b1_in=None,
         b2_in=None,
         m_integrand=False,
-        rsd=False
+        rsd=False,
+        fog=False
     ):
         """Compute P_2h(k,z) for specified profiles.
 
@@ -1330,9 +1356,12 @@ class HaloModel(Cosmology):
             Whether to return dP_2h/dm. Affects dimensionality of output.
             Default: False.
         rsd : bool, optional
-            Whether to include RSD (Kaiser and FoG effects). RSD is only included in
-            factors computed based on an HOD. Affects dimensionality of output.
+            Whether to include RSD (Kaiser and FoG effects). FoG is only included in
+            factors computed based on an HOD, and is separately controlled by fog
+            parameter. Affects dimensionality of output.
             Default: False.
+        fog : bool, optional
+            Whether to include FoG. Default: False.
 
         Returns
         -------
@@ -1376,8 +1405,12 @@ class HaloModel(Cosmology):
                 b = self.get_bg(
                     self.hods[iname]['Nc'],
                     self.hods[iname]['Ns'],
-                    self.hods[iname]['ngal']
-                )[:,None]
+                    self.hods[iname]['ngal'],
+                    fog=fog
+                )
+                # If only using Kaiser RSD, extend b axes from [z,k] to [z,k,mu]
+                if rsd and not fog:
+                    b = b[:, None]
             else: raise ValueError("Profile %s not defined!" % iname)
             return rterm1, rterm01, b
 
@@ -1390,7 +1423,9 @@ class HaloModel(Cosmology):
         # If needed for either tracer, compute F(k,mu,z)
         if rsd and (name in self.hods.keys() or name2 in self.hods.keys()):
             if verbose: print("Computing f")
-            fg = self.get_fgrowth(rsd=True)
+            fg = self.get_fgrowth(fog=fog)
+            if not fog:
+                fg = fg[:, None, None]
 
         # Compute effective bias factor for tracer 1
         if rsd and (name in self.hods.keys()):
@@ -1399,12 +1434,15 @@ class HaloModel(Cosmology):
                 self.hods[name]['Nc'],
                 self.hods[name]['Ns'],
                 self.hods[name]['ngal'],
-                rsd=True,
+                fog=fog,
+                lowklim=False,
                 u_name=self.hods[name]['satellite_profile']
             )
+            if not fog:
+                b1 = b1[:, :, None]
             if b1_in is not None:
                 b1 *= (b1_in[:, None] / b1[:, 0])[:, None, :]
-            factor1 = (b1 + fg * self.mu[np.newaxis, np.newaxis, :] ** 2)
+            factor1 = (b1 + fg * self.mu[None, None, :] ** 2)
         else:
             # Compute get Fourier-space profile for name, name2
             iterm1, iterm01, b1 = _get_term(name)
@@ -1430,9 +1468,12 @@ class HaloModel(Cosmology):
                 self.hods[name2]['Nc'],
                 self.hods[name2]['Ns'],
                 self.hods[name2]['ngal'],
-                rsd=True,
+                fog=fog,
+                lowklim=False,
                 u_name=self.hods[name2]['satellite_profile']
             )
+            if not fog:
+                b2 = b2[:, :, None]
             if b2_in is not None:
                 b2 *= (b2_in[:, None] / b2[:, 0])[:, None, :]
             factor2 = (b2 + fg * self.mu[np.newaxis, np.newaxis, :] ** 2)

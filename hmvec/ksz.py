@@ -202,7 +202,9 @@ class kSZ(HaloModel):
     mthreshs_override : array_like, optional
         Array of mass thresholds to use instead of ngals_mpc3 in HOD. Default: None.
     rsd : bool, optional
-        Whether to use RSD in halo model computations. Default: False.
+        Whether to use (Kaiser) RSD in halo model computations. Default: False.
+    fog : bool, optional
+        Whether to include Fingers of God in halo model computations. Default: False.
     kL_max : float, optional
         Maximum k to consider as k_long (for computing velocity power spectrum).
         Default: 0.1.
@@ -279,6 +281,7 @@ class kSZ(HaloModel):
         use_hod_default_ngal=False,
         mthreshs_override=None,
         rsd=False,
+        fog=False,
         kL_max=0.1,
         num_kL_bins=100,
         kS_min=0.1,
@@ -310,6 +313,12 @@ class kSZ(HaloModel):
         sigz=None,
     ):
 
+        # Store rsd and fog preferences
+        if fog and not rsd:
+            raise ValueError("Cannot use FoG without RSD!")
+        self.rsd = rsd
+        self.fog = fog
+
         # Define masses to compute for
         if ms is None: ms = np.geomspace(
             defaults['min_mass'], defaults['max_mass'], defaults['num_mass']
@@ -325,9 +334,6 @@ class kSZ(HaloModel):
             self.ngals_mpc3 = np.asarray(self.ngals_mpc3)
             if len(zs) != len(self.ngals_mpc3):
                 raise ValueError("zs and ngals_mpc3 must have same length")
-
-        # Store rsd preference
-        self.rsd = rsd
 
         # Warn user if k_min is the same for all zs
         if np.max(volumes_gpc3) != np.min(volumes_gpc3):
@@ -457,15 +463,31 @@ class kSZ(HaloModel):
         if not skip_hod:
             # Compute P_gg and P_ge, packed as [z,k] without RSD or [z,k,mu] with RSD.
             if verbose: print("Calculating small scale Pgg and Pge...")
-            self.sPgg_1h = self.get_power_1halo(hod_name, name2=hod_name, rsd=rsd)
+            self.sPgg_1h = self.get_power_1halo(hod_name, name2=hod_name, fog=fog)
+            if rsd and not fog:
+                self.sPgg_1h = self.sPgg_1h[:, :, None]
             self.sPge_1h = self.get_power_1halo(
-                hod_name, name2=electron_profile_name, rsd=rsd
+                hod_name, name2=electron_profile_name, fog=fog
             )
+            # If using Kaiser RSD but not FoG, extend axes from [z,k] to [z,k,mu]
+            if rsd and not fog:
+                self.sPge_1h = self.sPge_1h[:, :, None]
             self.sPgg_2h = self.get_power_2halo(
-                hod_name, name2=hod_name, verbose=verbose, b1_in=b1, b2_in=b1, rsd=rsd
+                hod_name,
+                name2=hod_name,
+                verbose=verbose,
+                b1_in=b1,
+                b2_in=b1,
+                rsd=rsd,
+                fog=fog
             )
             self.sPge_2h = self.get_power_2halo(
-                hod_name, name2=electron_profile_name, verbose=verbose, b1_in=b1, rsd=rsd
+                hod_name,
+                name2=electron_profile_name,
+                verbose=verbose,
+                b1_in=b1,
+                rsd=rsd,
+                fog=fog
             )
             self.sPgg = self.sPgg_1h + self.sPgg_2h
             self.sPge = self.sPge_1h + self.sPge_2h
@@ -1078,6 +1100,8 @@ def get_ksz_auto_squeezed(
     zs,
     ngals_mpc3=None,
     rsd=False,
+    fog=False,
+    isotropize_muS=False,
     bgs=None,
     params=None,
     k_max = 100.,
@@ -1136,7 +1160,14 @@ def get_ksz_auto_squeezed(
     zs : array_like
         Array of redshifts to compute at.
     rsd : bool, optional
-        Whether to include RSD in 3d power spectra involving galaxies.
+        Whether to include (Kaiser) RSD in 3d power spectra involving galaxies.
+        Default: False.
+    fog : bool, optional
+        Whether to include Fingers of God in 3d power spectra involving galaxies.
+        Default: False.
+    isotropize_muS : bool, optional
+        Whether to average Pge^2(k, mu) / Pggtot(k, mu) over mu. If False, we take
+        mu = 0 when we compute C_ell^kSZ. Default: False.
     bgs : array_like, optional
         Array of linear galaxy bias at each redshift. Default: None.
     **params : dict, optional
@@ -1251,6 +1282,7 @@ def get_ksz_auto_squeezed(
             volumes_gpc3,
             ngals_mpc3=ngals_mpc3,
             rsd=rsd,
+            fog=fog,
             kL_max=k_max,                 # Same k_max for kL and kS
             num_kL_bins=num_k_bins,
             kS_min=get_kmin(volume_gpc3), # Same k_min for kL and kS
@@ -1434,9 +1466,14 @@ def get_ksz_auto_squeezed(
             if rsd or (pksz.sigz is not None):
                 # Pge and Pgg at given z are packed as [k,mu]
                 integrand = sPge[zi]**2 / sPgg_for_e[zi]
-                # At each k, integrate over mu, multiplying by 1/2 so that we compute
-                # the monopole over mu
-                Pqr[:,zi] = 0.5 * np.trapz(integrand, pksz.mu, axis=-1)
+                if isotropize_muS:
+                    # At each k, integrate over mu, multiplying by 1/2 so that we compute
+                    # the monopole over mu
+                    Pqr[:,zi] = 0.5 * np.trapz(integrand, pksz.mu, axis=-1)
+                else:
+                    # Take mu = 0
+                    mu0_idx = np.argmin(np.abs(pksz.mu))
+                    Pqr[:,zi] = integrand[:, mu0_idx]
             else:
                 # Pge and Pgg at given z are function of k only
                 Pqr[:,zi] = sPge[zi]**2 / sPgg_for_e[zi]
@@ -1918,7 +1955,7 @@ def get_ksz_snr_survey(zs,dndz,zedges,Cls,fsky,Ngals,bs=None,sigz=None):
     return vols_gpc3,ngals_mpc3,zcents,bgs,snrs,totsnr
 
 
-def get_ksz_halomodel_spectra(pksz, b1=None, rsd=False):
+def get_ksz_halomodel_spectra(pksz, b1=None, rsd=False, fog=False):
     """Get separate 1h and 2h terms for P_ee, P_ge, and P_gg.
 
     Parameters
@@ -1928,7 +1965,9 @@ def get_ksz_halomodel_spectra(pksz, b1=None, rsd=False):
     b1 : array_like, optional
         Linear galaxy bias at desired redshifts. Default: None.
     rsd : bool, optional
-        Whether to include RSD: Default: False.
+        Whether to include (Kaiser) RSD. Default: False.
+    fog : bool, optional
+        Whether to include Fingers of God. Default: False.
 
     Returns
     -------
@@ -1941,14 +1980,18 @@ def get_ksz_halomodel_spectra(pksz, b1=None, rsd=False):
     ks = pksz.kS
     spec_dict['ks'] = pksz.kS
 
-    spec_dict["sPee_1h"] = pksz.get_power_1halo('e', name2='e', rsd=rsd)
-    spec_dict["sPee_2h"] = pksz.get_power_2halo('e', name2='e', rsd=rsd)
+    spec_dict["sPee_1h"] = pksz.get_power_1halo('e', name2='e')
+    spec_dict["sPee_2h"] = pksz.get_power_2halo('e', name2='e')
 
     spec_dict["sPgg_shot"] = 1/pksz.ngals_mpc3
-    spec_dict["sPgg_1h"] = pksz.get_power_1halo('g', name2='g', rsd=rsd)
-    spec_dict["sPgg_2h"] = pksz.get_power_2halo('g', name2='g', rsd=rsd, b1_in=b1, b2_in=b1)
+    spec_dict["sPgg_1h"] = pksz.get_power_1halo('g', name2='g', fog=fog)
+    spec_dict["sPgg_2h"] = pksz.get_power_2halo(
+        'g', name2='g', rsd=rsd, fog=fog, b1_in=b1, b2_in=b1
+    )
 
-    spec_dict["sPge_1h"] = pksz.get_power_1halo('g', name2='e', rsd=rsd)
-    spec_dict["sPge_2h"] = pksz.get_power_2halo('g', name2='e', rsd=rsd, b1_in=b1)
+    spec_dict["sPge_1h"] = pksz.get_power_1halo('g', name2='e', fog=fog)
+    spec_dict["sPge_2h"] = pksz.get_power_2halo(
+        'g', name2='e', rsd=rsd, fog=fog, b1_in=b1
+    )
 
     return spec_dict
