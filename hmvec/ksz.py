@@ -494,33 +494,17 @@ class kSZ(HaloModel):
 
             # Incorporate photo-z uncertainty
             if self.sigz is not None:
-                oPggs = self.sPgg.copy()
-                oPges = self.sPge.copy()
-                self.sPgg = []
-                self.sPge = []
-                for zindex in range(oPggs.shape[0]):
+                for zi in range(self.sPgg.shape[0]):
                     if self.rsd:
-                        # With RSD, oPggs and oPges are packed as [z,k,mu], while
-                        # Wphoto is packed as [mu,k], so we need to transpose it
-                        self.sPgg.append(
-                            oPggs[zindex] * self.Wphoto(zindex).T ** 2
-                        )
-                        self.sPge.append(
-                            oPges[zindex] * self.Wphoto(zindex).T
-                        )
+                        # With RSD, sPgg and sPge are packed as [z,k,mu], while
+                        # Wphoto(z) is packed as [mu,k], so we need to transpose it
+                        self.sPgg[zi] *= self.Wphoto(zi).T ** 2
+                        self.sPge[zi] *= self.Wphoto(zi).T
                     else:
-                        # Without RSD, oPggs and oPges are packed as [z,k], and after
-                        # incorporating W_photo, the results are packed as [z,k,mu]
-                        self.sPgg.append(
-                            oPggs[zindex][:, None] * self.Wphoto(zindex).T ** 2
-                        )
-                        self.sPge.append(
-                            oPges[zindex][:, None] * self.Wphoto(zindex).T
-                        )
-                        # self.sPggs.append(oPggs[zindex] * (self.Wphoto(zindex).reshape((self.mu.size, self.kLs.size, 1))**2) )
-                        # self.sPges.append(oPges[zindex] * (self.Wphoto(zindex).reshape((self.mu.size, self.kLs.size, 1))) )
-                self.sPgg = np.asarray(self.sPgg)
-                self.sPge = np.asarray(self.sPge)
+                        # Without RSD, sPgg and sPge are packed as [z,k], and after
+                        # incorporating W_photo(z), the results are packed as [z,k,mu]
+                        self.sPgg[zi] = self.sPgg[zi][:, None] * self.Wphoto(zi).T ** 2
+                        self.sPge[zi] = self.sPge[zi][:, None] * self.Wphoto(zi).T
 
             # Compute further power spectra
             # TODO: clean this up and add more comments
@@ -1234,7 +1218,7 @@ def get_ksz_auto_squeezed(
         amplitude. Default: False.
     sigz : float, optional
         The Gaussian scatter for photometric redshifts. The assumed scatter
-        will be sigz x (1+z).
+        will be sigz * (1+z).
     mthreshs_override : array_like, optional
         Array of mass thresholds to use instead of ngal in HOD. Default: None.
     use_hod_default_ngal : bool, optional
