@@ -116,11 +116,20 @@ class HaloModel(Cosmology):
         x = self.omz(z) - 1.
         d = 18.*np.pi**2. + 82.*x - 39. * x**2.
         return d
+    
     def rvir(self,m,z):
         if self.mdef == 'vir':
             return R_from_M(m,self.rho_critical_z(z),delta=self.deltav(z))
         elif self.mdef == 'mean':
             return R_from_M(m,self.rho_matter_z(z),delta=200.)
+
+    def Rdelta_critical(self,M,z,delta=200):
+        rho = self.rho_critical_z(z)
+        return R_from_M(M,rho,delta)
+    
+    def Rdelta_mean(self,M,z,delta=200):
+        rho = self.rho_matter_z(z)
+        return R_from_M(M,rho,delta)
     
     def R_of_m(self,ms):
         return R_from_M(ms,self.rho_matter_z(0),delta=1.) # note rhom0
@@ -206,7 +215,7 @@ class HaloModel(Cosmology):
     
     def add_battaglia_profile(self,name,family=None,param_override=None,
                               nxs=None,
-                              xmax=None,ignore_existing=False):
+                              xmax=None,ignore_existing=False,physical_truncate=False):
         if not(ignore_existing): assert name not in self.uk_profiles.keys(), "Profile name already exists."
         assert name!='nfw', "Name nfw is reserved."
         if nxs is None: nxs = self.p['electron_density_profile_integral_numxs']
@@ -237,11 +246,40 @@ class HaloModel(Cosmology):
             delta_rhos1 = rhocritz*self.deltav(self.zs)
         elif self.mdef=='mean':
             delta_rhos1 = self.rho_matter_z(self.zs)*200.
-        rvirs = self.rvir(self.ms[None,:],self.zs[:,None])
         cs = self.concentration()
         delta_rhos2 = 200.*self.rho_critical_z(self.zs)
         m200critz = mdelta_from_mdelta(self.ms,cs,delta_rhos1,delta_rhos2)
         r200critz = R_from_M(m200critz,self.rho_critical_z(self.zs)[:,None],delta=200.)
+        if physical_truncate:
+            if family.lower().strip()!='agn': raise NotImplementedError #FIXME: generalize
+            from classy_sz import Class
+            M = Class()
+            h = self.params['H0']/100.
+            M.set({# class_sz parameters:
+            'output':'tabulate_rhob_xout_at_m_and_z',
+            'gas profile':'B16', # Battaglia density pfroile 
+            'gas profile mode' : 'agn', # agn feedback model for Battaglia profile
+            'M_min' : self.ms.min()*h,  # msun/h
+            'M_max' : self.ms.max()*h, # msun/h
+            'z_min' : 1e-6,
+            'z_max' : self.zs.max(),
+            'A_s': self.params['As'],
+            'n_s': self.params['ns'], 
+            'h': h,
+            'omega_b': self.params['ombh2'],
+            'omega_cdm': self.params['omch2'],    
+            'n_z_m_to_xout': 100, # number of redshift points for tabulation of r_out
+            'n_mass_m_to_xout': 100 # number of mass points for tabulation of r_out
+                    })
+            M.compute()
+            get_m_to_xout_at_z_and_m = np.vectorize(M.get_m_to_xout_at_z_and_m)
+            xouts = []
+            for i in range(len(self.zs)): #FIXME: vectorize
+                xouts.append( get_m_to_xout_at_z_and_m(self.zs[i],self.ms*h) )
+            xouts = np.asarray(xouts)
+            rvirs = xouts*r200critz
+        else:
+            rvirs = self.rvir(self.ms[None,:],self.zs[:,None])
 
         # Generate profiles
         """
@@ -265,6 +303,7 @@ class HaloModel(Cosmology):
 
         rgs = r200critz/2.
         cgs = rvirs/rgs
+        print(cgs.shape)
         ks,ukouts = generic_profile_fft(rhofunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs)
         self.uk_profiles[name] = ukouts.copy()
 
@@ -641,7 +680,7 @@ class HaloModel(Cosmology):
 """
 Mass function
 """
-def R_from_M(M,rho,delta): return (3.*M/4./np.pi/delta/rho)**(1./3.) 
+def R_from_M(M,rho,delta): return (3.*M/4./np.pi/delta/rho)**(1./3.)
 
 """
 HOD functions from Matt Johnson and Moritz Munchmeyer (modified)

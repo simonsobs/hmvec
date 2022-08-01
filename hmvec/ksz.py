@@ -103,12 +103,14 @@ class kSZ(HaloModel):
                  skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None,
                  mthreshs_override=None,
                  verbose=False,
-                 b1=None,b2=None,sigz=None):
+                 b1=None,b2=None,sigz=None,
+                 physical_truncate=False):
 
         if ms is None: ms = np.geomspace(defaults['min_mass'],defaults['max_mass'],defaults['num_mass'])
+        zs = np.atleast_1d(zs)
         volumes_gpc3 = np.atleast_1d(volumes_gpc3)
+        ngals_mpc3 = np.atleast_1d(ngals_mpc3)
         assert len(zs)==len(volumes_gpc3)==len(ngals_mpc3)
-        ngals_mpc3 = np.asarray(ngals_mpc3)
         ks = np.geomspace(kS_min,kS_max,num_kS_bins)
         self.ks = ks
         self.mu = np.linspace(-1.,1.,num_mu_bins)
@@ -120,10 +122,11 @@ class kSZ(HaloModel):
         if not(skip_electron_profile):
             if verbose: print('Defining electron profile')
             self.add_battaglia_profile(name=electron_profile_name,
-                                            family=electron_profile_family,
-                                            param_override=electron_profile_param_override,
-                                            nxs=electron_profile_nxs,
-                                            xmax=electron_profile_xmax,ignore_existing=False)
+                                       family=electron_profile_family,
+                                       param_override=electron_profile_param_override,
+                                       nxs=electron_profile_nxs,
+                                       xmax=electron_profile_xmax,ignore_existing=False,
+                                       physical_truncate=physical_truncate)
             if verbose: print('Defining electron profile: finished')
         
         if not(skip_hod):
