@@ -7,7 +7,7 @@ def interp(x,y,bounds_error=False,fill_value=0.,**kwargs):
 def vectorized_bisection_search(x,inv_func,ybounds,monotonicity,rtol=1e-4,verbose=True,hang_check_num_iter=20):
     """
     You have a monotonic one-to-one relationship x <-> y
-    You know the inverse function inv_func=x(y), 
+    You know the inverse function inv_func=x(y),
     but you don't know y(x).
     Find y for a given x using a bisection search
     assuming y is bounded in ybounds=(yleft,yright)
@@ -36,6 +36,9 @@ def vectorized_bisection_search(x,inv_func,ybounds,monotonicity,rtol=1e-4,verbos
             print("WARNING: Bisection search has done more than ", hang_check_num_iter,
                   " loops. Still searching...")
             warned = True
+            print("\tynow:", ynow)
+            print("\txnow:", xnow)
+            print("\tmtol:", mtol)
     if verbose: print("Bisection search converged in ", i, " iterations.")
     return ynow
 
@@ -48,4 +51,19 @@ def test_bisection_search():
     d = vectorized_bisection_search(xs,x_of_y,(1,40),'increasing',rtol=1e-4,verbose=True)
     assert np.all(np.isclose(d,eys,rtol=1e-3))
 
-#test_bisection_search()    
+
+def sanitize(inp):
+    """Set infinite or NaN values to zero in an array.
+
+    Parameters
+    ----------
+    inp : array_like
+        Input array.
+
+    Returns
+    -------
+    out : array_like
+        Sanitized array.
+    """
+    inp[~np.isfinite(inp)] = 0
+    return inp

@@ -11,7 +11,7 @@ This module will (eventually) abstract away the choice of boltzmann codes.
 However, it does it stupidly by simply providing a common
 stunted interface. It makes no guarantee that the same set
 of parameters passed to the two engines will produce the same
-results. It could be a test-bed for converging towards that. 
+results. It could be a test-bed for converging towards that.
 
 """
 
@@ -20,11 +20,11 @@ class Cosmology(object):
     def __init__(self,params=None,halofit=None,engine='camb'):
         assert engine in ['camb','class']
         if engine=='class': raise NotImplementedError
-        
+
         self.p = dict(params) if params is not None else {}
         for param in default_params.keys():
             if param not in self.p.keys(): self.p[param] = default_params[param]
-        
+
         # Cosmology
         self._init_cosmology(self.p,halofit)
 
@@ -36,7 +36,7 @@ class Cosmology(object):
         Ds = self.angular_diameter_distance(zsource)
         Dds = np.asarray([self.results.angular_diameter_distance2(zl,zsource) for zl in zlens])
         return cval**2 * Ds / 4 / np.pi / Gval / Dd / Dds
-        
+
 
     def P_mm_linear(self,zs,ks):
         pass
@@ -53,10 +53,17 @@ class Cosmology(object):
     def angular_diameter_distance(self,z):
         return self.results.angular_diameter_distance(z)
 
+    def comoving_volume(self,zmin,zmax):
+        # Comoving volume between zmin and zmax
+        return 4 * np.pi / 3 * (
+            self.comoving_radial_distance(zmax)**3
+            - self.comoving_radial_distance(zmin)**3
+        )
+
     def hubble_parameter(self,z):
         # H(z) in km/s/Mpc
         return self.results.hubble_parameter(z)
-    
+
     def h_of_z(self,z):
         # H(z) in 1/Mpc
         return self.results.h_of_z(z)
@@ -69,13 +76,13 @@ class Cosmology(object):
         except:
             H0 = params['H0']
             theta = None
-        try:        
-            omm = params['omm']        
-            h = params['H0']/100.      
-            params['omch2'] = omm*h**2-params['ombh2']     
-            print("WARNING: omm specified. Ignoring omch2.")       
-        except:        
-            pass        
+        try:
+            omm = params['omm']
+            h = params['H0']/100.
+            params['omch2'] = omm*h**2-params['ombh2']
+            print("WARNING: omm specified. Ignoring omch2.")
+        except:
+            pass
         self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
                                     cosmomc_theta=theta,ombh2=params['ombh2'],
                                     omch2=params['omch2'], mnu=params['mnu'],
@@ -90,47 +97,65 @@ class Cosmology(object):
         self.params = params
         self.h = self.params['H0']/100.
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
-        self.om0 = omh2 / (self.params['H0']/100.)**2.        
-        try: self.as8 = self.params['as8']        
+        self.om0 = omh2 / (self.params['H0']/100.)**2.
+        try: self.as8 = self.params['as8']
         except: self.as8 = 1
-        
+
     def _get_matter_power(self,zs,ks,nonlinear=False):
-        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
+        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear,
                                                 hubble_units=False,
                                                 k_hunit=False, kmax=ks.max(),
                                                 zmax=zs.max()+1.)
         return (self.as8**2.) * PK.P(zs, ks, grid=True)
 
-        
+
     def rho_matter_z(self,z):
         return self.rho_critical_z(0.) * self.om0 \
             * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3
 
-    def omz(self,z): 
+    def omz(self,z):
         return self.rho_matter_z(z)/self.rho_critical_z(z)
-    
+
     def rho_critical_z(self,z):
         Hz = self.hubble_parameter(z) * 3.241e-20 # SI # FIXME: constants need checking
         G = 6.67259e-11 # SI
         rho = 3.*(Hz**2.)/8./np.pi/G # SI
         return rho * 1.477543e37 # in msolar / megaparsec3
-    
+
     def D_growth(self, a):
         # From Moritz Munchmeyer?
-        
+
         _amin = 0.001    # minimum scale factor
         _amax = 1.0      # maximum scale factor
         _na = 512        # number of points in interpolation arrays
         atab = np.linspace(_amin,
                            _amax,
                            _na)
-        ks = np.logspace(np.log10(1e-5),np.log10(1.),num=100) 
+        ks = np.logspace(np.log10(1e-5),np.log10(1.),num=100)
         zs = a2z(atab)
         deltakz = self.results.get_redshift_evolution(ks, zs, ['delta_cdm']) #index: k,z,0
         D_camb = deltakz[0,:,0]/deltakz[0,0,0]
         _da_interp = interp1d(atab, D_camb, kind='linear')
         _da_interp_type = "camb"
         return _da_interp(a)/_da_interp(1.0)
+
+    def f_growth(self, a):
+        # f(a) (a/D) D'(a)
+        _DA = 0.001
+
+        # If user inputs a>1-_DA, shift down by _DA such that derivative doesn't use
+        # a > 1. Similarly with a<_DA
+        a_in = a.copy()
+        a_in[a_in >= 1 - _DA] -= _DA
+        a_in[a_in <=  _DA] += _DA
+
+        Dmean = self.D_growth(a_in)
+        Dplus = self.D_growth(a_in + _DA)
+        Dminus = self.D_growth(a_in - _DA)
+        dDda = (Dplus - Dminus) / (2 * _DA)
+        f = a_in * dDda / Dmean
+
+        return f
 
     def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
         """
@@ -144,18 +169,18 @@ class Cosmology(object):
         scales, and cosmological dependence is obtained through an accurate CAMB based P(k),
         one should be fine.
         """
-        tk = self.Tk(ks,'eisenhu_osc') 
+        tk = self.Tk(ks,'eisenhu_osc')
         assert knorm<kmax
-        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False, 
+        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False,
                                                      hubble_units=False, k_hunit=False, kmax=kmax,
                                                      zmax=zs.max()+1.)
         pnorm = PK.P(zs, knorm,grid=True)
         tnorm = self.Tk(knorm,'eisenhu_osc') * knorm**(self.params['ns'])
         plin = (pnorm/tnorm) * tk**2. * ks**(self.params['ns'])
         return (self.as8**2.) *plin
- 
+
     def P_lin_slow(self,ks,zs,kmax = 0.1):
-        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False, 
+        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False,
                                                      hubble_units=False, k_hunit=False, kmax=kmax,
                                                      zmax=zs.max()+1.)
         plin = PK.P(zs, ks,grid=True)
@@ -165,7 +190,7 @@ class Cosmology(object):
         """
         Pulled from cosmicpy https://github.com/cosmicpy/cosmicpy/blob/master/LICENSE.rst
         """
-        
+
         k = ks/self.h
         self.tcmb = 2.726
         T_2_7_sqr = (self.tcmb/2.7)**2
@@ -265,7 +290,7 @@ class Cosmology(object):
 
     def lensing_window(self,ezs,zs,dndz=None):
         """
-        Generates a lensing convergence window 
+        Generates a lensing convergence window
         W(z).
 
         zs: If (nz,) with nz>2 and dndz is not None, then these are the points
@@ -290,7 +315,7 @@ class Cosmology(object):
             integrand = (chistar[None,:] - chis[:,None])/chistar[None,:] * dndz[None,:]
             for i in range(integrand.shape[0]): integrand[i][zs<ezs[i]] = 0 # FIXME: vectorize this
             integral = np.trapz(integrand,zs,axis=-1)
-            
+
         return 1.5*self.om0*H0**2.*(1.+ezs)*chis/H * integral
 
     def C_kg(self,ells,zs,ks,Pgm,gzs,gdndz=None,lzs=None,ldndz=None,lwindow=None):
@@ -352,7 +377,7 @@ class Cosmology(object):
         chis = self.comoving_radial_distance(zs)
         hzs = self.h_of_z(zs) # 1/Mpc
         # Convert to y units
-        # 
+        #
 
         return limber_integral(ells,zs,ks,Ppp,zs,1,1,hzs,chis)
 
@@ -392,12 +417,12 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
     Wz1s = np.array(Wz1s).reshape(-1)
     Wz2s = np.array(Wz2s).reshape(-1)
     chis = np.array(chis).reshape(-1)
-    
+
     prefactor = hzs * Wz1s * Wz2s   / chis**2.
     zevals = gzs
-    if zs.size>1:            
-         f = interp2d(ks,zs,Pzks,bounds_error=True)     
-    else:      
+    if zs.size>1:
+         f = interp2d(ks,zs,Pzks,bounds_error=True)
+    else:
          f = interp1d(ks,Pzks[0],bounds_error=True)
     Cells = np.zeros(ells.shape)
     for i,ell in enumerate(ells):
@@ -411,4 +436,23 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
         if zevals.size==1: Cells[i] = interpolated * prefactor
         else: Cells[i] = np.trapz(interpolated*prefactor,zevals)
     return Cells
-    
+
+
+def R_from_M(M, rho, delta):
+    """Compute halo mass to radius.
+
+    Parameters
+    ----------
+    M : float
+        Halo mass in Msun.
+    rho : float
+        Mean background density.
+    delta : float
+        Threshold above rho that defines halo.
+
+    Returns
+    -------
+    R : float
+        Halo radius.
+    """
+    return (3. * M / 4. / np.pi / delta / rho) ** (1. / 3.)

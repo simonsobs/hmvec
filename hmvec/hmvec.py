@@ -1,16 +1,17 @@
 import sys,os
 import numpy as np
 from scipy.special import erf
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, RectBivariateSpline
 import camb
 from camb import model
 import numpy as np
-from . import tinker,utils
-from .cosmology import Cosmology
+from . import tinker,utils,hod
+from .cosmology import Cosmology, R_from_M
 
 import scipy.constants as constants
 from .params import default_params, battaglia_defaults
 from .fft import generic_profile_fft
+from .mstar_mhalo import Mstellar_halo, Mhalo_stellar
 import scipy
 from scipy.integrate import simps
 
@@ -42,29 +43,29 @@ k in the linear matter power. For this reason, low-mass halos
 are never accounted for correctly, and thus consistency relations do not hold.
 Currently the consistency relation is subtracted out to get the 2-halo
 power to agree with Plin at large scales.
-3. Higher redshifts have less than expected 1-halo power compared to halofit. 
+3. Higher redshifts have less than expected 1-halo power compared to halofit.
 
 Limitations:
 1. Tinker 2010 option and Sheth-Torman have only been coded up for M200m and mvir
 respectively.
 
- In Fisher calculations, I want to calculate power spectra at a fiducial parameter set      
- and at perturbed parameters (partial derivatives). The usual flowdown for a power      
- spectrum calculation is:       
- C1. initialize background cosmology and linear matter power        
- C2. calculate mass function        
- C3. calculate profiles and HODs        
- with each step depending on the previous. This means if I change a parameter associated        
- with C3, I don't need to recalculate C1 and C2. So a Fisher calculation with n-point derivatives       
- should be      
- done based on a parameter set p = {p1,p2,p3} for each of the above as follows:     
- 1. Calculate power spectra for fiducial p (1 C1,C2,C3 call each)       
- 2. Calculate power spectra for perturbed p3 (n C3 calls for each p3 parameter)     
- 3. Calculate power spectra for perturbed p2 (n C2,C3 calls for each p2 parameter)      
- 2. Calculate power spectra for perturbed p1 (n C1,C2,C3 calls for each p1 parameter)       
-        
+ In Fisher calculations, I want to calculate power spectra at a fiducial parameter set
+ and at perturbed parameters (partial derivatives). The usual flowdown for a power
+ spectrum calculation is:
+ C1. initialize background cosmology and linear matter power
+ C2. calculate mass function
+ C3. calculate profiles and HODs
+ with each step depending on the previous. This means if I change a parameter associated
+ with C3, I don't need to recalculate C1 and C2. So a Fisher calculation with n-point derivatives
+ should be
+ done based on a parameter set p = {p1,p2,p3} for each of the above as follows:
+ 1. Calculate power spectra for fiducial p (1 C1,C2,C3 call each)
+ 2. Calculate power spectra for perturbed p3 (n C3 calls for each p3 parameter)
+ 3. Calculate power spectra for perturbed p2 (n C2,C3 calls for each p2 parameter)
+ 2. Calculate power spectra for perturbed p1 (n C1,C2,C3 calls for each p1 parameter)
+
  """
-    
+
 
 def Wkr_taylor(kR):
     xx = kR*kR
@@ -73,7 +74,7 @@ def Wkr_taylor(kR):
 def Wkr(k,R,taylor_switch=default_params['Wkr_taylor_switch']):
     kR = k*R
     ans = 3.*(np.sin(kR)-kR*np.cos(kR))/(kR**3.)
-    ans[kR<taylor_switch] = Wkr_taylor(kR[kR<taylor_switch]) 
+    ans[kR<taylor_switch] = Wkr_taylor(kR[kR<taylor_switch])
     return ans
 
 def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
@@ -82,24 +83,56 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     beta = default_params['duffy_beta_mean'] if beta is None else beta
     h = default_params['H0'] / 100. if h is None else h
     return A*((h*m/2.e12)**alpha)*(1+z)**beta
-    
+
+def maccio_HI_concentration(m, z, c_HI0=None, gamma=None):
+    """Maccio et al. 2007 concentration-mass relation, adapted to HI.
+
+    We use the form fitted to HI profiles in Padmanabhan et al. 2017 (1611.06235),
+    Eq. 3.
+
+    Parameters
+    ----------
+    m : array_like
+        Halo masses to evaluate at. Must be broadcastable against z.
+    z : array_like
+        Redshifts to evaluate at. Must be broadcastable against m.
+    c_HI0, gamma: float, optional
+        Fit parameters in c-m relation. If not specified, use fitted values from paper.
+        Default: None.
+
+    Returns
+    -------
+    c_HI : array_like
+        HI concentrations, with shape determined by broadcasting m and z against each
+        other.
+    """
+    # Use values from Table 3 of 1611.06235
+    c_HI0 = default_params["maccio_HI_cHI0"] if c_HI0 is None else c_HI0
+    gamma = default_params["maccio_HI_gamma"] if gamma is None else gamma
+
+    return c_HI0 * (m / 1e11) ** -0.109 * 4 / (1 + z) ** gamma
+
+
 class HaloModel(Cosmology):
-    def __init__(self,zs,ks,ms=None,params=None,mass_function="sheth-torman",
+
+    def __init__(self,zs,ks,ms=None,mus=None,params=None,mass_function="sheth-torman",
                  halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accurate_sigma2=False):
         self.zs = np.asarray(zs)
         self.ks = ks
+        self.mus = mus
         self.accurate_sigma2 = accurate_sigma2
         Cosmology.__init__(self,params,halofit)
-        
+
         self.mdef = mdef
         self.mode = mass_function
         self.hods = {}
 
+
         # Mass function
-        if ms is not None: 
+        if ms is not None:
             self.ms = np.asarray(ms)
             self.init_mass_function(self.ms)
-        
+
         # Profiles
         self.uk_profiles = {}
         self.pk_profiles = {}
@@ -110,17 +143,21 @@ class HaloModel(Cosmology):
         self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
         if halofit is not None: self.nPzk = self._get_matter_power(self.zs,self.ks,nonlinear=True)
 
-        
+
     def deltav(self,z): # Duffy virial actually uses this from Bryan and Norman 1997
         # return 178. * self.omz(z)**(0.45) # Eke et al 1998
         x = self.omz(z) - 1.
         d = 18.*np.pi**2. + 82.*x - 39. * x**2.
         return d
     
-    def rvir(self,m,z):
-        if self.mdef == 'vir':
+    def rvir(self,m,z,mdef=None):
+
+        if mdef is None:
+            mdef = self.mdef
+
+        if mdef == 'vir':
             return R_from_M(m,self.rho_critical_z(z),delta=self.deltav(z))
-        elif self.mdef == 'mean':
+        elif mdef == 'mean':
             return R_from_M(m,self.rho_matter_z(z),delta=200.)
 
     def Rdelta_critical(self,M,z,delta=200):
@@ -133,8 +170,10 @@ class HaloModel(Cosmology):
     
     def R_of_m(self,ms):
         return R_from_M(ms,self.rho_matter_z(0),delta=1.) # note rhom0
-    
-    def get_sigma2(self):
+
+    def get_sigma2(self, vectorize_z=True):
+        _MAX_INTEGRAND_SIZE = 1e8
+
         ms = self.ms
         kmin = self.p['sigma2_kmin']
         kmax = self.p['sigma2_kmax']
@@ -148,10 +187,21 @@ class HaloModel(Cosmology):
         R = self.R_of_m(ms)[None,:,None]
         W2 = Wkr(ks,R,self.p['Wkr_taylor_switch'])**2.
         Ps = self.sPzk[:,None,:]
-        integrand = Ps*W2*ks**2./2./np.pi**2.
-        sigma2 = simps(integrand,ks,axis=-1)
+
+        # If N_z * N_m * N_k is large, compute sigma^2 separately for each z
+        # to avoid storing the integrands for each z in memory simultaneously.
+        # Otherwise, we perform the integrals on a single 3d integrand array.
+        if (Ps.shape[0] * np.prod(W2.shape[1:]) > _MAX_INTEGRAND_SIZE) or not vectorize_z:
+            sigma2 = np.zeros((Ps.shape[0], W2.shape[1]), dtype=Ps.dtype)
+            for zi in range(Ps.shape[0]):
+                integrand = Ps[zi] * W2[0] * ks[0]**2. / 2. / np.pi**2.
+                sigma2[zi] = simps(integrand, ks[0], axis=-1)
+        else:
+            integrand = Ps*W2*ks**2./2./np.pi**2.
+            sigma2 = simps(integrand,ks,axis=-1)
+
         return sigma2
-        
+
     def init_mass_function(self,ms):
         self.ms = ms
         self.sigma2 = self.get_sigma2()
@@ -173,7 +223,7 @@ class HaloModel(Cosmology):
             return nus * fnus # note that f is actually nu*fnu !
         else:
             raise NotImplementedError
-    
+
     def get_bh(self):
         sigma2 = self.sigma2
         deltac = self.p['st_deltac']
@@ -188,9 +238,20 @@ class HaloModel(Cosmology):
         else:
             raise NotImplementedError
 
-    def concentration(self,mode='duffy'):
+    def concentration(self, mode='duffy'):
+        """Compute concentration-mass relation.
+
+        Parameters
+        ----------
+        mode : one of {'duffy', 'maccio_HI'}, optional
+            Which c-m relation to use. Default: 'duffy'.
+
+        Returns
+        -------
+        Concentration values, packed as [z,m].
+        """
         ms = self.ms
-        if mode=='duffy':
+        if mode == 'duffy':
             if self.mdef == 'mean':
                 A = self.p['duffy_A_mean']
                 alpha = self.p['duffy_alpha_mean']
@@ -199,9 +260,15 @@ class HaloModel(Cosmology):
                 A = self.p['duffy_A_vir']
                 alpha = self.p['duffy_alpha_vir']
                 beta = self.p['duffy_beta_vir']
-            return duffy_concentration(ms[None,:],self.zs[:,None],A,alpha,beta,self.h)
+            return duffy_concentration(
+                ms[None, :], self.zs[:, None], A, alpha, beta, self.h
+            )
+        elif mode == 'maccio_HI':
+            return maccio_HI_concentration(ms[None, :], self.zs[:, None])
         else:
-            raise NotImplementedError
+            raise NotImplementedError(
+                "Concentration-mass relation %s not implemented!" % mode
+            )
 
     def get_nzm(self):
         sigma2 = self.sigma2
@@ -210,18 +277,18 @@ class HaloModel(Cosmology):
         fsigmaz = self.get_fsigmaz()
         dln_sigma_dlnm = np.gradient(ln_sigma_inv,np.log(ms),axis=-1)
         ms = ms[None,:]
-        return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2. 
+        return self.rho_matter_z(0) * fsigmaz * dln_sigma_dlnm / ms**2.
 
-    
+
     def add_battaglia_profile(self,name,family=None,param_override=None,
                               nxs=None,
-                              xmax=None,ignore_existing=False,physical_truncate=False):
+                              xmax=None,ignore_existing=False,vectorize_z=True,
+                              verbose=False,physical_truncate=False):
         if not(ignore_existing): assert name not in self.uk_profiles.keys(), "Profile name already exists."
         assert name!='nfw', "Name nfw is reserved."
         if nxs is None: nxs = self.p['electron_density_profile_integral_numxs']
         if xmax is None: xmax = self.p['electron_density_profile_integral_xmax']
 
-        
         # Set default parameters
         if family is None: family = self.p['battaglia_gas_family'] # AGN or SH?
         pparams = {}
@@ -230,7 +297,7 @@ class HaloModel(Cosmology):
 
         # Update with overrides
         if param_override is not None:
-            print(param_override)
+            if verbose: print(param_override)
             for key in param_override.keys():
                 if key=='battaglia_gas_gamma':
                     pparams[key] = param_override[key]
@@ -289,23 +356,70 @@ class HaloModel(Cosmology):
         """
         omb = self.p['ombh2'] / self.h**2.
         omm = self.om0
-        rhofunc = lambda x: rho_gas_generic_x(x,m200critz[...,None],self.zs[:,None,None],omb,omm,rhocritz[...,None,None],
-                                    gamma=pparams['battaglia_gas_gamma'],
-                                    rho0_A0=pparams['rho0_A0'],
-                                    rho0_alpham=pparams['rho0_alpham'],
-                                    rho0_alphaz=pparams['rho0_alphaz'],
-                                    alpha_A0=pparams['alpha_A0'],
-                                    alpha_alpham=pparams['alpha_alpham'],
-                                    alpha_alphaz=pparams['alpha_alphaz'],
-                                    beta_A0=pparams['beta_A0'],
-                                    beta_alpham=pparams['beta_alpham'],
-                                    beta_alphaz=pparams['beta_alphaz'])
 
-        rgs = r200critz/2.
-        cgs = rvirs/rgs
-        print(cgs.shape)
-        ks,ukouts = generic_profile_fft(rhofunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs)
-        self.uk_profiles[name] = ukouts.copy()
+        if vectorize_z:
+            rhofunc = lambda x: rho_gas_generic_x(
+                x,
+                m200critz[..., None],
+                self.zs[:, None, None],
+                omb,
+                omm,
+                rhocritz[..., None, None],
+                gamma=pparams['battaglia_gas_gamma'],
+                rho0_A0=pparams['rho0_A0'],
+                rho0_alpham=pparams['rho0_alpham'],
+                rho0_alphaz=pparams['rho0_alphaz'],
+                alpha_A0=pparams['alpha_A0'],
+                alpha_alpham=pparams['alpha_alpham'],
+                alpha_alphaz=pparams['alpha_alphaz'],
+                beta_A0=pparams['beta_A0'],
+                beta_alpham=pparams['beta_alpham'],
+                beta_alphaz=pparams['beta_alphaz']
+            )
+
+            rgs = r200critz/2.
+            cgs = rvirs/rgs
+            ks,ukouts = generic_profile_fft(rhofunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs)
+
+            self.uk_profiles[name] = ukouts.copy()
+
+        else:
+            # If we are computing for many redshifts, the memory cost of vectorizing over
+            # z may be substantial, so we also provide the option (via vectorize_z)
+            # to serialize over z
+            for zi, z in enumerate(self.zs):
+                rhofunc = lambda x: rho_gas_generic_x(
+                    x,
+                    m200critz[zi : zi+1, :, None],
+                    self.zs[zi : zi+1, None, None],
+                    omb,
+                    omm,
+                    rhocritz[zi : zi+1, None, None],
+                    gamma=pparams['battaglia_gas_gamma'],
+                    rho0_A0=pparams['rho0_A0'],
+                    rho0_alpham=pparams['rho0_alpham'],
+                    rho0_alphaz=pparams['rho0_alphaz'],
+                    alpha_A0=pparams['alpha_A0'],
+                    alpha_alpham=pparams['alpha_alpham'],
+                    alpha_alphaz=pparams['alpha_alphaz'],
+                    beta_A0=pparams['beta_A0'],
+                    beta_alpham=pparams['beta_alpham'],
+                    beta_alphaz=pparams['beta_alphaz']
+                )
+                rgs = r200critz[zi : zi + 1, :] / 2. # Packed as [z,m]
+                cgs = rvirs[zi : zi + 1, :] / rgs # Packed as [z,m]
+                ks, ukouts = generic_profile_fft(
+                    rhofunc, cgs, rgs[..., None], self.zs[zi : zi+1], self.ks, xmax, nxs
+                )
+
+                if zi == 0:
+                    self.uk_profiles[name] = np.zeros(
+                        (len(self.zs), len(self.ms), ukouts.shape[-1]), dtype=np.float64
+                    )
+
+                self.uk_profiles[name][zi, :] = ukouts[:]
+
+
 
     def add_battaglia_pres_profile(self,name,family=None,param_override=None,
                               nxs=None,
@@ -314,7 +428,7 @@ class HaloModel(Cosmology):
         assert name!='nfw', "Name nfw is reserved."
         if nxs is None: nxs = self.p['electron_pressure_profile_integral_numxs']
         if xmax is None: xmax = self.p['electron_pressure_profile_integral_xmax']
-        
+
         # Set default parameters
         if family is None: family = self.p['battaglia_pres_family'] # AGN or SH?
         pparams = {}
@@ -371,7 +485,7 @@ class HaloModel(Cosmology):
         sigmaT=constants.physical_constants['Thomson cross section'][0] # units m^2
         mElect=constants.physical_constants['electron mass'][0] / default_params['mSun']# units kg
         ks,pkouts = generic_profile_fft(presFunc,cgs,rgs[...,None],self.zs,self.ks,xmax,nxs,do_mass_norm=False)
-        self.pk_profiles[name] = pkouts.copy()*4*np.pi*(sigmaT/(mElect*constants.c**2))*(r200critz**3*((1+self.zs)**2/self.h_of_z(self.zs))[...,None])[...,None]            
+        self.pk_profiles[name] = pkouts.copy()*4*np.pi*(sigmaT/(mElect*constants.c**2))*(r200critz**3*((1+self.zs)**2/self.h_of_z(self.zs))[...,None])[...,None]
 
     def add_nfw_profile(self,name,numeric=False,
                         nxs=None,
@@ -389,7 +503,7 @@ class HaloModel(Cosmology):
         to lower halo masses.
         xmax decides accuracy on large scales
         nxs decides accuracy on small scales
-        
+
         """
         if not(ignore_existing): assert name not in self.uk_profiles.keys(), "Profile name already exists."
         if nxs is None: nxs = self.p['nfw_integral_numxs']
@@ -409,21 +523,158 @@ class HaloModel(Cosmology):
             Sic, Cic = scipy.special.sici((1.+cs)*x)
             ukouts = (np.sin(x)*(Sic-Si) - np.sin(cs*x)/((1+cs)*x) + np.cos(x)*(Cic-Ci))/mc
             self.uk_profiles[name] = ukouts.copy()
-        
+
         return self.ks,ukouts
 
-    def add_hod(self,name,mthresh=None,ngal=None,corr="max",
-                satellite_profile_name='nfw',
-                central_profile_name=None,ignore_existing=False,param_override=None):
+    def add_HI_profile(
+        self, name, numeric=False, nxs=None, xmax=None, ignore_existing=False
+    ):
+        """Precompute and store Fourier transform of HI density profile.
+
+        Parameters
+        ----------
+        name : one of {"padmanabhan17", "vn18"}, optional
+            Name for HI profile. Default: "padmanabhan17".
+        numeric : bool, optional
+            Whether to use analytical form of Fourier-space profile (False), or evaluate
+            FFT of position-space profile (True). Default: False.
+        nxs : integer, optional
+            Number of radial samples to use for FFT, linearly spaced from 0 to xmax.
+            If not specified, value taken from "HI_integral_numxs" entry of params dict.
+        xmax : float, optional
+            Maximum dimensionless radius to use in FFT, scaled accordingly for a given
+            profiles (e.g. for padmanabhan17, x = r / r_s). If not specified, value
+            taken from "HI_integral_xmax" entry of params dict.
+        ignore_existing : bool, optional
+            Whether to overwrite existing profile with given name. Default: False
+
+        Returns
+        -------
+        ks : array_like
+            Array of k values (in Mpc^-1) that u(k) is evaluated at.
+        ukouts : array_like
+            Output Fourier-space profiles, packed as [z,m,k].
         """
-        Specify an HOD.
-        This requires either a stellar mass threshold mthresh (nz,)
-        or a number density ngal (nz,) from which mthresh is identified iteratively.
-        You can either specify a corr="max" maximally correlated central-satellite 
-        model or a corr="min" minimally correlated model.
-        Miscentering could be included through central_profile_name (default uk=1 for default name of None).
+        if name not in ["padmanabhan17", "vn18"]:
+            raise NotImplementedError("HI profile %s not implemented!" % name)
+
+        if not ignore_existing and name in self.uk_profiles.keys():
+            raise ValueError("Profile %s already exists!" % name)
+
+        if nxs is None: nxs = self.p["HI_integral_numxs"]
+        if xmax is None: xmax = self.p["HI_integral_xmax"]
+
+        if name == "padmanabhan17":
+
+            if not numeric:
+                # Halo concentrations, packed as [z,m]
+                con = self.concentration(mode="maccio_HI")
+                # Halo masses, packed as [m]
+                ms = self.ms
+                # Virial radii, packed as [z,m]
+                rvir = self.rvir(ms[None, :], self.zs[:, None])
+                # Scale radii, packed as [z,m]
+                rs = rvir / con
+
+                # Eq. 7 of 1611.06235, normalized to unity at k=0.
+                # uk_profiles[name] is packed as [z,m,k]
+                x = self.ks[None, None, :] * rs[:, :, None] * (1 + self.zs[:,None,None])
+                self.uk_profiles[name] = (1 + x ** 2) ** -2
+
+            else:
+                raise NotImplementedError(
+                    "Numeric transform of Padmanabhan17 HI profile not implemented!"
+                )
+
+        elif name == "vn18":
+
+            if numeric:
+                # r_0 parameter values from "Model 1" section of Table 2 of 1804.09180
+                _R0_Z = np.array([0., 1., 2., 3., 4., 5.])
+                _R0_LOG10MH = (
+                    np.array([9, 10, 11, 12, 13, 14]) - np.log10(0.67)
+                ) # log10(M / Msun)
+                _R0_LOG10_VALS = np.array([
+                    [-3.59, -3.59, -2.8, -2.32, -1.71, -1.91], # z=0
+                    [-2.5, -3.72, -3.3, -2.32, -1.77, -1.71], # z=1
+                    [-3.2, -3.64, -2.75, -2.18, -1.74, -1.74], # z=2
+                    [-3.63, -3.1, -2.52, -2.09, -2.09, -2.09], # z=3
+                    [-3.3, -2.46, -2.32, -2.04, -2.04, -2.04], # z=4
+                    [-2.9, -2.28, -2.18, -2.02, -2.02, -2.02], # z=5
+                ]) - np.log10(0.67) # log10(val / Mpc)
+
+                # Define interpolating function for r_0 as function of z,m
+                log10r0_interp = RectBivariateSpline(_R0_Z, _R0_LOG10MH, _R0_LOG10_VALS)
+                def r0_interp(z, m):
+                    return 10 ** log10r0_interp.ev(z, np.log10(m))
+
+                # Dimensionless cutoff for profile integrals, taken to be 5 times
+                # default c-M relation
+                cmax = 5 * self.concentration()
+
+                # Scale radii, packed as [z,m]
+                z_mesh, m_mesh = np.meshgrid(self.zs, self.ms)
+                r0 = r0_interp(
+                    z_mesh.flatten(), m_mesh.flatten()
+                ).reshape(z_mesh.shape).T[..., None]
+
+                ks, ukouts = generic_profile_fft(
+                    lambda x: rho_nfw_x(x,rhoscale=1),
+                    cmax,
+                    r0,
+                    self.zs,
+                    self.ks,
+                    xmax,
+                    nxs
+                )
+                ukouts /= ukouts[:, :, 0][:, :, None]
+                self.uk_profiles[name] = ukouts.copy()
+
+            else:
+                raise NotImplementedError(
+                    "Analytical transform of VN18 HI profile does not exist!"
+                )
+
+        return self.ks, self.uk_profiles[name]
+
+    def add_hod(
+        self,
+        name,
+        family=hod.Leauthaud12_HOD,
+        corr="max",
+        satellite_profile_name='nfw',
+        central_profile_name=None,
+        ignore_existing=False,
+        param_override=None,
+        **kwargs
+    ):
+        """Precompute and store quantities related to a given HOD.
+
+        Possible HODs are defined as subclasses of HODBase in hod.py.
+
+        Parameters
+        ----------
+        name : string
+            Name for HOD. Quantities are fetched from name item
+            in hods dict.
+        family : hod.HODBase, optional
+            Name of HOD class. Default: hod.Leauthaud12_HOD.
+        corr : string, optional
+            Either "min" or "max", describing correlations in central-satellite model.
+            Default: "max"
+        satellite_profile_name : string, optional
+            Density profile for satellites. Default: "nfw"
+        central_profile_name : string, optional
+            Density profile for centrals, used to specify miscentering.
+            Default: None (correponds to uk=1)
+        ignore_existing : bool, optional
+            Whether to overwrite existing HOD with given name. Default: False
+        **param_override : dict, optional
+            Dict of parameter values to override defaults with. Default: None
         """
-        if not(ignore_existing): 
+
+        # Check for existing profiles or HODs with same name
+        if not(ignore_existing):
             assert name not in self.uk_profiles.keys(), \
                 "HOD name already used by profile."
         assert satellite_profile_name in self.uk_profiles.keys(), \
@@ -431,116 +682,446 @@ class HaloModel(Cosmology):
         if central_profile_name is not None:
             assert central_profile_name in self.uk_profiles.keys(), \
                 "No matter profile by that name exists."
-        if not(ignore_existing): 
+        if not(ignore_existing):
             assert name not in self.hods.keys(), "HOD with that name already exists."
 
-        hod_params = ['hod_sig_log_mstellar','hod_bisection_search_min_log10mthresh',
-                   'hod_bisection_search_max_log10mthresh','hod_bisection_search_rtol',
-                   'hod_bisection_search_warn_iter','hod_alphasat','hod_Bsat',
-                      'hod_betasat','hod_Bcut','hod_betacut','hod_A_log10mthresh']
-        # Set default parameters
-        pparams = {}
-        for ip in hod_params:
-            pparams[ip] = self.p[ip]
-
-        # Update with overrides
-        if param_override is not None:
-            for key in param_override.keys():
-                if key in hod_params:
-                    pparams[key] = param_override[key]
-                else:
-                    raise ValueError # param in param_override doesn't seem to be an HOD parameter
-        
-        
+        # Make dict entry to store info for new HOD, and store HOD object.
         self.hods[name] = {}
-        if ngal is not None:
-            try: assert ngal.size == self.zs.size
-            except:
-                raise ValueError("ngal has to be a vector of size self.zs")
-            assert mthresh is None
+        self.hods[name]["hod"] = family(
+            self.zs,
+            self.ms,
+            params=self.p,
+            nzm=self.nzm,
+            param_override=param_override,
+            corr=corr,
+            **kwargs
+        )
 
-            try:
-                Msat_override = pparams['hod_Msat_override']
-            except:
-                Msat_override = None
-            try:
-                Mcut_override = pparams['hod_Mcut_override']
-            except:
-                Mcut_override = None
-
-            nfunc = lambda ilog10mthresh: ngal_from_mthresh(ilog10mthresh,
-                                                            self.zs,
-                                                            self.nzm,
-                                                            self.ms,
-                                                            sig_log_mstellar=pparams['hod_sig_log_mstellar'],
-                                                            alphasat=pparams['hod_alphasat'],
-                                                            Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
-                                                            Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
-                                                            Msat_override=Msat_override,
-                                                            Mcut_override=Mcut_override)
-
-            log10mthresh = utils.vectorized_bisection_search(ngal,nfunc,
-                                                             [pparams['hod_bisection_search_min_log10mthresh'],
-                                                              pparams['hod_bisection_search_max_log10mthresh']],
-                                                             "decreasing",
-                                                             rtol=pparams['hod_bisection_search_rtol'],
-                                                             verbose=True,
-                                                             hang_check_num_iter=pparams['hod_bisection_search_warn_iter'])
-            mthresh = 10**(log10mthresh*pparams['hod_A_log10mthresh'])
-            
-        try: assert mthresh.size == self.zs.size
-        except:
-            raise ValueError("mthresh has to be a vector of size self.zs")
-
-        log10mhalo = np.log10(self.ms[None,:])
-        log10mstellar_thresh = np.log10(mthresh[:,None])
-        Ncs = avg_Nc(log10mhalo,self.zs[:,None],log10mstellar_thresh,sig_log_mstellar=pparams['hod_sig_log_mstellar'])
-        Nss = avg_Ns(log10mhalo,self.zs[:,None],log10mstellar_thresh,Nc=Ncs,
-                     sig_log_mstellar=pparams['hod_sig_log_mstellar'],
-                     alphasat=pparams['hod_alphasat'],
-                     Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
-                     Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
-                     Msat_override=Msat_override,
-                     Mcut_override=Mcut_override)
-        NsNsm1 = avg_NsNsm1(Ncs,Nss,corr)
-        NcNs = avg_NcNs(Ncs,Nss,corr)
-        
-        self.hods[name]['Nc'] = Ncs
-        self.hods[name]['Ns'] = Nss
-        self.hods[name]['NsNsm1'] = NsNsm1
-        self.hods[name]['NcNs'] = NcNs
-        self.hods[name]['ngal'] = self.get_ngal(Ncs,Nss)
-        self.hods[name]['bg'] = self.get_bg(Ncs,Nss,self.hods[name]['ngal'])
+        # Store precomputed HOD quantities.
+        # TODO: This is a bit redundant, since these quantities are also stored
+        # in self.hods[name]['hod'], but it's left here for consistency with previous
+        # routines
+        self.hods[name]['Nc'] = self.hods[name]['hod'].Nc
+        self.hods[name]['Ns'] = self.hods[name]['hod'].Ns
+        self.hods[name]['NsNsm1'] = self.hods[name]['hod'].NsNsm1
+        self.hods[name]['NsNsm1Nsm2'] = self.hods[name]['hod'].NsNsm1Nsm2
+        self.hods[name]['NcNs'] = self.hods[name]['hod'].NcNs
+        self.hods[name]['NcNsNsm1'] = self.hods[name]['hod'].NcNsNsm1
+        self.hods[name]['ngal'] = self.get_ngal(
+            self.hods[name]['Nc'], self.hods[name]['Ns']
+        )
+        self.hods[name]['bg'] = self.get_bg(
+            self.hods[name]['Nc'],
+            self.hods[name]['Ns'],
+            self.hods[name]['ngal']
+        )
         self.hods[name]['satellite_profile'] = satellite_profile_name
         self.hods[name]['central_profile'] = central_profile_name
-        self.hods[name]['log10mthresh'] = np.log10(mthresh[:,None])
-        
-    def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
 
-    def get_bg(self,Nc,Ns,ngal):
-        integrand = self.nzm * (Nc+Ns) * self.bh
-        return np.trapz(integrand,self.ms,axis=-1)/ngal
-    
+    def get_ngal(self, Nc, Ns):
+        integrand = self.nzm * (Nc + Ns)
+        return np.trapz(integrand, self.ms, axis=-1)
 
-    def _get_hod_common(self,name):
+    def sigma2_FoG(self, m, z):
+        """Compute squared mass-dependent Finger of God damping scale.
+
+        We follow Schaan & White 2021 (2103.01964, discussion between Eqs. 2.7 and 2.8)
+        in taking the damping scale to be sigma_d = sigma_{v,1d} / (aH), where the
+        line-of-sight velocity dispersion is that of a singular isothermal sphere with
+        radius r_vir and mass m.
+
+        Parameters
+        ----------
+        m : array_like, 1d
+            Halo masses to compute for, in Msun.
+        z : array_like, 1d
+            Redshifts to compute for.
+
+        Returns
+        -------
+        sigma_d2 : array_like
+            Sigma_d^2, packed as [z,m].
+        """
+
+        _GNEWTON = 4.30091e-9 # Mpc Msun^-1 km^2 s^-1; value from Wikipedia
+
+        # Compute sigma_v^2, packed as [z,m]. We need this r_vir to be physical,
+        # rather than comoving, but this should be what self.rvir() computes.
+        # Units of sigma_v^2 are km^2 s^-2
+        sigma_v2 = _GNEWTON * m[np.newaxis, :] / (
+            2 * self.rvir(m[np.newaxis, :], z[:, np.newaxis], mdef="vir")
+        )
+        # Compute sigma_d^2 = sigma_v^2 / (aH)^2, packed as [z,m].
+        # hubble_parameter(z) has units of km s^-1 Mpc^-1, so sigma_d2 has units of
+        # Mpc^2
+        sigma_d2 = sigma_v2 * (((1 + z) / self.hubble_parameter(z))**2)[:, np.newaxis]
+
+        return sigma_d2
+
+    def DFoG(self, kmu, func="Schaan"):
+        """Mass-dependent Finger of God damping function.
+
+        We follow Schaan & White 2021 (2103.01964, Eq. 2.7) in taking the damping
+        function to be an exponential with damping scale sigma_d, computed in the
+        sigma2_FoG routine. Lorentzian damping is also implemented
+
+        Parameters
+        ----------
+        kmu : array_like
+            k*mu values to compute for, packed as [k,mu].
+        func : {"Schaan", "Lorentzian"}, optional
+            Form of damping function. Default: "Schaan".
+
+        Returns
+        -------
+        factor : array_like
+            D_FoG(k, m, z, mu), packed as [z,m,k,mu].
+        """
+
+        if func == "Schaan":
+            factor = np.exp(
+                -0.5
+                * kmu[np.newaxis, np.newaxis, :, :] ** 2
+                * self.sigma2_FoG(self.ms, self.zs)[:, :, np.newaxis, np.newaxis]
+            )
+        elif func == "Lorentzian":
+            factor = 1 / (
+                1 + 0.5 * kmu[np.newaxis, np.newaxis, :, :] ** 2
+                * self.sigma2_FoG(self.ms, self.zs)[:, :, np.newaxis, np.newaxis]
+            )
+        else:
+            raise NotImplementedError(
+                "Specified DFoG function (%s) not implemented" % func
+            )
+        return factor
+
+    def get_bg(
+        self, Nc, Ns, ngal, lowklim=False, fog=False, u_name="nfw", vectorize_mu=True
+    ):
+        """Galaxy bias, optionally including effects of Fingers of God.
+
+        We follow Schaan & White 2021 (2103.01964, Eq. A.27) in incorporating a
+        mass-dependent Finger of God damping inside the integral over halo mass.
+        If this is ignored, b_g is only a function of z if lowklim=True or a function of
+        z and k if lowklim=False.
+
+        Parameters
+        ----------
+        Nc, Ns : array_like
+            N_c and N_s from a given HOD, packed as [z,m].
+        ngal : array_like
+            Mean galaxy number density, packed as [z].
+        lowklim : bool, optional
+            Whether to take b_g to be scale-independent, or incorporate the halo profile
+            u(k,m) in the computation of b_g. Default: False.
+        fog : bool, optional
+            Whether to include Finger of God effects. Affects dimensionality of output.
+            Default: False.
+        u_name : string, optional
+            Internal name for satellite galaxy profile. Default: "nfw".
+        vectorize_mu : bool, optional
+            Whether to vectorize in mu, which is faster than looping over mu but takes
+            more memory. Regardless of this option, we loop over mu if vectorization
+            would take an excessive amount of memory. Default: True.
+
+        Returns
+        -------
+        bg : array_like
+            Galaxy bias. If ignoring RSD, packed as [z] in low-k limit or [z,k] if not;
+            if including RSD, packed as [z,k,mu].
+        """
+
+        _MAX_INTEGRAND_SIZE = 1e8
+
+        if not fog:
+
+            if lowklim:
+                # Get integrand, packed as [z, m]
+                integrand = self.nzm * (Nc + Ns) * self.bh
+                # Integrate in m to get b_g(z)
+                bg = np.trapz(integrand, self.ms, axis=-1) / ngal
+
+            else:
+                # Get u(k,m,z) corresponding to satellite profile, packed as [z,m,k]
+                uk = self.uk_profiles[u_name]
+
+                # Get integrand, packed as [z,m,k]
+                integrand = self.nzm * (Nc + Ns) * self.bh
+                integrand = integrand[:, :, None] * uk
+
+                # Integrate in m, to get b_g(z, k, mu)
+                bg = np.trapz(integrand, self.ms, axis=1) / ngal[:, None]
+
+        else:
+
+            if self.mus is None:
+                raise RuntimeError("mu array not defined!")
+
+            # Get u(k,m,z) corresponding to satellite profile, packed as [z,m,k]
+            uk = self.uk_profiles[u_name]
+            # If full integrand, packed as [z,m,k,mu] would be too large
+            # to hold in memory at once, loop over mu:
+            if (
+                (np.prod(uk.shape) * self.mu.shape[0] > _MAX_INTEGRAND_SIZE)
+                or not vectorize_mu
+            ):
+                bg = np.zeros((uk.shape[0], uk.shape[2],) + self.mus.shape)
+                for mui, mu in enumerate(self.mu):
+                    # Form n(m) * b(m), packed as [z, m]
+                    integrand = self.nzm * self.bh
+                    # Multiply by (N_c(m) + N_s(m) u(k,m,z) D_FoG(k*mu)).
+                    # Result is packed as [z,m,k,mu], with a length-1 mu axis.
+                    integrand = (
+                        integrand[:, :, None, None]
+                        * (
+                            Nc[:, :, None, None]
+                            + Ns[:, :,  None, None]
+                            * uk[:, :, :, None]
+                            * self.DFoG(
+                                self.ks[:, None]
+                                * self.mu[mui : mui + 1][None, :]
+                            )
+                        )
+                    )
+                    # Integrate in m, to get b_g(z, k, mu)
+                    bg[:, :, mui : mui + 1] = np.trapz(
+                        integrand, self.ms, axis=1
+                    ) / ngal[:, None,  None]
+
+            # Otherwise, form whole integrand and integrate all at once
+            else:
+                # Form n(m) * b(m), packed as [z, m]
+                integrand = self.nzm * self.bh
+                # Multiply by (N_c(m) + N_s(m) D_FoG(k*mu)).
+                # Result is packed as [z,m,k,mu].
+                integrand = integrand[:, :, None, None] * (
+                    Nc[:, :, None, None]
+                    + Ns[:, :, None, None]
+                    * uk[:, :, :, None]
+                    * self.DFoG(self.ks[:, None] * self.mus[None, :])
+                )
+                # Integrate in m to get b_g(z,k,mu)
+                bg = np.trapz(integrand, self.ms, axis=1) / ngal[:, None,  None]
+
+        return bg
+
+    def get_fgrowth(self, fog=False, vectorize_mu=True):
+        """Logarithmic growth rate f(z), optionally Finger-of-God effects.
+
+        We follow Schaan & White 2021 (2103.01964, Eq. A.28) in incorporating a
+        mass-dependent Finger of God damping inside an integral over halo mass.
+        Alternatively, this can be ignored, such that f is only a function of z
+        instead of z, k, and mu.
+
+        Parameters
+        ----------
+        fog : bool, optional
+            Whether to include Finger of God effects. Affects dimensionality of output.
+            Default: False.
+        vectorize_mu : bool, optional
+            Whether to vectorize in mu, which is faster than looping over mu but takes
+            more memory. Regardless of this option, we loop over mu if vectorization
+            would take an excessive amount of memory. Default: True.
+
+        Returns
+        -------
+        f : array_like
+            Logarithmic growth rate. If ignoring RSD, packed as [z]; if including RSD,
+            packed as [z,k,mu].
+        """
+        _MAX_INTEGRAND_SIZE = 1e8
+
+        # Compute scale-independent growth rate f(z) = a D'(a) / D(a).
+        fz = self.f_growth(1/(1+self.zs))
+
+        if not fog:
+            return fz
+
+        else:
+
+            if self.mus is None:
+                raise RuntimeError("mu array not defined!")
+
+            # Get (m / rhobar_m) u_matter(k,m,z), packed as [z,m,k]
+            uk = self._get_matter("nfw")
+
+            # Compute normalization factor, \int dm n(m) (m / rhobar_m),
+            # packed as [z].
+            integrand = self.nzm[:, :] * uk[:, :, 0]
+            norm = np.trapz(integrand, self.ms, axis=1)
+
+            # If full integrand, packed as [z,m,k,mu] would be too large
+            # to hold in memory at once, loop over mu:
+            if (
+                (np.prod(uk.shape) * self.mu.shape[0] > _MAX_INTEGRAND_SIZE)
+                or not vectorize_mu
+            ):
+                f = np.zeros((uk.shape[0], uk.shape[2],) + self.mus.shape)
+                for mui, mu in enumerate(self.mu):
+                    # Form n(m) * (m / rhobar_m) u_matter(k,m,z), packed as [z,m,k]
+                    integrand = self.nzm[:, :, None] * uk
+                    # Multiply by D_FoG(k*mu).
+                    # Result is packed as [z,m,k,mu], with a length-1 mu axis.
+                    integrand = integrand[:, :, :, None] * self.DFoG(
+                        self.ks[:, None]
+                        * self.mu[mui : mui + 1][None, :]
+                    )
+                    # Integrate in m to get f(z, k, mu) / f_{scale-independent}(z)
+                    f[:, :, mui : mui + 1] = np.trapz(integrand, self.ms, axis=1)
+
+                # Finally, multiply by f_{scale-independent}(z), and divide by
+                # normalization factor
+                f *= (fz / norm)[:, None, None]
+
+            # Otherwise, form whole integrand and integrate all at once
+            else:
+                # Form n(m) * (m / rhobar_m) u_matter(k,m,z), packed as [z,m,k]
+                integrand = self.nzm[:, :, None] * uk
+                # Multiply by D_FoG(k*mu).
+                # Result is packed as [z,m,k,mu].
+                integrand = (
+                    integrand[:, :, :, None]
+                    * self.DFoG(self.ks[:, None] * self.mu[None, :])
+                )
+                # Integrate in m to get f(z, k, mu) / f_{scale-independent}(z)
+                f = np.trapz(integrand, self.ms, axis=1)
+                # Finally, multiply by f_{scale-independent}(z)
+                f *= (fz / norm)[:, None, None]
+
+            return f
+
+
+    def _get_hod_common(self, name):
+        """Fetch dict of HOD quantities and u_c, u_s profiles.
+
+        Parameters
+        ----------
+        name : string
+            Internal name for HOD.
+
+        Returns
+        -------
+        hod : dict
+            Dict of precomputed HOD quantities.
+        uc, us : array_like
+            Central and satellite profiles, packed as [z,m,k].
+        """
         hod = self.hods[name]
         cname = hod['central_profile']
         sname = hod['satellite_profile']
         uc = 1 if cname is None else self.uk_profiles[cname]
         us = self.uk_profiles[sname]
-        return hod,uc,us
-    
-    def _get_hod_square(self,name):
-        hod,uc,us = self._get_hod_common(name)
-        return (2.*uc*us*hod['NcNs'][...,None]+hod['NsNsm1'][...,None]*us**2.)/hod['ngal'][...,None,None]**2.
+        return hod, uc, us
 
-    def _get_hod(self,name,lowklim=False):
-        hod,uc,us = self._get_hod_common(name)
+    def _get_hod_square(self, name, fog=False, mui=None):
+        """Fetch HOD-specific factors in P_1h integrand.
+
+        Without FoG, this computes
+            (2 u_c u_s N_c N_s + u_s^2 N_s^2) / n_gal^2 .
+        Including RSD, this becomes (see Schaan & White 2021 (2103.01964), Eq. A.29)
+            (2 u_c u_s N_c N_c D_FoG + u_s^2 N_s^2 D_FoG^2) / n_gal^2 .
+
+        Parameters
+        ----------
+        name : string
+            Internal name for HOD.
+        fog : bool, optional
+            Whether to include FoG. Affects dimensionality of output. Default: False.
+        mui : int, optional
+            If specified, we compute for mu = self.mus[mui] instead of all mu's at once.
+            Default: None.
+
+        Returns
+        -------
+        s : array_like
+            Product of factors in P_1h integrand. If ignoring RSD, packed as [z,m,k];
+            if including FoG, packed as [z,m,k,mu].
+        """
+        # uc, us packed as [z,m,k]
+        hod, uc, us = self._get_hod_common(name)
+
+        if fog:
+            # Make array of k*mu, packed as [k,mu]
+            if mui is None:
+                kmu = self.ks[:, None] * self.mus[None, :]
+            else:
+                kmu = self.ks[:, None] * self.mus[None, mui : mui+1]
+            # Compute (2 u_c u_s N_c N_c D_FoG + u_s^2 N_s^2 D_FoG^2) / n_gal^2,
+            # packed as [z,m,k,mu]
+            if np.asarray(uc).size > 1: uc = uc[..., None]
+            return (
+                2
+                * uc
+                * us[..., None]
+                * hod['NcNs'][..., None, None]
+                * self.DFoG(kmu)
+                + hod['NsNsm1'][..., None, None]
+                * us[..., None] ** 2
+                * self.DFoG(kmu) ** 2
+            ) / hod['ngal'][..., None, None, None] ** 2
+        else:
+            # Compute (2 u_c u_s N_c N_s + u_s^2 N_s^2) / n_gal^2, packed as [z,m,k]
+            return (
+                2 * uc * us * hod['NcNs'][..., None]
+                + hod['NsNsm1'][..., None] * us ** 2
+            ) / hod['ngal'][..., None, None] ** 2
+
+    def _get_hod(self, name, lowklim=False, fog=False, mui=None):
+        """Fetch HOD-specific factors for single-tracer contribution to P_1h.
+
+        Without RSD, this computes
+            (u_c N_c + u_s N_s) / n_gal .
+        Including RSD, this becomes (see Schaan & White 2021 (2103.01964), Eq. A.29)
+            (u_c N_c + u_s N_s D_FoG) / n_gal .
+
+        Parameters
+        ----------
+        name : string
+            Internal name for HOD.
+        lowklim : bool, optional
+            If True, take low-k limit of profiles and FoG damping. Default: False.
+        fog : bool, optional
+            Whether to include FoG. Affects dimensionality of output. Default: False.
+        mui : int, optional
+            If specified, we compute for mu = self.mus[mui] instead of all mu's at once.
+            Default: None.
+
+        Returns
+        -------
+        s : array_like
+            Product of factors in P_1h integrand. If ignoring RSD, packed as [z,m,k];
+            if including RSD, packed as [z,m,k,mu].
+        """
+        # uc, us packed as [z,m,k]
+        hod, uc, us = self._get_hod_common(name)
         if lowklim:
             uc = 1
             us = 1
-        return (uc*hod['Nc'][...,None]+us*hod['Ns'][...,None])/hod['ngal'][...,None,None]
-    
+
+        if fog:
+            # Make array of k*mu, packed as [k,mu]
+            if mui is None:
+                kmu = self.ks[:, None] * self.mus[None, :]
+            else:
+                kmu = self.ks[:, None] * self.mus[None, mui : mui+1]
+            # Compute (u_c N_c + u_s N_s D_FoG), packed as [z,m,k,mu]
+            if np.asarray(uc).size > 1: uc = uc[..., None]
+            if np.asarray(us).size > 1: us = us[..., None]
+            if lowklim:
+                dfog = 1
+            else:
+                dfog = self.DFoG(kmu)
+            return (
+                uc * hod['Nc'][..., None, None]
+                + us * hod['Ns'][..., None, None] * dfog
+            ) / hod['ngal'][..., None, None, None]
+        else:
+            # Compute (u_c N_c + u_s N_s) / n_gal, packed as [z,m,k]
+            return (
+                (uc * hod['Nc'][..., None] + us * hod['Ns'][...,None])
+                / hod['ngal'][..., None, None]
+            )
+
     def _get_matter(self,name,lowklim=False):
         ms = self.ms[...,None]
         uk = self.uk_profiles[name]
@@ -553,79 +1134,934 @@ class HaloModel(Cosmology):
         return pk
 
 
-    def get_power(self,name,name2=None,verbose=True,b1=None,b2=None):
+    def get_power(
+        self,
+        name,
+        name2=None,
+        verbose=False,
+        b1=None,
+        b2=None,
+        m_integrand=False,
+        rsd=False,
+        fog=False
+    ):
+        """Compute halo model power spectrum for specified profiles.
+
+        This is the sum of the 1-halo and 2-halo terms.
+
+        Parameters
+        ----------
+        name, name2 : string, optional
+            Internal tracer names. Default: "nfw" for name1, None for name2.
+        verbose : bool, optional
+            Whether to print debugging information. Default: False.
+        b1, b2 : array_like, optional
+            Low-k linear bias for each tracer. If specified, override internal
+            computations of these linear biases. Not applied to factors involving RSD.
+            Default: None.
+        m_integrand : bool, optional
+            Whether to return dP/dm. Affects dimensionality of output.
+            Default: False.
+        rsd : bool, optional
+            Whether to include RSD (Kaiser and FoG effects). RSD is only included in
+            factors computed based on an HOD. Kaiser effect is always included, but
+            FoG is controlled separately by fog parameter. Affects dimensionality of
+            output. Default: False.
+        fog : bool, optional
+            Whether to include FoG. Default: False.
+
+        Returns
+        -------
+        P : array_like
+            Sum of 1-halo and 2-halo terms. Packing depends on inclusion of RSD and
+            whether m integrand is requested:
+                - No RSD, m integral: [z,k].
+                - No RSD, m integrand: [z,m,k].
+                - RSD, m integral: [z,k,mu].
+                - RSD, m integrand: not implemented, but would be [z,m,k,mu].
+        """
+        if fog and not rsd:
+            raise ValueError("Cannot include FoG without RSD!")
+
         if name2 is None: name2 = name
-        return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose,b1,b2)
-    
-    def get_power_1halo(self,name="nfw",name2=None):
+        return (
+            self.get_power_1halo(name, name2, m_integrand=m_integrand, fog=fog)
+            + self.get_power_2halo(
+                name, name2, verbose, b1, b2, m_integrand=m_integrand, rsd=rsd, fog=fog
+            )
+        )
+
+    def get_power_1halo(self, name="nfw", name2=None, m_integrand=False, fog=False):
+        """Compute P_1h(k,z) for specified profiles.
+
+        Parameters
+        ----------
+        name, name2 : string, optional
+            Internal tracer names. Default: "nfw" for name1, None for name2.
+        m_integrand : bool, optional
+            Whether to return dP_2h/dm. Affects dimensionality of output. Not
+            implemented if RSD is turned on. Default: False.
+        fog : bool, optional
+            Whether to include Finger of God effect (only included in
+            factors computed based on an HOD). Affects dimensionality of output.
+            Default: False.
+
+        Returns
+        -------
+        P_1h : array_like
+            1-halo term. Packing depends on inclusion of RSD and whether m integrand
+            is requested:
+                - No FoG, m integral: [z,k].
+                - No FoG, m integrand: [z,m,k].
+                - FoG, m integral: [z,k,mu].
+                - FoG, m integrand: not implemented, but would be [z,m,k,mu].
+        """
+        if fog and m_integrand:
+            raise NotImplementedError("M integrand output not implemented with FoG")
+
+        name2 = name if name2 is None else name2
+        hnames = self.hods.keys()
+
+        if fog and (name in hnames or name2 in hnames):
+            return self._get_power_1halo_fog(name=name, name2=name2)
+        else:
+            return self._get_power_1halo_nofog(
+                name=name, name2=name2, m_integrand=m_integrand
+            )
+
+    def _get_power_1halo_nofog(self, name="nfw", name2=None, m_integrand=False):
+        """Compute P_1h(k,z) for specified profiles, without FoG.
+
+        Parameters
+        ----------
+        name, name2 : string, optional
+            Internal tracer names. Default: "nfw" for name1, None for name2.
+        m_integrand : bool, optional
+            Whether to return dP_2h/dm. Affects dimensionality of output.
+            Default: False.
+
+        Returns
+        -------
+        P_1h : array_like
+            1-halo term. Packing depends on whether m integrand is requested:
+                - M integral: [z,k].
+                - M integrand: [z,m,k].
+        """
         name2 = name if name2 is None else name2
         ms = self.ms[...,None]
         mnames = self.uk_profiles.keys()
         hnames = self.hods.keys()
-        pnames =self.pk_profiles.keys()
-        if (name in hnames) and (name2 in hnames): 
-            square_term = self._get_hod_square(name)
-        elif (name in pnames) and (name2 in pnames): 
+        pnames = self.pk_profiles.keys()
+
+        if (name in hnames) and (name2 in hnames):
+            square_term = self._get_hod_square(name, fog=False)
+        elif (name in pnames) and (name2 in pnames):
             square_term = self._get_pressure(name)**2
         else:
-            square_term=1.
-            for nm in [name,name2]:
+            square_term = 1
+            for nm in [name, name2]:
                 if nm in hnames:
-                    square_term *= self._get_hod(nm)
+                    square_term *= self._get_hod(nm, fog=False)
                 elif nm in mnames:
                     square_term *= self._get_matter(nm)
                 elif nm in pnames:
                     square_term *= self._get_pressure(nm)
-                else: raise ValueError
-        
-        integrand = self.nzm[...,None] * square_term
-        return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
-    
-    def get_power_2halo(self,name="nfw",name2=None,verbose=False,b1_in=None,b2_in=None):
+                else:
+                    raise ValueError("Profile %s not computed!" % nm)
+
+        integrand = self.nzm[..., None] * square_term
+
+        if m_integrand:
+            # Return full integrand, packed as [z,m,k]
+            return (
+                integrand * (
+                    1 - np.exp(-(self.ks / self.p['kstar_damping']) ** 2)
+                )[None, None, :]
+            )
+        else:
+            # Integrate in m, and return result packed as [z,k]
+            return (
+                np.trapz(integrand,ms,axis=-2)
+                * (1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
+            )
+
+    def _get_power_1halo_fog(self, name="nfw", name2=None):
+        """Compute P_1h(k,z) for specified profiles, including FoG.
+
+        Parameters
+        ----------
+        name, name2 : string, optional
+            Internal tracer names. Default: "nfw" for name1, None for name2.
+
+        Returns
+        -------
+        P_1h : array_like
+            1-halo term, packed as [z,k,mu].
+        """
+        _MAX_INTEGRAND_SIZE = 1e8
+
         name2 = name if name2 is None else name2
-        
+        mnames = self.uk_profiles.keys()
+        hnames = self.hods.keys()
+        pnames = self.pk_profiles.keys()
+
+        term1 = None
+        term2 = None
+
+        # Fetch matter and/or pressure profiles, if either are desired
+        if name in mnames:
+            term1 = self._get_matter(name)[..., None]
+        elif name in pnames:
+            term1 = self._get_pressure(name)[..., None]
+
+        if name2 in mnames:
+            term2 = self._get_matter(name2)[..., None]
+        elif name2 in pnames:
+            term2 = self._get_pressure(name2)[..., None]
+
+        # If full integrand would be too large to store in memory, loop over mu,
+        # performing m integral separately for each mu
+        integrand_size = len(self.zs) * len(self.ms) * len(self.ks) * len(self.mus)
+        if integrand_size > _MAX_INTEGRAND_SIZE:
+
+            p1h = np.zeros((len(self.zs), len(self.ks), len(self.mus)))
+
+            for mui, mu in enumerate(self.mus):
+                # Get m integrand
+                if (name in hnames) and (name2 in hnames):
+                    square_term = self._get_hod_square(name, fog=True, mui=mui)
+                elif (name in hnames) and (name2 not in hnames):
+                    square_term = self._get_hod(name, fog=True, mui=mui) * term2
+                elif (name not in hnames) and (name2 in hnames):
+                    square_term = term1 * self._get_hod(name2, fog=True, mui=mui)
+                integrand = self.nzm[..., None, None] * square_term
+                # Do m integral
+                p1h[:, :, mui : mui + 1] = np.trapz(integrand, self.ms, axis=1) * (
+                    1 - np.exp(
+                        - (self.ks[None, :, None] / self.p['kstar_damping']) ** 2
+                    )
+                )
+
+        else:
+            # Get m integrand
+            if (name in hnames) and (name2 in hnames):
+                square_term = self._get_hod_square(name, fog=True)
+            elif (name in hnames) and (name2 not in hnames):
+                square_term = self._get_hod(name, fog=True) * term2
+            elif (name not in hnames) and (name2 in hnames):
+                square_term = term1 * self._get_hod(name2, fog=True)
+            integrand = self.nzm[..., None, None] * square_term
+            # Do m integral
+            p1h = np.trapz(integrand, self.ms, axis=1) * (1 - np.exp(
+                - (self.ks[None, :, None] / self.p['kstar_damping']) ** 2
+            ))
+
+        return p1h
+
+
+    def get_power_2halo(
+        self,
+        name="nfw",
+        name2=None,
+        verbose=False,
+        b1_in=None,
+        b2_in=None,
+        m_integrand=False,
+        rsd=False,
+        fog=False
+    ):
+        """Compute P_2h(k,z) for specified profiles.
+
+        This implements a low-k consistency condition that ensures that P_2h is equal
+        to b_A b_B P_lin in the low-k limit, where A and B are the 2 tracers we are
+        computing for.
+
+        Parameters
+        ----------
+        name, name2 : string, optional
+            Internal tracer names. Default: "nfw" for name1, None for name2.
+        verbose : bool, optional
+            Whether to print debugging information. Default: False.
+        b1_in, b2_in : array_like, optional
+            Low-k linear bias for each tracer. If specified, override internal
+            computations of these linear biases. If using RSD and computing for
+            galaxies, adjust overall normalization of b_g(z,k,mu) to equal the input
+            bias in the low-k limit. Default: None.
+        m_integrand : bool, optional
+            Whether to return dP_2h/dm. Affects dimensionality of output.
+            Default: False.
+        rsd : bool, optional
+            Whether to include RSD (Kaiser and FoG effects). FoG is only included in
+            factors computed based on an HOD, and is separately controlled by fog
+            parameter. Affects dimensionality of output.
+            Default: False.
+        fog : bool, optional
+            Whether to include FoG. Default: False.
+
+        Returns
+        -------
+        P_2h : array_like
+            2-halo term. Packing depends on inclusion of RSD and whether m integrand
+            is requested:
+                - No RSD, m integral: [z,k].
+                - No RSD, m integrand: [z,m,k].
+                - RSD, m integral: [z,k,mu].
+                - RSD, m integrand: not implemented, but would be [z,m,k,mu].
+        """
+        name2 = name if name2 is None else name2
+
+        def _2halointegrand(iterm):
+            # Compute n(m) * b_h(m) * [Fourier-space profile]
+            return self.nzm[..., None] * iterm * self.bh[..., None]
+
         def _2haloint(iterm):
-            integrand = self.nzm[...,None] * iterm * self.bh[...,None]
-            integral = np.trapz(integrand,ms,axis=-2)
+            # Compute \int dm n(m) b_h(m) [Fourier-space profile]
+            integrand = _2halointegrand(iterm)
+            integral = np.trapz(integrand, self.ms[..., None], axis=-2)
             return integral
 
         def _get_term(iname):
+            # Get Fourier-space profile, low-k limit of this profile, and linear bias
             if iname in self.uk_profiles.keys():
+                # Matter profile (m / rhobar_m) u(k,m,z), with b=1
                 rterm1 = self._get_matter(iname)
-                rterm01 = self._get_matter(iname,lowklim=True)
+                rterm01 = self._get_matter(iname, lowklim=True)
                 b = 1
             elif iname in self.pk_profiles.keys():
+                # Pressure profile, with b=0 and low-k limit also set to 0
                 rterm1 = self._get_pressure(iname)
-                rterm01 = self._get_pressure(iname,lowklim=True)
+                rterm01 = self._get_pressure(iname, lowklim=True)
                 print ('Check the consistency relation for tSZ')
-                b = rterm01 =0
+                b = rterm01 = 0
             elif iname in self.hods.keys():
+                # Profile from HOD, with b also computed from HOD
                 rterm1 = self._get_hod(iname)
-                rterm01 = self._get_hod(iname,lowklim=True)
-                b = self.get_bg(self.hods[iname]['Nc'],self.hods[iname]['Ns'],self.hods[iname]['ngal'])[:,None]
-            else: raise ValueError
-            return rterm1,rterm01,b
-            
-        ms = self.ms[...,None]
+                rterm01 = self._get_hod(iname, lowklim=True)
+                b = self.get_bg(
+                    self.hods[iname]['Nc'],
+                    self.hods[iname]['Ns'],
+                    self.hods[iname]['ngal'],
+                    fog=fog
+                )
+                # If only using Kaiser RSD, extend b axes from [z,k] to [z,k,mu]
+                if rsd and not fog:
+                    b = b[:, None]
+            else: raise ValueError("Profile %s not defined!" % iname)
+            return rterm1, rterm01, b
+
+        if rsd and (name not in self.hods.keys() and name2 not in self.hods.keys()):
+            raise RuntimeError("RSD can only be applied to galaxy factors in P_2h!")
+
+        if rsd and m_integrand:
+            raise NotImplementedError("M integrand output not implemented with RSD")
+
+        # If needed for either tracer, compute F(k,mu,z)
+        if rsd and (name in self.hods.keys() or name2 in self.hods.keys()):
+            if verbose: print("Computing f")
+            fg = self.get_fgrowth(fog=fog)
+            if not fog:
+                fg = fg[:, None, None]
+
+        # Compute effective bias factor for tracer 1
+        if rsd and (name in self.hods.keys()):
+            if verbose: print("Tracer 1: computing b")
+            b1 = self.get_bg(
+                self.hods[name]['Nc'],
+                self.hods[name]['Ns'],
+                self.hods[name]['ngal'],
+                fog=fog,
+                lowklim=False,
+                u_name=self.hods[name]['satellite_profile']
+            )
+            if not fog:
+                b1 = b1[:, :, None]
+            if b1_in is not None:
+                b1 *= (b1_in[:, None] / b1[:, 0])[:, None, :]
+            factor1 = (b1 + fg * self.mu[None, None, :] ** 2)
+        else:
+            # Compute get Fourier-space profile for name, name2
+            iterm1, iterm01, b1 = _get_term(name)
+            # Set linear bias factors to inputs, if specified
+            if b1_in is not None:
+                b1 = b1_in.reshape((b1_in.shape[0],1))
+
+            # Compute \int dm n(m) b_h(m) [Fourier-space profile] for name, name2
+            integral = _2haloint(iterm1)
+            # For halo bias consistency relation, compute
+            # \int dm n(m) b_h(m) [Fourier-space profile]
+            # using low-k limit of profile
+            consistency1 = _2haloint(iterm01)
+            # Compute bias factor for P_2h
+            factor1 = integral + b1 - consistency1
+            if rsd:
+                factor1 = factor1[..., np.newaxis]
+
+        # Compute effective bias factor for tracer 2
+        if rsd and (name2 in self.hods.keys()):
+            if verbose: print("Tracer 2: computing b")
+            b2 = self.get_bg(
+                self.hods[name2]['Nc'],
+                self.hods[name2]['Ns'],
+                self.hods[name2]['ngal'],
+                fog=fog,
+                lowklim=False,
+                u_name=self.hods[name2]['satellite_profile']
+            )
+            if not fog:
+                b2 = b2[:, :, None]
+            if b2_in is not None:
+                b2 *= (b2_in[:, None] / b2[:, 0])[:, None, :]
+            factor2 = (b2 + fg * self.mu[np.newaxis, np.newaxis, :] ** 2)
+        else:
+            iterm2, iterm02, b2 = _get_term(name2)
+            if b2_in is not None:
+                b2 = b2_in.reshape((b2_in.shape[0],1))
+
+            integral2 = _2haloint(iterm2)
+            consistency2 = _2haloint(iterm02)
+            factor2 = integral2 + b2 - consistency2
+            if rsd:
+                factor2 = factor2[..., None]
 
 
-        iterm1,iterm01,b1 = _get_term(name)
-        iterm2,iterm02,b2 = _get_term(name2)
+        if m_integrand:
+            # Return dP_2h / dM, packed as [z,m,k].
+            # There is a question of how to incorporate the
+            # normalization from the consistency relation into this. The
+            # prescription below, which takes d(consistency)/dM=0, seems to work,
+            # in that integrating it in M gives a result that's pretty close
+            # to the full result.
+            prefactor = (
+                _2halointegrand(iterm1)
+                * (integral2+b2-consistency2)[..., None, :]
+                + (integral+b1-consistency1)[..., None, :]
+                * _2halointegrand(iterm2)
+            )
+            return prefactor * self.Pzk[..., None, :]
+
+        else:
+            if rsd:
+                # Result packed as [z,k,mu].
+                return self.Pzk[:, :, None] * factor1 * factor2
+            else:
+                # Subtract the low-k limit from each integral, and then add the linear
+                # bias. This is redundant for P_gg, but for P_mm it ensures that P_2h
+                # is equal to P_lin in the low-k limit.
+                # The resulting P_2h is packed as [z,k]
+                # if verbose:
+                #     print("Two-halo consistency1: " , consistency1,integral)
+                #     print("Two-halo consistency2: " , consistency2,integral2)
+                return self.Pzk * factor1 * factor2
+
+    def get_bispectrum(
+        self,
+        name="g",
+        name2=None,
+        name3=None,
+        b1_in=None,
+        verbose=False,
+        zi=None
+    ):
+        """Compute halo model bispectrum for specified profiles
+
+        Currently only implemented for B_ggg, without RSD.
+
+        Parameters
+        ----------
+        name, name2, name3 : string, optional
+            Internal tracer names. Default: "g" for name1, None for name2 and name3.
+        b1_in : array_like, optional
+            Low-k linear bias. If specified, override internal computations of linear
+            bias. Default: None.
+        verbose : bool, optional
+            Whether to print debugging information. Default: False.
+        zi : int, optional
+            If specified, only compute bispectrum for redshift corresponding to
+            self.zs[zi]. Affects dimensionality of output. Default: None.
+
+        Returns
+        -------
+        B : array_like
+            Bispectrum, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if zi is
+            specified.
+        """
+        return (
+            self.get_bispectrum_3halo(
+                name, name2=name2, name3=name3, b1_in=b1_in, zi=zi
+            )
+            + self.get_bispectrum_2halo(
+                name, name2=name2, name3=name3, b1_in=b1_in, verbose=verbose, zi=zi
+            )
+            + self.get_bispectrum_1halo(
+                name, name2=name2, name3=name3, verbose=verbose, zi=zi
+            )
+        )
+
+    def get_bispectrum_3halo(
+        self,
+        name="g",
+        name2=None,
+        name3=None,
+        b1_in=None,
+        zi=None
+    ):
+        """Compute B_3h(k1,k2,k3,z) for specified profiles.
+
+        Currently only implemented for B_ggg, without RSD.
+
+        Parameters
+        ----------
+        name, name2, name3 : string, optional
+            Internal tracer names. Default: "g" for name1, None for name2 and name3.
+        b1_in : array_like, optional
+            Low-k linear bias. If specified, override internal computations of linear
+            bias. Default: None.
+        zi : int, optional
+            If specified, only compute bispectrum for redshift corresponding to
+            self.zs[zi]. Affects dimensionality of output. Default: None.
+
+        Returns
+        -------
+        B_3h : array_like
+            3-halo term, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if zi is
+            specified.
+        """
+        name2 = name if name2 is None else name2
+        name3 = name if name3 is None else name3
+
+        def _3halointegrand(iterm):
+            # Compute n(m) * b_h(m) * [Fourier-space profile]
+            if zi is None:
+                return self.nzm[..., None] * iterm * self.bh[..., None]
+            else:
+                return self.nzm[zi, :, None] * iterm * self.bh[zi, :, None]
+
+        def _3haloint(iterm):
+            # Compute \int dm n(m) b_h(m) [Fourier-space profile]
+            integrand = _3halointegrand(iterm)
+            integral = np.trapz(integrand, self.ms[..., None], axis=-2)
+            return integral
+
+        def _get_term(iname):
+            # Get Fourier-space profile, low-k limit of this profile, and linear bias.
+            # Profile from HOD, with b also computed from HOD.
+            # Output of _get_hod() includes 1/ngal factor
+            rterm1 = self._get_hod(iname)
+            rterm01 = self._get_hod(iname, lowklim=True)
+            b = self.get_bg(
+                self.hods[iname]['Nc'],
+                self.hods[iname]['Ns'],
+                self.hods[iname]['ngal']
+            )[:,None]
+
+            return rterm1, rterm01, b
+
+        if (
+            (name not in self.hods.keys())
+            or (name2 not in self.hods.keys())
+            or (name3 not in self.hods.keys())
+        ):
+            raise NotImplementedError(
+                "Bispectrum only implemented for galaxy autos! "
+                "name = %s, name2 = %s, name3 = %s" % (name, name2, name3)
+            )
+
+        if (name != name2) or (name != name3):
+            raise NotImplementedError("Bispectrum only implemented for tracer autos!")
+
+        # Compute effective bias factor
+        ## Get Fourier-space profile
+        iterm1, iterm01, b1 = _get_term(name)
+        if zi is not None:
+            iterm1 = iterm1[zi, ...]
+            iterm01 = iterm01[zi, ...]
+            b1 = b1[zi]
+        ## Set linear bias factors to inputs, if specified
         if b1_in is not None:
             b1 = b1_in.reshape((b1_in.shape[0],1))
-        if b2_in is not None:
-            b2 = b2_in.reshape((b1_in.shape[0],1))
+            if zi is not None:
+                b1 = b1[zi, ...]
+        ## Compute \int dm n(m) b_h(m) [Fourier-space profile
+        integral = _3haloint(iterm1)
+        ## For halo bias consistency relation, compute
+        ## \int dm n(m) b_h(m) [Fourier-space profile]
+        ## using low-k limit of profile
+        consistency1 = _3haloint(iterm01)
+        ## Compute bias factor
+        factor1 = integral + b1 - consistency1
 
-        integral = _2haloint(iterm1)
-        integral2 = _2haloint(iterm2)
-            
-        # consistency relation : Correct for part that's missing from low-mass halos to get P(k->0) = b1*b2*Plinear
-        consistency1 = _2haloint(iterm01)
-        consistency2 = _2haloint(iterm02)
+        if zi is None:
+            return (
+                self.get_bispectrum_matter_tree()
+                * factor1[:, :, None, None]
+                * factor1[:, None, :, None]
+                * factor1[:, None, None, :]
+            )
+        else:
+            return (
+                self.get_bispectrum_matter_tree(zi=zi)
+                * factor1[:, None, None]
+                * factor1[None, :, None]
+                * factor1[None, None, :]
+            )
+
+    def get_bispectrum_matter_tree(self, zi=None):
+        """Compute tree-level matter bispectrum.
+
+        This is evaluated at every (k1,k2,k3) triplet for k_i in self.ks.
+
+        Parameters
+        ----------
+        zi : int, optional
+            If specified, only compute bispectrum for redshift corresponding to
+            self.zs[zi]. Affects dimensionality of output. Default: None.
+
+        Returns
+        -------
+        B : array_like
+            Tree-level bispectrum, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if
+            zi is specified.
+        """
+
+        def _F2(k1, k2, k3):
+            costheta12 = 0.5 * (k3 ** 2 - k1 ** 2 - k2 ** 2) / (k1 * k2)
+            return (
+                5.0 / 7
+                + 0.5 * costheta12 * (k1 / k2 + k2 / k1)
+                + 2.0 / 7 * costheta12 ** 2
+            )
+
+        # Get coordinate meshes for k1, k2, k3 and flatten each mesh
+        k1_mesh, k2_mesh, k3_mesh = np.meshgrid(
+            self.ks, self.ks, self.ks, indexing="ij"
+        )
+        # k1, k2, k3 = k1.flatten(), k2.flatten(), k3.flatten()
+
+        # Get required permutations of F_2 kernel
+        F2_123 = _F2(k1_mesh, k2_mesh, k3_mesh)
+        F2_231 = _F2(k2_mesh, k3_mesh, k1_mesh)
+        F2_312 = _F2(k3_mesh, k1_mesh, k2_mesh)
+
+        # Compute B_tree
+        if zi is None:
+            B = 2 * (
+                F2_123[None, :, :, :]
+                * self.Pzk[:, :, None, None] # P(k1)
+                * self.Pzk[:, None, :, None] # P(k2)
+                + F2_231[None, :, :, :]
+                * self.Pzk[:, None, :, None] # P(k2)
+                * self.Pzk[:, None, None, :] # P(k3)
+                + F2_312[None, :, :, :]
+                * self.Pzk[:, None, None, :] # P(k3)
+                * self.Pzk[:, :, None, None] # P(k1)
+            )
+        else:
+            B = 2 * (
+                F2_123
+                * self.Pzk[zi, :, None, None] # P(k1)
+                * self.Pzk[zi, None, :, None] # P(k2)
+                + F2_231
+                * self.Pzk[zi, None, :, None] # P(k2)
+                * self.Pzk[zi, None, None, :] # P(k3)
+                + F2_312
+                * self.Pzk[zi, None, None, :] # P(k3)
+                * self.Pzk[zi, :, None, None] # P(k1)
+            )
+
+        return B
+
+
+    def get_bispectrum_2halo(
+        self, name="g", name2=None, name3=None, b1_in=None, verbose=False, zi=None
+    ):
+        """Compute B_2h(k1,k2,k3,z) for specified profiles.
+
+        Parameters
+        ----------
+        name, name2, name3 : string, optional
+            Internal tracer names. Default: "g" for name1, None for name2 and name3.
+        b1_in : array_like, optional
+            Low-k linear bias. If specified, override internal computations of linear
+            bias. Default: None.
+        verbose : bool, optional
+            Whether to print debugging information. Default: False.
+        zi : int, optional
+            If specified, only compute bispectrum for redshift corresponding to
+            self.zs[zi]. Affects dimensionality of output. Default: None.
+
+        Returns
+        -------
+        B_2h : array_like
+            2-halo term, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if
+            zi is specified.
+        """
+        name2 = name if name2 is None else name2
+        name3 = name if name3 is None else name3
+
+        if (
+            (name not in self.hods.keys())
+            or (name2 not in self.hods.keys())
+            or (name3 not in self.hods.keys())
+        ):
+            raise NotImplementedError("Bispectrum only implemented for galaxy autos!")
+
+        if (name != name2) or (name != name3):
+            raise NotImplementedError("Bispectrum only implemented for tracer autos!")
+
+        def _3halointegrand(iterm):
+            # Compute n(m) * b_h(m) * [Fourier-space profile]
+            if zi is None:
+                return self.nzm[..., None] * iterm * self.bh[..., None]
+            else:
+                return self.nzm[zi, :, None] * iterm * self.bh[zi, :, None]
+
+        def _3haloint(iterm):
+            # Compute \int dm n(m) b_h(m) [Fourier-space profile]
+            integrand = _3halointegrand(iterm)
+            integral = np.trapz(integrand, self.ms[..., None], axis=-2)
+            return integral
+
+        def _get_term(iname):
+            # Get Fourier-space profile, low-k limit of this profile, and linear bias.
+                # Profile from HOD, with b also computed from HOD
+            rterm1 = self._get_hod(iname)
+            rterm01 = self._get_hod(iname, lowklim=True)
+            b = self.get_bg(
+                self.hods[iname]['Nc'],
+                self.hods[iname]['Ns'],
+                self.hods[iname]['ngal']
+            )[:,None]
+
+            return rterm1, rterm01, b
+
+        # Compute bias factor as for 3h term, as function of k
         if verbose:
-            print("Two-halo consistency1: " , consistency1,integral)
-            print("Two-halo consistency2: " , consistency2,integral2)
-        return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
+            print("Computing effective bias factor")
+        ## Get Fourier-space profile
+        iterm1, iterm01, b1 = _get_term(name)
+        if zi is not None:
+            iterm1 = iterm1[zi, ...]
+            iterm01 = iterm01[zi, ...]
+            b1 = b1[zi]
+        ## Set linear bias factors to inputs, if specified
+        if b1_in is not None:
+            b1 = b1_in.reshape((b1_in.shape[0],1))
+            if zi is not None:
+                b1 = b1[zi, ...]
+        ## Compute \int dm n(m) b_h(m) [Fourier-space profile
+        integral = _3haloint(iterm1)
+        ## For halo bias consistency relation, compute
+        ## \int dm n(m) b_h(m) [Fourier-space profile]
+        ## using low-k limit of profile
+        consistency1 = _3haloint(iterm01)
+        ## Compute bias factor
+        factor1 = integral + b1 - consistency1
+
+        # Compute NcNs term, as function of k
+        if verbose:
+            print("Computing NcNs term")
+        ## Get uc, us packed as [z,m,k]
+        hod, uc, us = self._get_hod_common(name)
+        if uc != 1:
+            raise NotImplementedError("Bispectrum not implemented for nontrivial u_c!")
+        ## Compute m integrand, packed as [z,m,k] or [m,k] for specific z
+        if zi is None:
+            integrand = (
+                self.nzm[:, :, None]
+                * self.bh[:, :, None]
+                * hod['NcNs'][:, :, None]
+                * us
+                / hod['ngal'][:, None, None]
+            )
+        else:
+            integrand = (
+                self.nzm[zi, :, None]
+                * self.bh[zi, :, None]
+                * hod['NcNs'][zi, :, None]
+                * us[zi]
+                / hod['ngal'][zi, None, None]
+            )
+        ## Integrate in m, and apply low-k damping
+        ncns_term = np.trapz(integrand, self.ms, axis=-2)
+        del integrand
+        lowk_damping = 1 - np.exp(-(self.ks/self.p['kstar_damping']) ** 2.)
+        if zi is None:
+            ncns_term *= lowk_damping[None, :]
+        else:
+            ncns_term *= lowk_damping
+
+        # Compute NsNsm1 term, as function of k1,k2
+        if verbose:
+            print("Computing NsNsm1 term")
+        ## Compute m integrand, packed as [z,m,k1,k2]
+        if zi is None:
+            integrand = (
+                self.nzm[:, :, None, None]
+                * self.bh[:, :, None, None]
+                * hod['NsNsm1'][:, :, None, None]
+                * us[:, :, :, None]
+                * us[:, :, None, :]
+                / hod['ngal'][:, None, None, None]
+            )
+        else:
+            integrand = (
+                self.nzm[zi, :, None, None]
+                * self.bh[zi, :, None, None]
+                * hod['NsNsm1'][zi, :, None, None]
+                * us[zi, :, :, None]
+                * us[zi, :, None, :]
+                / hod['ngal'][zi, None, None, None]
+            )
+        ## Integrate in m, and apply low-k damping
+        nsnsm1_term = np.trapz(integrand, self.ms, axis=-3)
+        del integrand
+        if zi is None:
+            nsnsm1_term *= lowk_damping[None, :, None] * lowk_damping[None, None, :]
+        else:
+            nsnsm1_term *= lowk_damping[:, None] * lowk_damping[None, :]
+
+        # Accumulate 3 permutations, packed as [z,k1,k2,k3]
+        if verbose:
+            print("Computing B")
+
+        if zi is None:
+            B = (
+                (
+                    ncns_term[:, :, None, None]
+                    + ncns_term[:, None, :, None]
+                    + nsnsm1_term[:, :, :, None]
+                ) * factor1[:, None, None, :] * self.Pzk[:, None, None, :]
+                + (
+                    ncns_term[:, None, :, None]
+                    + ncns_term[:, None, None, :]
+                    + nsnsm1_term[:, None, :, :]
+                ) * factor1[:, :, None, None] * self.Pzk[:, :, None, None]
+                + (
+                    ncns_term[:, None, None, :]
+                    + ncns_term[:, :, None, None]
+                    + nsnsm1_term[:, :, None, :]
+                ) * factor1[:, None, :, None] * self.Pzk[:, None, :, None]
+            )
+        else:
+            B = (
+                (
+                    ncns_term[:, None, None]
+                    + ncns_term[None, :, None]
+                    + nsnsm1_term[:, :, None]
+                ) * factor1[None, None, :] * self.Pzk[zi, None, None, :]
+                + (
+                    ncns_term[None, :, None]
+                    + ncns_term[None, None, :]
+                    + nsnsm1_term[None, :, :]
+                ) * factor1[:, None, None] * self.Pzk[zi, :, None, None]
+                + (
+                    ncns_term[None, None, :]
+                    + ncns_term[:, None, None]
+                    + nsnsm1_term[:, None, :]
+                ) * factor1[None, :, None] * self.Pzk[zi, None, :, None]
+            )
+
+        return B
+
+
+    def get_bispectrum_1halo(
+        self, name="g", name2=None, name3=None, verbose=False, zi=None
+    ):
+        """Compute B_1h(k1,k2,k3,z) for specified profiles.
+
+        Parameters
+        ----------
+        name, name2, name3 : string, optional
+            Internal tracer names. Default: "g" for name1, None for name2 and name3.
+        verbose : bool, optional
+            Whether to print debugging information. Default: False.
+        zi : int, optional
+            If specified, only compute bispectrum for redshift corresponding to
+            self.zs[zi]. Affects dimensionality of output. Default: None.
+
+        Returns
+        -------
+        B_1h : array_like
+            1-halo term, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if
+            zi is specified.
+        """
+        name2 = name if name2 is None else name2
+        name3 = name if name3 is None else name3
+
+        if (
+            (name not in self.hods.keys())
+            or (name2 not in self.hods.keys())
+            or (name3 not in self.hods.keys())
+        ):
+            raise NotImplementedError("Bispectrum only implemented for galaxy autos!")
+
+        if (name != name2) or (name != name3):
+            raise NotImplementedError("Bispectrum only implemented for tracer autos!")
+
+        # Get uc, us packed as [z,m,k]
+        hod, uc, us = self._get_hod_common(name)
+        if uc != 1:
+            raise NotImplementedError("Bispectrum not implemented for nontrivial u_c!")
+
+        b1h = []
+
+        # Loop over z, for memory reasons
+        for zii, z in enumerate(self.zs):
+            if zi is not None and zii != zi:
+                continue
+
+            if verbose:
+                print("Computing for redshift index %d (z = %g)" % (zii, z))
+                if zii == 0:
+                    print(
+                        "\tIntegrand shape:",
+                        (
+                            hod['NcNsNsm1'].shape[1],
+                            len(self.ks),
+                            len(self.ks),
+                            len(self.ks)
+                        )
+                    )
+            # Compute integrand, packed as [m,k1,k2,k3]
+            if verbose:
+                print("\tComputing NcNsNsm1 term")
+            integrand = (
+                hod['NcNsNsm1'][zii, :, None, None, None]
+                * (
+                    us[zii, :, :, None, None] * us[zii, :, None, :, None]
+                    + us[zii, :, None, :, None] * us[zii, :, None, None, :]
+                    + us[zii, :, None, None, :] * us[zii, :, :, None, None]
+                )
+            )
+            if verbose:
+                print("\tComputing NsNsm1Nsm2 term")
+            integrand += (
+                hod['NsNsm1Nsm2'][zii, :, None, None, None]
+                * us[zii, :, :, None, None]
+                * us[zii, :, None, :, None]
+                * us[zii, :, None, None, :]
+            )
+            integrand
+            integrand *= self.nzm[zii, :, None, None, None]
+
+            # Integrate in m, and append to b1h
+            lowk_damping = 1 - np.exp(-(self.ks/self.p['kstar_damping']) ** 2.)
+            b1h.append(
+                np.trapz(integrand,self.ms,axis=0)
+                * lowk_damping[:, None, None]
+                * lowk_damping[None, :, None]
+                * lowk_damping[None, None, :]
+            )
+
+        # Divide final result by n_gal^3
+        if zi is None:
+            b1h = np.asarray(b1h) / hod['ngal'][:, None, None, None] ** 3
+        else:
+            b1h = np.asarray(b1h[0]) / hod['ngal'][zi, None, None, None] ** 3
+
+        return b1h
+
+
 
     def sigma_1h_profiles(self,thetas,Ms,concs,sig_theta=None,delta=200,rho='mean',rho_at_z=True):
         import clusterlensing as cl
@@ -635,7 +2071,7 @@ class HaloModel(Cosmology):
         chis = self.angular_diameter_distance(zs)
         rbins = chis * thetas
         offsets = chis * sig_theta if sig_theta is not None else None
-        if rho=='critical': rhofunc = self.rho_critical_z 
+        if rho=='critical': rhofunc = self.rho_critical_z
         elif rho=='mean': rhofunc = self.rho_matter_z
         rhoz = zs if rho_at_z else zs * 0
         Rdeltas = R_from_M(Ms,rhofunc(rhoz),delta=delta)
@@ -677,113 +2113,6 @@ class HaloModel(Cosmology):
             ints.append( np.trapz(integrand,ells) )
         return np.asarray(ints)
 
-"""
-Mass function
-"""
-def R_from_M(M,rho,delta): return (3.*M/4./np.pi/delta/rho)**(1./3.)
-
-"""
-HOD functions from Matt Johnson and Moritz Munchmeyer (modified)
-"""
-    
-def Mstellar_halo(z,log10mhalo):
-    # Function to compute the stellar mass Mstellar from a halo mass mv at redshift z.
-    # z = list of redshifts
-    # log10mhalo = log of the halo mass
-    # FIXME: can the for loop be removed?
-    # FIXME: is the zero indexing safe?
-    
-    log10mstar = np.linspace(-18,18,4000)[None,:]
-    mh = Mhalo_stellar(z,log10mstar)
-    mstar = np.zeros((z.shape[0],log10mhalo.shape[-1]))
-    for i in range(z.size):
-        mstar[i] = np.interp(log10mhalo[0],mh[i],log10mstar[0])
-    return mstar
-
-def Mhalo_stellar_core(log10mstellar,a,Mstar00,Mstara,M1,M1a,beta0,beta_a,gamma0,gamma_a,delta0,delta_a):
-    log10M1 = M1 + M1a*(a-1)
-    log10Mstar0 = Mstar00 + Mstara*(a-1)
-    beta = beta0 + beta_a*(a-1)
-    gamma = gamma0 + gamma_a*(a-1)
-    delta = delta0 + delta_a*(a-1)
-    log10mstar = log10mstellar
-    log10mh = -0.5 + log10M1 + beta*(log10mstar-log10Mstar0) + 10**(delta*(log10mstar-log10Mstar0))/(1.+ 10**(-gamma*(log10mstar-log10Mstar0)))
-    return log10mh
-
-def Mhalo_stellar(z,log10mstellar):
-    # Function to compute halo mass as a function of the stellar mass. arxiv 1001.0015 Table 2
-    # z = list of redshifts
-    # log10mhalo = log of the halo mass
-    
-    output = np.zeros((z.size,log10mstellar.shape[-1]))
-    
-    a = 1./(1+z)
-    log10mstellar = log10mstellar + z*0
-    
-    Mstar00=10.72
-    Mstara=0.55
-    M1=12.35
-    M1a=0.28
-    beta0=0.44
-    beta_a=0.18
-    gamma0=1.56
-    gamma_a=2.51
-    delta0=0.57
-    delta_a=0.17
-    
-    sel1 = np.where(z.reshape(-1)<=0.8)
-    output[sel1] = Mhalo_stellar_core(log10mstellar[sel1],a[sel1],Mstar00,Mstara,M1,M1a,beta0,beta_a,gamma0,gamma_a,delta0,delta_a)
-    
-    Mstar00=11.09
-    Mstara=0.56
-    M1=12.27
-    M1a=-0.84
-    beta0=0.65
-    beta_a=0.31
-    gamma0=1.12
-    gamma_a=-0.53
-    delta0=0.56
-    delta_a=-0.12
-    
-    sel1 = np.where(z.reshape(-1)>0.8)
-    output[sel1] = Mhalo_stellar_core(log10mstellar[sel1],a[sel1],Mstar00,Mstara,M1,M1a,beta0,beta_a,gamma0,gamma_a,delta0,delta_a)
-    return output
-
-
-def avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar):
-    """<Nc(m)>"""
-    log10mstar = Mstellar_halo(z,log10mhalo)
-    num = log10mstellar_thresh - log10mstar
-    denom = np.sqrt(2.) * sig_log_mstellar
-    return 0.5*(1. - erf(num/denom))
-
-
-def hod_default_mfunc(mthresh,Bamp,Bind): return (10.**(12.))*Bamp*10**((mthresh-12)*Bind)
-
-def avg_Ns(log10mhalo,z,log10mstellar_thresh,Nc=None,sig_log_mstellar=None,
-           alphasat=None,Bsat=None,betasat=None,Bcut=None,betacut=None,
-           Msat_override=None,Mcut_override=None):
-    mthresh = Mhalo_stellar(z,log10mstellar_thresh)
-    Msat = Msat_override if Msat_override is not None else hod_default_mfunc(mthresh,Bsat,betasat)
-    Mcut = Mcut_override if Mcut_override is not None else hod_default_mfunc(mthresh,Bcut,betacut)
-    Nc = avg_Nc(log10mhalo,z,log10mstellar_thresh,sig_log_mstellar=sig_log_mstellar) if Nc is None else Nc
-    masses = 10**log10mhalo
-    return Nc*((masses/Msat)**alphasat)*np.exp(-Mcut/(masses))    
-   
-
-def avg_NsNsm1(Nc,Ns,corr="max"):
-    if corr=='max':
-        ret = Ns**2./Nc
-        ret[np.isclose(Nc,0.)] = 0 #FIXME: is this kosher?
-        return ret
-    elif corr=='min':
-        return Ns**2.
-    
-def avg_NcNs(Nc,Ns,corr="max"):
-    if corr=='max':
-        return Ns
-    elif corr=='min':
-        return Ns*Nc
 
 """
 Profiles
@@ -799,6 +2128,74 @@ def rhoscale_nfw(mdelta,rdelta,cdelta):
 def rho_nfw_x(x,rhoscale): return rhoscale/x/(1.+x)**2.
 
 def rho_nfw(r,rhoscale,rs): return rho_nfw_x(r/rs,rhoscale)
+
+def rhoHI_vn18(r, r0, rho0=None):
+    """Compute position-space HI density profile from Villaescusa-Navarro et al. 2018
+    (1804.09180).
+
+    Parameters
+    ----------
+    r : array_like
+        1d array of radii to evaluate at, in Mpc.
+    r0 : array_like
+        Array of r_0 parameters to evaluate at. Typically, these will be evaluated at
+        different redshifts and/or halo masses.
+    rho0 : array_like, optional
+        1d array of rho_0 parameter to evaluate at, with same shape as r0.
+        If not specified, we use rho_0=1.
+
+    Returns
+    -------
+    rho : array_like
+        rho_HI values, packed as [r,...]).
+    """
+    _ALPHASTAR = 3.0
+
+    # TODO: there must be a better way to do this...
+    r_newshape = (len(r), ) + tuple(np.ones(len(r0.shape), dtype=int))
+    r = r.reshape(r_newshape)
+
+    rho = r ** (-1 * _ALPHASTAR) * np.exp(-r0[None, ...] / r)
+
+    if rho0 is not None:
+        rho *= rho0[None, ...]
+
+    return rho
+
+
+def rhoHI_vn18_x(x, alphastar, r0, rho0=None):
+    """Compute position-space HI density profile from Villaescusa-Navarro et al. 2018
+    (1804.09180), as function of x=r/r0.
+
+    Parameters
+    ----------
+    x : array_like
+        1d array of dimensionless to evaluate at.
+    r0 : array_like
+        Array of r_0 parameters to evaluate at. Typically, these will be evaluated at
+        different redshifts and/or halo masses.
+    rho0 : array_like, optional
+        1d array of rho_0 parameter to evaluate at, with same shape as r0.
+        If not specified, we use rho_0=1.
+
+    Returns
+    -------
+    rho : array_like
+        rho_HI values, packed as [x,...].
+    """
+    _ALPHASTAR = 3.0
+
+    # TODO: there must be a better way to do this...
+    x_newshape = (len(x), ) + tuple(np.ones(len(r0.shape), dtype=int))
+    x = x.reshape(x_newshape)
+
+    rho = (x * r0[None, ...]) ** (-1 * _ALPHASTAR) * np.exp(-1 / x)
+
+    if rho0 is not None:
+        rho *= rho0[None, ...]
+
+    return rho
+
 
 def mdelta_from_mdelta(M1,C1,delta_rhos1,delta_rhos2,vectorized=True):
     """
@@ -821,7 +2218,7 @@ def mdelta_from_mdelta(M1,C1,delta_rhos1,delta_rhos2,vectorized=True):
                 M2outs[i,j] = mdelta_from_mdelta_unvectorized(M1[j],C1[i,j],delta_rhos1[i],delta_rhos2[i])
     return M2outs
 
-    
+
 def mdelta_from_mdelta_unvectorized(M1,C1,delta_rhos1,delta_rhos2):
     """
     Implements mdelta_from_mdelta.
@@ -855,7 +2252,7 @@ def mdelta_from_mdelta_unvectorized(M1,C1,delta_rhos1,delta_rhos2):
 def battaglia_gas_fit(m200critz,z,A0x,alphamx,alphazx):
     # Any factors of h in M?
     return A0x * (m200critz/1.e14)**alphamx * (1.+z)**alphazx
-    
+
 def rho_gas(r,m200critz,z,omb,omm,rhocritz,
             gamma=default_params['battaglia_gas_gamma'],
             profile="AGN"):
@@ -915,7 +2312,7 @@ def rho_gas_generic_x(x,m200critz,z,omb,omm,rhocritz,
     return (omb/omm) * rhocritz * rho0 * (x**gamma) * (1.+x**alpha)**(-(beta+gamma)/alpha)
 
 
-   
+
 def P_e(r,m200critz,z,omb,omm,rhocritz,
             alpha=default_params['battaglia_pres_alpha'],
             gamma=default_params['battaglia_pres_gamma'],
@@ -982,31 +2379,4 @@ def P_e_generic_x(x,m200critz,R200critz,z,omb,omm,rhocritz,
     return eFrac*(omb/omm)*200*m200critz*G_newt* rhocritz/(2*R200critz) * P0 * (x/xc)**gamma * (1.+(x/xc)**alpha)**(-beta)
 
 
-
-
-
 def a2z(a): return (1.0/a)-1.0
-
-
-def ngal_from_mthresh(log10mthresh=None,zs=None,nzm=None,ms=None,
-                      sig_log_mstellar=None,Ncs=None,Nss=None,
-                      alphasat=None,Bsat=None,betasat=None,
-                      Bcut=None,betacut=None,
-                      Msat_override=None,
-                      Mcut_override=None):
-    if (Ncs is None) and (Nss is None):
-        log10mstellar_thresh = log10mthresh[:,None]
-        log10mhalo = np.log10(ms[None,:])    
-        Ncs = avg_Nc(log10mhalo,zs[:,None],log10mstellar_thresh,sig_log_mstellar)
-        Nss = avg_Ns(log10mhalo,zs[:,None],log10mstellar_thresh,Ncs,
-                     sig_log_mstellar,alphasat,
-                     Bsat,betasat,
-                     Bcut,betacut,
-                     Msat_override=Msat_override,
-                     Mcut_override=Mcut_override)
-    else:
-        assert log10mthresh is None
-        assert zs is None
-        assert sig_log_mstellar is None
-    integrand = nzm * (Ncs+Nss)
-    return np.trapz(integrand,ms,axis=-1)   
