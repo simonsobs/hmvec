@@ -888,15 +888,31 @@ def get_ksz_snr(volume_gpc3,z,ngal_mpc3,Cls,bg=None,params=None,
     return np.sqrt(V*snr2),fksz
 
 
-def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
-                        k_max = 100., num_k_bins = 200,
-#                             kL_max=0.1,num_kL_bins=100,kS_min=0.1,kS_max=10.0,
-                            num_kS_bins=101,num_mu_bins=102,ms=None,mass_function="sheth-torman",
-                            mdef='vir',nfw_numeric=False,
-                            electron_profile_family='AGN',
-                            electron_profile_nxs=None,electron_profile_xmax=None,
-                       verbose=False, pksz_in=None, save_debug_files=False):
-    """
+def get_ksz_auto_mafry(
+    ells,
+    volume_gpc3,
+    zs,
+    ngals_mpc3=None,
+    bgs=None,
+    params=None,
+    k_max = 100.,
+    num_k_bins = 200,
+    num_mu_bins=102,
+    ms=None,
+    mass_function="sheth-torman",
+    mdef='vir',
+    nfw_numeric=False,
+    electron_profile_family='AGN',
+    electron_profile_nxs=None,
+    electron_profile_xmax=None,
+    n_int = 100,
+    verbose=False,
+    pksz_in=None,
+    slow_chi_integral=False,
+    save_cl_integrand=False,
+):
+    """Compute kSZ angular auto power spectrum, C_ell, as in Ma & Fry.
+
     Get C_ell_^kSZ, the CMB kSZ auto power, as described by Eq. (B28) and the following
     (unnumbered) equation in Smith et al:
 
@@ -908,26 +924,99 @@ def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
                             P_{ee}^{NL}(|\vec{k}-\vec{k}'|,z)
                             P_{\delta\delta}^{lin}(k',z)
                             \frac{k(k-2k'\mu')(1-\mu'^2)}{k'^2(k^2+k'^2-2kk'\mu}
-
     C_ell^kSZ is returned in uK^2.
+
+    Parameters
+    ----------
+    ells : array_like
+        Array of ell values to compute C_ell at.
+    volumes_gpc3, ngals_mpc3 : array_like
+        Array of comoving volume (in Gpc^3) corresponding to redshifts in zs.
+    ngals_mpc3 : array_like, optional
+        Array of galaxy number density (in Mpc^3) corresponding to redshifts in zs.
+        If not specified, n_gal computed from HOD is used. Default: None
+    zs : array_like
+        Array of redshifts to compute at.
+    bgs : array_like, optional
+        Array of linear galaxy bias at each redshift. Default: None.
+    **params : dict, optional
+        Optional dict of parameters for halo model and radial kSZ weight computations.
+        Default: None.
+    k_max : float, optional
+        Maximum k to consider as k_long and k_short (same value used for both).
+        Default: 100.
+    num_k_bins : int, optional
+        Number of k_long and k_short bins for computations. Default: 200.
+    num_mu_bins : int, optional
+        Number of mu bins for computations. Bins will be linear between -1 and 1.
+        Default: 102.
+    ms : array_like, optional
+        Array of halo masses to compute over, in Msun.
+        Default: Log-spaced array determined by parameters in `defaults` dict.
+    mass_function : {'sheth-torman', 'tinker'}, optional
+        Mass function to use. Default: 'sheth-torman'
+    mdef : {'vir', 'mean'}
+        Halo mass definition. 'mean' = M200m.
+    nfw_numeric : bool, optional
+        Compute Fourier transform of NFW profile numerically instead of analytically.
+        Default : False.
+    electron_profile_family : {'AGN', 'SH', 'pres'}, optional
+        Electron profile to use. Default: 'AGN'.
+    electron_profile_nxs : int, optional
+        Number of samples of electron profile for FFT. Default: None.
+    electron_profile_xmax : float, optional
+        X_max for electron profile in FFT. Default: None.
+    n_int : int, optional
+        Number of samples to use in Limber integral. Default: 100.
+    verbose : bool, optional
+        Print progress of computations. Default: False.
+    pksz_in : kSZ object, optional
+        Predefined kSZ object to use for computations, instead of initializing
+        a new one. Default: None.
+    slow_chi_integral : bool, optional
+        Use slower quad method for Limber integral for C_ell, instead of faster
+        trapz. Default: False.
+    save_cl_integrand : bool, optional
+        Save integrand of C_ell to spec_dict, along with coordinate values
+        that integrand was evaluated at, w.r.t. either chi or z.
+
+    Returns
+    -------
+    pksz : kSZ object
+        kSZ object initialized during the routine. (Can be used as input to
+        later calls to save time.)
+    cl : np.ndarray
+        Computed C_ell^kSZ, evaluated at input ells.
+    **spec_dict : dict
+        Dict containing various 3d power spectra used for kSZ computation.
     """
+    _LIMBER_KMAX = 30 # Mpc
+
+    # Define empty dict for storing spectra
+    spec_dict = {}
+
+    # Widen search range for setting lower mass threshold from nbar
+    if params is None:
+        params = default_params
+    params['hod_bisection_search_min_log10mthresh'] = 1
 
     # Make sure input redshifts are sorted
     zs = np.sort(np.asarray(zs))
 
-    # Make arrays for volume and galaxy number density, for feeding to kSZ object
+    # Make array for volumes, for feeding to kSZ object
     volumes_gpc3 = volume_gpc3 * np.ones_like(zs)
-    ngals_mpc3 = ngal_mpc3 * np.ones_like(zs)
 
     # Define kSZ object, if not specified as input
     if pksz_in is not None:
         pksz = pksz_in
     else:
-        if verbose: print('Initializing kSZ objects')
+        if verbose: print('Initializing kSZ object')
         pksz = kSZ(
             zs,
             volumes_gpc3,
-            ngals_mpc3,
+            ngals_mpc3=ngals_mpc3,
+            rsd=False,
+            fog=False,
             kL_max=k_max,                 # Same k_max for kL and kS
             num_kL_bins=num_k_bins,
             kS_min=get_kmin(volume_gpc3), # Same k_min for kL and kS
@@ -947,70 +1036,84 @@ def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
             electron_profile_param_override=params,
             electron_profile_nxs=electron_profile_nxs,
             electron_profile_xmax=electron_profile_xmax,
-            skip_hod=True,                # Skip HOD computation to save time
-            verbose=verbose
+            skip_hod=True, # Skip HOD, since we're computing true kSZ signal
+            verbose=verbose,
+            b1=bgs,
+            b2=bgs,
         )
 
-    # Get ks and mus that P_{q_perp} integrand is evaluated at
+    # Update ngal. Also, if different galaxy number density for velocity template is not
+    # specified, set equal to density for electron template
+    ngals_mpc3 = pksz.ngals_mpc3
+
+    # Get k_short values that P_{q_perp} integrand is evaluated at
     ks = pksz.kS
+    spec_dict['ks'] = ks
+
+    # Also get mu values
     mus = pksz.mu
 
-    # Get P_ee as a function of z and k (packed as [z,k])
+    # Get P_ee (packed as [z,k])
+    if verbose: print("Computing P_ee and P_vv")
     sPee = pksz.get_power('e',name2='e',verbose=False)
+
+    # Get P_vv (packed as [z,k]), by getting it for each z individually
+    lPvv0 = pksz.lPvv(zindex=0)[0,:]
+    lPvv = np.zeros((len(zs), lPvv0.shape[0]), dtype=lPvv0.dtype)
+    lPvv[0,:] = lPvv0
+    for zi in range(1, len(zs)):
+        lPvv[zi,:] = pksz.lPvv(zindex=zi)[0,:]
 
     # Get P_linear as a function of z and k (packed as [z,k])
     Pmm = np.asarray(pksz.Pmms)
     Pmm = Pmm[:,0,:]
 
+    # Save 3d power spectra
+    spec_dict['sPee'] = sPee
+    spec_dict['lPvv'] = lPvv
+    spec_dict['Pmm'] = Pmm
+
     # Make meshes of mu and k, packed as [k,mu]
-    mu_mesh,k_mesh = np.meshgrid(mus, ks)
+    mu_mesh, k_mesh = np.meshgrid(mus, ks)
 
-    # Define function that returns fraction in P_{q_perp} integrand,
+    # Define function that returns fraction in P_{q_r} integrand,
     # and also |\vec{k} - \vec{k}'|
-    def Pqperp_igr_poly(k,kp,mu,z):
+    def Pqr_igr_poly(k, kp, mu, z):
 
-        frac = k * (k - 2*kp*mu) * (1 - mu**2)
-        frac /= (kp**2 * (kp**2 + k**2 - 2*k*kp*mu))
+        frac = k * (k - 2 * kp * mu) * (1 - mu ** 2)
+        frac /= (kp ** 2 * (kp ** 2 + k ** 2 - 2 * k * kp * mu))
 
-        kmkp = np.sqrt(kp**2 + k**2 - 2*k*kp*mu)
+        kmkp = (kp ** 2 + k ** 2 - 2 * k * kp * mu) ** 0.5
 
-        igr = kp**2 * frac
+        igr = kp ** 2 * frac
 
         return igr, kmkp
 
-    # Compute P_{q_perp} values on grid in k,z
-    if verbose: print('Computing P_{q_perp} on grid in k,z')
-    Pqperp = np.zeros((ks.shape[0], zs.shape[0]))
-    for iz,z in enumerate(zs):
+    # P_{q_r} will be packed as [k,z]
+    if verbose:
+        print('Computing P_{q_r} on grid in k,z')
+    Pqr = np.zeros((ks.shape[0], zs.shape[0]))
+
+    for zi, z in enumerate(zs):
 
         # Define interpolating functions for P_ee and P_mm at this z
-        isPee = interp1d(ks, sPee[iz], bounds_error=False, fill_value=0.)
-        iPmm = interp1d(ks, Pmm[iz], bounds_error=False, fill_value=0.)
+        isPee = interp1d(ks, sPee[zi], bounds_error=False, fill_value=0.)
+        iPmm = interp1d(ks, Pmm[zi], bounds_error=False, fill_value=0.)
+
+        # Compute \dot{a} f = a H f at this redshift
+        adotf = pksz.adotf[zi][0]
 
         for ik,k in enumerate(ks):
 
-            # Compute \dot{a} f = a H f at this redshift
-            adotf = pksz.adotf[iz][0]
-
             if True:
-                # Get P_{q_perp} integrand on [k,mu] mesh
-                Pqperp_igr_mesh, kmkp_mesh = Pqperp_igr_poly(k,k_mesh,mu_mesh,z)
+                # Get P_{q_r} integrand on [k,mu] mesh
+                Pqr_igr_mesh, kmkp_mesh = Pqr_igr_poly(k, k_mesh, mu_mesh, z)
                 Pee_mesh = isPee(kmkp_mesh.flatten()).reshape(kmkp_mesh.shape)
                 Pmm_mesh = iPmm(k_mesh.flatten()).reshape(kmkp_mesh.shape)
-                Pqperp_igr_mesh *= Pmm_mesh * Pee_mesh
-
-                # If desired, save some meshes to disk for debugging
-                if save_debug_files and ik == 0 and iz == 0:
-                    np.savetxt('debug_files/kmkp_mesh.dat', kmkp_mesh)
-                    np.savetxt('debug_files/pee_mesh.dat', Pee_mesh)
-                    np.savetxt('debug_files/pqperp_igr_mesh.dat', Pqperp_igr_mesh)
+                Pqr_igr_mesh *= Pmm_mesh * Pee_mesh
 
                 # Integrate integrand mesh along k axis with trapezoid rule
-                integral = np.trapz(np.nan_to_num(Pqperp_igr_mesh), ks, axis=0)
-
-                # If desired, save partial integral to disk for debugging
-                if save_debug_files and ik == 0 and iz == 0:
-                    np.savetxt('debug_files/pqperp_igr_mu.dat', np.transpose([mus,integral]))
+                integral = np.trapz(np.nan_to_num(Pqr_igr_mesh), ks, axis=0)
 
                 # Integrate along mu axis with trapezoid rule
                 integral = np.trapz(integral, mus)
@@ -1018,46 +1121,89 @@ def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
             else:
                 # Could also do double integral with dblquad, but in practice
                 # this takes forever
-                integral = dblquad(lambda kp,mu: Pqperp_igr(k,kp,mu,z),
-                                        -1, 1, ks[0], ks[-1])[0]
+                integral = dblquad(
+                    lambda kp,mu: Pqr_igr(k, kp, mu, z), -1, 1, ks[0], ks[-1]
+                )[0]
 
             # Include prefactors for integral
-            Pqperp[ik,iz] = adotf**2 * (2*np.pi)**-2 * integral
+            Pqr[ik, zi] = adotf**2 * (2*np.pi)**-2 * integral
 
-    # Make 2d interpolating function for P_{q_\perp}, with arguments z,k.
-    # Resulting interpolating function automatically sorts arguments if
+    spec_dict['Pqr'] = Pqr
+
+    # Make 2d interpolating function for P_{q_r}, with arguments z,k.
+    # The resulting interpolating function automatically sorts arguments if
     # arrays are fed in, but we'll only call iPqperp with one (z,k) pair
     # at a time, so we'll be fine.
-    iPqperp = interp2d(zs, ks, Pqperp, fill_value=0.)
+    iPqr = interp2d(zs, ks, Pqr, fill_value=0.)
 
     # Compute C_ell integral at each ell
     if verbose: print('Computing C_ell')
     cl = np.zeros(ells.shape[0])
-    for iell,ell in enumerate(ells):
+    for iell, ell in enumerate(ells):
 
-        # Set chi_min based on k=30Mpc^-1, and chi_max from max redshift
-        chi_min = ell/30.
+        # Set chi_min from min redshift, or from k=30Mpc^-1 if the lowest redshift
+        # translates to k>30Mpc^-1
+        chi_min = max(pksz.results.comoving_radial_distance(zs[0]), ell / _LIMBER_KMAX)
+        # Set chi_max from max redshift
         chi_max = pksz.results.comoving_radial_distance(zs[-1])
-        chi_int = np.geomspace(chi_min, chi_max, 100)
+        chi_int = np.geomspace(chi_min, chi_max, n_int)
         k_int = ell/chi_int
         z_int = pksz.results.redshift_at_comoving_radial_distance(chi_int)
 
         # Get integrand evaluated at z,k corresponding to Limber integral
         integrand = np.zeros(k_int.shape[0])
         for ki,k in enumerate(k_int):
-            integrand[ki] = iPqperp(z_int[ki], k)
-        integrand /= chi_int**2 * 1/(1+z_int)**4
+            integrand[ki] = iPqr(z_int[ki], k)
+        integrand /= chi_int**2
+        integrand *= (1+z_int)**4
 
         # Include prefactors
         ne0 = ne0_shaw(pksz.pars.ombh2, pksz.pars.YHe)
-        integrand *= 0.5
         # Units: (m^2 * m^-3 * Mpc^-1 m^1)^2
-        integrand *= (constants['thompson_SI'] \
-                      * ne0 \
-                      * 1/constants['meter_to_megaparsec'] )**2
+        integrand *= (
+            constants['thompson_SI']
+            * ne0
+            * 1/constants['meter_to_megaparsec']
+        )**2
         integrand *= (pksz.pars.TCMB * 1e6)**2
+        integrand *= 0.5
 
-        if True:
+        # If desired, save integrand for each ell to spec_dict.
+        # We save the integrand w.r.t either chi and z, along with the
+        # chi and z value it is evaluated at
+        if save_cl_integrand:
+            # Make empty arrays to hold output
+            if iell == 0:
+                spec_dict['ClkSZ_integrand_chi'] = np.zeros(
+                    (len(ells), len(chi_int)), dtype=chi_int.dtype
+                )
+                spec_dict['ClkSZ_integrand_z'] = np.zeros_like(
+                    spec_dict['ClkSZ_integrand_chi']
+                )
+
+                spec_dict['ClkSZ_dchi_integrand'] = np.zeros(
+                    (len(ells), len(integrand)), dtype=integrand.dtype
+                )
+                spec_dict['ClkSZ_dz_integrand'] = np.zeros_like(
+                    spec_dict['ClkSZ_dchi_integrand']
+                )
+
+            # Save integrand w.r.t. chi
+            spec_dict['ClkSZ_integrand_chi'][iell] = chi_int
+            spec_dict['ClkSZ_dchi_integrand'][iell] = integrand
+
+            # Save integrand w.r.t z, which is dchi/dz * integrand_dchi
+            spec_dict['ClkSZ_integrand_z'][iell] = z_int
+            _DERIV_DZ = 0.001
+            dchi_dz_int = (
+                (
+                    pksz.results.comoving_radial_distance(z_int + _DERIV_DZ)
+                    - pksz.results.comoving_radial_distance(z_int - _DERIV_DZ)
+                ) / (2 * _DERIV_DZ)
+            )
+            spec_dict['ClkSZ_dz_integrand'][iell] = integrand * dchi_dz_int
+
+        if not slow_chi_integral:
             # Do C_ell integral via trapezoid rule
             cl[iell] = np.trapz(integrand, chi_int)
         else:
@@ -1066,16 +1212,9 @@ def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
             igr_interp = interp1d(chi_int, integrand)
             cl[iell] = quad(igr_interp, chi_int[0], chi_int[-1])[0]
 
-    # If desired, save some files for debugging
-    if save_debug_files:
-        np.savetxt('debug_files/zs.dat', zs)
-        np.savetxt('debug_files/k_invMpc.dat', ks)
-        np.savetxt('debug_files/pee.dat', sPee)
-        np.savetxt('debug_files/pmm.dat', Pmm)
-        np.savetxt('debug_files/pqperp.dat', Pqperp)
-
-    # Return kSZ object (in case we want to use it later) and C_ell array
-    return pksz, cl
+    # Return kSZ object (in case we want to use it later), C_ell array,
+    # and dict of spectra used
+    return pksz, cl, spec_dict
 
 
 def get_ksz_auto_squeezed(
