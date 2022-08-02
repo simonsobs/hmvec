@@ -13,7 +13,7 @@ from .params import default_params, battaglia_defaults
 from .fft import generic_profile_fft
 from .mstar_mhalo import Mstellar_halo, Mhalo_stellar
 import scipy
-from scipy.integrate import simps
+from scipy.integrate import simps, cumulative_trapezoid
 
 """
 
@@ -1385,6 +1385,13 @@ class HaloModel(Cosmology):
             integral = np.trapz(integrand, self.ms[..., None], axis=-2)
             return integral
 
+        def _2haloint_mmax(iterm):
+            # Compute \int^m dm' n(m') b_h(m') [Fourier-space profile] as function of m,
+            # using cumulative trapezoid rule
+            integrand = _2halointegrand(iterm)
+            integral = cumulative_trapezoid(integrand, self.ms, axis=-2, initial=0)
+            return integral
+
         def _get_term(iname):
             # Get Fourier-space profile, low-k limit of this profile, and linear bias
             if iname in self.uk_profiles.keys():
@@ -1496,10 +1503,16 @@ class HaloModel(Cosmology):
             # prescription below, which takes d(consistency)/dM=0, seems to work,
             # in that integrating it in M gives a result that's pretty close
             # to the full result.
+
+            integral_mmax = _2haloint_mmax(iterm1)
+            consistency_mmax = _2haloint_mmax(iterm01)
+            integral2_mmax = _2haloint_mmax(iterm2)
+            consistency2_mmax = _2haloint_mmax(iterm02)
+
             prefactor = (
                 _2halointegrand(iterm1)
-                * (integral2+b2-consistency2)[..., None, :]
-                + (integral+b1-consistency1)[..., None, :]
+                * (integral2_mmax+b2-consistency2_mmax)
+                + (integral_mmax+b1-consistency_mmax)
                 * _2halointegrand(iterm2)
             )
             return prefactor * self.Pzk[..., None, :]
