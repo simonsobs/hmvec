@@ -311,7 +311,7 @@ class kSZ(HaloModel):
         b1=None,
         b2=None,
         sigz=None,
-        physical_truncate=False):
+        physical_truncate=True):
 
         # Store rsd and fog preferences
         if fog and not rsd:
