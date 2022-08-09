@@ -272,6 +272,9 @@ class kSZ(HaloModel):
     sigz : float, optional
         The Gaussian uncertainty for photometric redshifts. The assumed scatter
         will be sigz * (1+z). Default: None.
+    physical_truncate : bool, optional
+        Truncate the electron (gas) profile such that the enclosed mass is equal to
+        f_b m_200c. Default: True.
     """
     def __init__(
         self,
@@ -311,7 +314,8 @@ class kSZ(HaloModel):
         b1=None,
         b2=None,
         sigz=None,
-        physical_truncate=True):
+        physical_truncate=True,
+    ):
 
         # Store rsd and fog preferences
         if fog and not rsd:
@@ -385,7 +389,7 @@ class kSZ(HaloModel):
                 ignore_existing=False,
                 vectorize_z=False,
                 verbose=verbose,
-                physical_truncate=physical_truncate
+                physical_truncate=physical_truncate,
             )
             if verbose: print('Defining electron profile: finished')
 
