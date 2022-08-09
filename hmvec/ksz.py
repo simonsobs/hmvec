@@ -311,7 +311,7 @@ class kSZ(HaloModel):
         b1=None,
         b2=None,
         sigz=None,
-    ):
+        physical_truncate=True):
 
         # Store rsd and fog preferences
         if fog and not rsd:
@@ -326,10 +326,14 @@ class kSZ(HaloModel):
 
         # Define comoving volume and galaxy number density at each redshift
         volumes_gpc3 = np.atleast_1d(volumes_gpc3)
+        zs = np.atleast_1d(zs)
+        if ngals_mpc3 is not None:
+            self.ngals_mpc3 = np.atleast_1d(ngals_mpc3)
+        else:
+            self.ngals_mpc3 = ngals_mpc3
         if len(zs) != len(volumes_gpc3):
             raise ValueError("zs and volumes_gpc3 must have same length")
 
-        self.ngals_mpc3 = ngals_mpc3
         if self.ngals_mpc3 is not None:
             self.ngals_mpc3 = np.asarray(self.ngals_mpc3)
             if len(zs) != len(self.ngals_mpc3):
@@ -381,6 +385,7 @@ class kSZ(HaloModel):
                 ignore_existing=False,
                 vectorize_z=False,
                 verbose=verbose,
+                physical_truncate=physical_truncate
             )
             if verbose: print('Defining electron profile: finished')
 

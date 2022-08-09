@@ -47,6 +47,9 @@ class Cosmology(object):
     def comoving_radial_distance(self,z):
         return self.results.comoving_radial_distance(z)
 
+    def redshift_at_comoving_radial_distance(self,chi):
+        return self.results.redshift_at_comoving_radial_distance(chi)
+    
     def angular_diameter_distance(self,z):
         return self.results.angular_diameter_distance(z)
 
