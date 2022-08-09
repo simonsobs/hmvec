@@ -919,6 +919,7 @@ def get_ksz_auto_mafry(
     pksz_in=None,
     slow_chi_integral=False,
     save_cl_integrand=False,
+    physical_truncate=True,
 ):
     """Compute kSZ angular auto power spectrum, C_ell, as in Ma & Fry.
 
@@ -988,6 +989,9 @@ def get_ksz_auto_mafry(
     save_cl_integrand : bool, optional
         Save integrand of C_ell to spec_dict, along with coordinate values
         that integrand was evaluated at, w.r.t. either chi or z.
+    physical_truncate : bool, optional
+        Truncate the electron (gas) profile such that the enclosed mass is equal to
+        f_b m_200c. Default: True.
 
     Returns
     -------
@@ -1049,6 +1053,7 @@ def get_ksz_auto_mafry(
             verbose=verbose,
             b1=bgs,
             b2=bgs,
+            physical_truncate=physical_truncate,
         )
 
     # Update ngal. Also, if different galaxy number density for velocity template is not
@@ -1262,7 +1267,8 @@ def get_ksz_auto_squeezed(
     use_pee_in_template=False,
     sigz=None,
     mthreshs_override=None,
-    use_hod_default_ngal=False
+    use_hod_default_ngal=False,
+    physical_truncate=True,
 ):
     """Compute kSZ angular auto power spectrum, C_ell, as in Ma & Fry.
 
@@ -1371,6 +1377,9 @@ def get_ksz_auto_squeezed(
         Array of mass thresholds to use instead of ngal in HOD. Default: None.
     use_hod_default_ngal : bool, optional
         If set, don't use input ngals_mpc3 to fix mthresh for HOD. Default: False.
+    physical_truncate : bool, optional
+        Truncate the electron (gas) profile such that the enclosed mass is equal to
+        f_b m_200c. Default: True.
 
     Returns
     -------
@@ -1443,7 +1452,8 @@ def get_ksz_auto_squeezed(
             b2=bgs,
             sigz=sigz,
             mthreshs_override=mthreshs_override,
-            use_hod_default_ngal=use_hod_default_ngal
+            use_hod_default_ngal=use_hod_default_ngal,
+            physical_truncate=physical_truncate,
         )
 
     # Update ngal. Also, if different galaxy number density for velocity template is not
@@ -1732,6 +1742,7 @@ def get_ksz_auto_squeezed_m_integrand(
     verbose=False,
     pksz_in=None,
     save_cl_integrand=False,
+    physical_truncate=True,
 ):
     """Compute kSZ angular auto power spectrum M derivative, dC_\ell / dM_halo.
 
@@ -1796,6 +1807,9 @@ def get_ksz_auto_squeezed_m_integrand(
     save_cl_integrand : bool, optional
         Save integrand of C_ell to spec_dict, along with coordinate values
         that integrand was evaluated at, w.r.t. either chi or z.
+    physical_truncate : bool, optional
+        Truncate the electron (gas) profile such that the enclosed mass is equal to
+        f_b m_200c. Default: True.
 
     Returns
     -------
@@ -1854,6 +1868,7 @@ def get_ksz_auto_squeezed_m_integrand(
             skip_hod=skip_hod,
             hod_family=hod_family,
             verbose=verbose,
+            physical_truncate=physical_truncate,
         )
 
     # Get k_short values that P_{q_perp} integrand is evaluated at
