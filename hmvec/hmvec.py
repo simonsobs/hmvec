@@ -149,7 +149,7 @@ class HaloModel(Cosmology):
         x = self.omz(z) - 1.
         d = 18.*np.pi**2. + 82.*x - 39. * x**2.
         return d
-    
+
     def rvir(self,m,z,mdef=None):
 
         if mdef is None:
@@ -163,11 +163,11 @@ class HaloModel(Cosmology):
     def Rdelta_critical(self,M,z,delta=200):
         rho = self.rho_critical_z(z)
         return R_from_M(M,rho,delta)
-    
+
     def Rdelta_mean(self,M,z,delta=200):
         rho = self.rho_matter_z(z)
         return R_from_M(M,rho,delta)
-    
+
     def R_of_m(self,ms):
         return R_from_M(ms,self.rho_matter_z(0),delta=1.) # note rhom0
 
@@ -324,17 +324,17 @@ class HaloModel(Cosmology):
             h = self.params['H0']/100.
             M.set({# class_sz parameters:
             'output':'tabulate_rhob_xout_at_m_and_z',
-            'gas profile':'B16', # Battaglia density pfroile 
+            'gas profile':'B16', # Battaglia density pfroile
             'gas profile mode' : 'agn', # agn feedback model for Battaglia profile
             'M_min' : self.ms.min()*h,  # msun/h
             'M_max' : self.ms.max()*h, # msun/h
             'z_min' : 1e-6,
             'z_max' : self.zs.max(),
             'A_s': self.params['As'],
-            'n_s': self.params['ns'], 
+            'n_s': self.params['ns'],
             'h': h,
             'omega_b': self.params['ombh2'],
-            'omega_cdm': self.params['omch2'],    
+            'omega_cdm': self.params['omch2'],
             'n_z_m_to_xout': 100, # number of redshift points for tabulation of r_out
             'n_mass_m_to_xout': 100 # number of mass points for tabulation of r_out
                     })
@@ -1665,7 +1665,7 @@ class HaloModel(Cosmology):
                 self.hods[iname]['Nc'],
                 self.hods[iname]['Ns'],
                 self.hods[iname]['ngal']
-            )[:,None]
+            )
 
             return rterm1, rterm01, b
 
@@ -1843,7 +1843,7 @@ class HaloModel(Cosmology):
                 self.hods[iname]['Nc'],
                 self.hods[iname]['Ns'],
                 self.hods[iname]['ngal']
-            )[:,None]
+            )
 
             return rterm1, rterm01, b
 
