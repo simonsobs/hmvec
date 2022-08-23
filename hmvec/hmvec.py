@@ -1566,6 +1566,40 @@ class HaloModel(Cosmology):
                 #     print("Two-halo consistency2: " , consistency2,integral2)
                 return self.Pzk * factor1 * factor2
 
+
+    def _bispectrum_tri_mask(self, k1_mesh=None, k2_mesh=None, k3_mesh=None):
+        """Compute a mask corresponding to valid bispectrum triangles.
+
+        Selects triangles with k1+k2>=k3, k2+k3>=k1, k3+k1>=k2.
+
+        Parameters
+        ----------
+        k1_mesh, k2_mesh, k3_mesh : array_like, optional
+            Output of np.meshgrid(..., indexing="ij"), corresponding to meshes of
+            k1, k2, k3. Will be generated internally if not specified. Default: None.
+
+        Returns
+        -------
+        tri_mask : array_like
+            Mask corresponding to meshes described above, with True for good triangles.
+        """
+
+        # Make k1, k2, k3 meshes if not specified
+        if k1_mesh is None or k2_mesh is None or k3_mesh is None:
+            k1_mesh, k2_mesh, k3_mesh = np.meshgrid(
+                self.ks, self.ks, self.ks, indexing="ij"
+            )
+
+        # Make mask that selects valid triangles
+        tri_mask = (
+            (k1_mesh + k2_mesh >= k3_mesh)
+            & (k2_mesh + k3_mesh >= k1_mesh)
+            & (k3_mesh + k1_mesh >= k2_mesh)
+        )
+
+        return tri_mask
+
+
     def get_bispectrum(
         self,
         name="g",
@@ -1598,7 +1632,9 @@ class HaloModel(Cosmology):
             Bispectrum, packed as [z,k1,k2,k3] if zi=None or [k1,k2,k3] if zi is
             specified.
         """
-        return (
+        _SMALL = 1e-40
+
+        B = (
             self.get_bispectrum_3halo(
                 name, name2=name2, name3=name3, b1_in=b1_in, zi=zi
             )
@@ -1609,6 +1645,10 @@ class HaloModel(Cosmology):
                 name, name2=name2, name3=name3, verbose=verbose, zi=zi
             )
         )
+        B[~self._bispectrum_tri_mask()] = _SMALL
+
+        return B
+
 
     def get_bispectrum_3halo(
         self,
@@ -1736,6 +1776,9 @@ class HaloModel(Cosmology):
             zi is specified.
         """
 
+        # Value to use for bispectrum on invalid ("open") triangles
+        _SMALL = 1e-40
+
         def _F2(k1, k2, k3):
             costheta12 = 0.5 * (k3 ** 2 - k1 ** 2 - k2 ** 2) / (k1 * k2)
             return (
@@ -1748,14 +1791,13 @@ class HaloModel(Cosmology):
         k1_mesh, k2_mesh, k3_mesh = np.meshgrid(
             self.ks, self.ks, self.ks, indexing="ij"
         )
-        # k1, k2, k3 = k1.flatten(), k2.flatten(), k3.flatten()
 
         # Get required permutations of F_2 kernel
         F2_123 = _F2(k1_mesh, k2_mesh, k3_mesh)
         F2_231 = _F2(k2_mesh, k3_mesh, k1_mesh)
         F2_312 = _F2(k3_mesh, k1_mesh, k2_mesh)
 
-        # Compute B_tree
+        # Compute B_tree. Set values for invalid triangles to small values.
         if zi is None:
             B = 2 * (
                 F2_123[None, :, :, :]
@@ -1768,6 +1810,7 @@ class HaloModel(Cosmology):
                 * self.Pzk[:, None, None, :] # P(k3)
                 * self.Pzk[:, :, None, None] # P(k1)
             )
+            B[:, ~self._bispectrum_tri_mask(k1_mesh, k2_mesh, k3_mesh)] = _SMALL
         else:
             B = 2 * (
                 F2_123
@@ -1780,6 +1823,7 @@ class HaloModel(Cosmology):
                 * self.Pzk[zi, None, None, :] # P(k3)
                 * self.Pzk[zi, :, None, None] # P(k1)
             )
+            B[~self._bispectrum_tri_mask(k1_mesh, k2_mesh, k3_mesh)] = _SMALL
 
         return B
 
