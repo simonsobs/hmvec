@@ -482,7 +482,7 @@ class HaloModel(Cosmology):
             self.cib_params['Td_o'] = 24.4
             self.cib_params['logM_eff'] = 12.6
             self.cib_params['var'] = 0.5
-            self.cib_params['L_o'] = 4e-6  # Changed by Anton after fitting 2h to websky fig.7 at 143 Ghz #3.0e-15
+            self.cib_params['L_o'] = 6.4e-8  # Changed by Anton to 4e-6 after fitting 2h to websky fig.7 at 143 Ghz #3.0e-15
         elif name.lower() == 'vierro':  # Vierro et al
             self.cib_params['alpha'] = 0.2
             self.cib_params['beta'] = 1.6
@@ -491,7 +491,7 @@ class HaloModel(Cosmology):
             self.cib_params['Td_o'] = 20.7
             self.cib_params['logM_eff'] = 12.3
             self.cib_params['var'] = 0.3
-            self.cib_params['L_o'] = 10 ** (-1.8)  # Changed by Anton #3.0e-15
+            self.cib_params['L_o'] = 6.4e-8 # Changed by Anton to 10 ** (-1.8) #3.0e-15
         else:
             assert len(params) == 8, "New sets of parameters require exactly 8 parameters"
 
@@ -764,7 +764,7 @@ class HaloModel(Cosmology):
                     square_term *= self._get_matter(nm)
                 elif nm in pnames:
                     square_term *= self._get_pressure(nm)
-                elif name.lower()=='cib':
+                elif nm.lower()=='cib':
                     square_term *= self._get_cib(nu_obs[0], subhalos, cibinteg, satmf)
                 else: raise ValueError
 
