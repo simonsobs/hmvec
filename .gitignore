@@ -11,3 +11,4 @@ commented.py
 .vscode/
 *.ipynb_checkpoints*
 *__pycache__*
+*.pyc
