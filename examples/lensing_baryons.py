@@ -4,6 +4,7 @@ from scipy.interpolate import interp1d
 import os,sys
 import hmvec as hm # Git clone and pip install as in readme from github.com/msyriac/hmvec
 import numpy as np
+import time
 
 zgalaxy = 0.6 # delta-function lens population
 zsource = 1.0 # delta-function source population
@@ -22,7 +23,10 @@ hcos = hm.HaloModel(zs,ks,ms=ms)
 hcos.add_hod("g",ngal=ngal+zs*0.,corr="max")
 print("Galaxy bias at zgalaxy=",zgalaxy, " is ",interp1d(zs,hcos.hods['g']['bg'])(zgalaxy))
 # We add a gas profile
+a = time.time()
 hcos.add_battaglia_profile("electron",family="AGN",xmax=50,nxs=30000)
+b = time.time()-a
+print(f"Profile took {b} seconds.")
 
 """
 Galaxy-galaxy lensing

@@ -1,4 +1,5 @@
 import numpy as np
+from numba import jit
 
 """
 FFT routines
@@ -89,19 +90,26 @@ def generic_profile_fft(rhofunc_x,cmaxs,rss,zs,ks,xmax,nxs,do_mass_norm=True):
     kts,ukts = fft_integral(xs,integrand)
     uk = ukts/kts[None,None,:]/mnorm[...,None]
     kouts = kts/rss/(1+zs[:,None,None]) # divide k by (1+z) here for comoving FIXME: check this!
-    ukouts = np.zeros((uk.shape[0],uk.shape[1],ks.size))
+    ukouts = _interp_loop(ks.size,uk.shape[0],uk.shape[1],kouts,uk,ks)
+    return ks,ukouts
+        
+#@jit(nopython=True) # numba nearly doubles the time it takes :/
+def _interp_loop(Nk,Nuy,Nux,kouts,uk,ks):
+    ukouts = np.zeros((Nuy,Nux,Nk))
     # sadly at this point we must loop to interpolate :(
-    # from orphics import io
-    # pl = io.Plotter(xyscale='loglog')
-    for i in range(uk.shape[0]):
-        for j in range(uk.shape[1]):
+    for i in range(Nuy):
+        for j in range(Nux):
             pks = kouts[i,j]
             puks = uk[i,j]
             puks = puks[pks>0]
             pks = pks[pks>0]
+
             ukouts[i,j] = np.interp(ks,pks,puks,left=puks[0],right=0)
-            #TODO: Add compulsory debug plot here
-    #         pl.add(ks,ukouts[i,j])
-    # pl.hline(y=1)
-    # pl.done()
-    return ks, ukouts
+
+            # Use these lines if using jit because the left and right
+            # arguments are not supported by numba-numpy
+            #ukouts[i,j] = np.interp(ks,pks,puks)
+            #ukouts[i,j][ks<pks[0]] = puks[0]
+            #ukouts[i,j][ks>pks[-1]] = 0
+            
+    return ukouts
