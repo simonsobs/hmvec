@@ -93,7 +93,7 @@ def generic_profile_fft(rhofunc_x,cmaxs,rss,zs,ks,xmax,nxs,do_mass_norm=True):
     ukouts = _interp_loop(ks.size,uk.shape[0],uk.shape[1],kouts,uk,ks)
     return ks,ukouts
         
-#@jit(nopython=True) # numba nearly doubles the time it takes :/
+#@jit(nopython=True)
 def _interp_loop(Nk,Nuy,Nux,kouts,uk,ks):
     ukouts = np.zeros((Nuy,Nux,Nk))
     # sadly at this point we must loop to interpolate :(
@@ -108,8 +108,8 @@ def _interp_loop(Nk,Nuy,Nux,kouts,uk,ks):
 
             # Use these lines if using jit because the left and right
             # arguments are not supported by numba-numpy
-            #ukouts[i,j] = np.interp(ks,pks,puks)
-            #ukouts[i,j][ks<pks[0]] = puks[0]
-            #ukouts[i,j][ks>pks[-1]] = 0
+            # ukouts[i,j] = np.interp(ks,pks,puks)
+            # ukouts[i,j][ks<pks[0]] = puks[0]
+            # ukouts[i,j][ks>pks[-1]] = 0
             
     return ukouts
