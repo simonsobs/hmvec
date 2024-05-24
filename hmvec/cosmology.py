@@ -82,8 +82,9 @@ class Cosmology(object):
                                     w=params['w0'],wa=params['wa'],
                                     dark_energy_model='ppf',
                                     halofit_version=self.p['default_halofit'] if halofit is None else halofit,
-                                    AccuracyBoost=2)
+                                    AccuracyBoost=2,pivot_scalar=params['pivot_scalar'])
         self.results = camb.get_background(self.pars)
+        self._init_D_growth()
         self.params = params
         self.h = self.params['H0']/100.
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
@@ -112,7 +113,7 @@ class Cosmology(object):
         rho = 3.*(Hz**2.)/8./np.pi/G # SI
         return rho * 1.477543e37 # in msolar / megaparsec3
     
-    def D_growth(self, a):
+    def _init_D_growth(self):
         # From Moritz Munchmeyer?
         
         _amin = 0.001    # minimum scale factor
@@ -125,9 +126,15 @@ class Cosmology(object):
         zs = a2z(atab)
         deltakz = self.results.get_redshift_evolution(ks, zs, ['delta_cdm']) #index: k,z,0
         D_camb = deltakz[0,:,0]/deltakz[0,0,0]
-        _da_interp = interp1d(atab, D_camb, kind='linear')
-        _da_interp_type = "camb"
-        return _da_interp(a)/_da_interp(1.0)
+        self._da_interp = interp1d(atab, D_camb, kind='linear')
+        #_da_interp_type = "camb"
+
+    def D_growth(self, a,type="camb_anorm"):
+        if type=="camb_z0norm":
+            mul = 1 #normed so that D(a=1)=1
+        elif type=="camb_anorm":
+            mul = 0.76 #normed so that D(a)=a in matter domination
+        return self._da_interp(a)/self._da_interp(1.0)*0.76
 
     def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
         """
@@ -141,6 +148,8 @@ class Cosmology(object):
         scales, and cosmological dependence is obtained through an accurate CAMB based P(k),
         one should be fine.
         """
+        zs = np.asarray(zs)
+        ks = np.asarray(ks)
         tk = self.Tk(ks,'eisenhu_osc') 
         assert knorm<kmax
         PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False, 
@@ -157,6 +166,21 @@ class Cosmology(object):
                                                      zmax=zs.max()+1.)
         plin = PK.P(zs, ks,grid=True)
         return (self.as8**2.) * plin
+
+    def P_lin_approx(self,ks,zs,type='eisenhu_osc'):
+        zs = np.asarray(zs)
+        ks = np.asarray(ks)
+        tk = self.Tk(ks,type=type)[None,:]
+        a = 1/(1+zs)
+        Dzs = self.D_growth(a)[:,None]
+        print(Dzs)
+        kp = self.params['pivot_scalar']
+        ns = self.params['ns']
+        omh2 = (self.params['omch2'] + self.params['ombh2'])*100**2. # neutrinos?
+        kfacts = (ks/kp)**(ns-1.)  * ks
+        cspeed = 299792.458 # km/s
+        pref = 8*np.pi**2*self.params['As']/25./omh2**2. * cspeed**4.
+        return pref * kfacts[None,:] * Dzs**2. * tk**2.
 
     def Tk(self,ks,type ='eisenhu_osc'):
         """
