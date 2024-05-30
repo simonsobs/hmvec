@@ -12,7 +12,6 @@ import scipy.constants as constants
 from .params import default_params, battaglia_defaults
 from .fft import generic_profile_fft
 import scipy
-from scipy.integrate import simps
 
 """
 
@@ -66,16 +65,6 @@ respectively.
  """
     
 
-def Wkr_taylor(kR):
-    xx = kR*kR
-    return 1 - .1*xx + .00357142857143*xx*xx
-
-def Wkr(k,R,taylor_switch=default_params['Wkr_taylor_switch']):
-    kR = k*R
-    ans = 3.*(np.sin(kR)-kR*np.cos(kR))/(kR**3.)
-    ans[kR<taylor_switch] = Wkr_taylor(kR[kR<taylor_switch]) 
-    return ans
-
 def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     A = default_params['duffy_A_mean'] if A is None else A
     alpha = default_params['duffy_alpha_mean'] if alpha is None else alpha
@@ -85,11 +74,10 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     
 class HaloModel(Cosmology):
     def __init__(self,zs,ks,ms=None,params=None,mass_function="sheth-torman",
-                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accurate_sigma2=False):
+                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accuracy='medium',growth_exact=False):
         self.zs = np.asarray(zs)
         self.ks = ks
-        self.accurate_sigma2 = accurate_sigma2
-        Cosmology.__init__(self,params,halofit)
+        Cosmology.__init__(self,params,halofit,growth_exact=growth_exact,accuracy=accurace)
         
         self.mdef = mdef
         self.mode = mass_function
@@ -105,9 +93,12 @@ class HaloModel(Cosmology):
         self.pk_profiles = {}
         if not(skip_nfw): self.add_nfw_profile("nfw",numeric=nfw_numeric)
 
-    def _init_cosmology(self,params,halofit):
-        Cosmology._init_cosmology(self,params,halofit)
-        self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
+    def _init_cosmology(self,params,halofit,growth_exact=False):
+        Cosmology._init_cosmology(self,params,halofit,growth_exact=growth_exact)
+        if self.accuracy=='low':
+            self.Pzk = self.P_lin_approx(self.ks,self.zs)
+        else:
+            self.Pzk = self._get_matter_power(self.zs,self.ks,nonlinear=False)
         if halofit is not None: self.nPzk = self._get_matter_power(self.zs,self.ks,nonlinear=True)
 
         
@@ -125,24 +116,13 @@ class HaloModel(Cosmology):
     def R_of_m(self,ms):
         return R_from_M(ms,self.rho_matter_z(0),delta=1.) # note rhom0
     
+    
     def get_sigma2(self):
         ms = self.ms
-        kmin = self.p['sigma2_kmin']
-        kmax = self.p['sigma2_kmax']
-        numks = self.p['sigma2_numks']
-        self.ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
-        if self.accurate_sigma2:
-            self.sPzk = self.P_lin_slow(self.ks_sigma2,self.zs,kmax=kmax)
-        else:
-            self.sPzk = self.P_lin(self.ks_sigma2,self.zs)
-        ks = self.ks_sigma2[None,None,:]
         R = self.R_of_m(ms)[None,:,None]
-        W2 = Wkr(ks,R,self.p['Wkr_taylor_switch'])**2.
-        Ps = self.sPzk[:,None,:]
-        integrand = Ps*W2*ks**2./2./np.pi**2.
-        sigma2 = simps(integrand,ks,axis=-1)
-        return sigma2
-        
+        return self.get_sigma2_R(R,self.zs)
+
+    
     def init_mass_function(self,ms):
         self.ms = ms
         self.sigma2 = self.get_sigma2()
@@ -514,7 +494,7 @@ class HaloModel(Cosmology):
         return pk
 
 
-    def get_power(self,name,name2=None,verbose=True,b1=None,b2=None):
+    def get_power(self,name,name2=None,verbose=False,b1=None,b2=None):
         if name2 is None: name2 = name
         return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose,b1,b2)
     

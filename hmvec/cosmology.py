@@ -5,6 +5,8 @@ import camb
 from camb import model
 import scipy.interpolate as si
 import scipy.constants as constants
+from scipy.special import hyp2f1
+from scipy.integrate import simps
 
 """
 This module will (eventually) abstract away the choice of boltzmann codes.
@@ -15,18 +17,30 @@ results. It could be a test-bed for converging towards that.
 
 """
 
+def Wkr_taylor(kR):
+    xx = kR*kR
+    return 1 - .1*xx + .00357142857143*xx*xx
+
+def Wkr(k,R,taylor_switch=default_params['Wkr_taylor_switch']):
+    kR = k*R
+    ans = 3.*(np.sin(kR)-kR*np.cos(kR))/(kR**3.)
+    ans[kR<taylor_switch] = Wkr_taylor(kR[kR<taylor_switch]) 
+    return ans
+
+
 class Cosmology(object):
 
-    def __init__(self,params=None,halofit=None,engine='camb'):
+    def __init__(self,params=None,halofit=None,engine='camb',growth_exact=False,accuracy='medium'):
         assert engine in ['camb','class']
         if engine=='class': raise NotImplementedError
+        self.accuracy = accuracy
         
         self.p = dict(params) if params is not None else {}
         for param in default_params.keys():
             if param not in self.p.keys(): self.p[param] = default_params[param]
         
         # Cosmology
-        self._init_cosmology(self.p,halofit)
+        self._init_cosmology(self.p,halofit,growth_exact=growth_exact)
 
 
     def sigma_crit(self,zlens,zsource):
@@ -58,7 +72,7 @@ class Cosmology(object):
         # H(z) in 1/Mpc
         return self.results.h_of_z(z)
 
-    def _init_cosmology(self,params,halofit):
+    def _init_cosmology(self,params,halofit,growth_exact=False):
         try:
             theta = params['theta100']/100.
             H0 = None
@@ -72,10 +86,11 @@ class Cosmology(object):
             params['omch2'] = omm*h**2-params['ombh2']     
             print("WARNING: omm specified. Ignoring omch2.")       
         except:        
-            pass        
+            pass
         self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
                                     cosmomc_theta=theta,ombh2=params['ombh2'],
                                     omch2=params['omch2'], mnu=params['mnu'],
+                                    omk = params['omk'],
                                     tau=params['tau'],nnu=params['nnu'],
                                     num_massive_neutrinos=
                                     params['num_massive_neutrinos'],
@@ -83,12 +98,16 @@ class Cosmology(object):
                                     dark_energy_model='ppf',
                                     halofit_version=self.p['default_halofit'] if halofit is None else halofit,
                                     AccuracyBoost=2,pivot_scalar=params['pivot_scalar'])
+        self.pars.WantTransfer = True
         self.results = camb.get_background(self.pars)
-        self._init_D_growth()
+        if growth_exact: self._init_D_growth()
+        self.growth_exact = growth_exact
         self.params = params
         self.h = self.params['H0']/100.
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
-        self.om0 = omh2 / (self.params['H0']/100.)**2.        
+        self.omm0 = omh2 / (self.params['H0']/100.)**2.
+        self.omk0 = self.params['omk']
+        self.oml0 = 1-self.omm0-self.omk0
         try: self.as8 = self.params['as8']        
         except: self.as8 = 1
         
@@ -101,7 +120,7 @@ class Cosmology(object):
 
         
     def rho_matter_z(self,z):
-        return self.rho_critical_z(0.) * self.om0 \
+        return self.rho_critical_z(0.) * self.omm0 \
             * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3
 
     def omz(self,z): 
@@ -113,6 +132,31 @@ class Cosmology(object):
         rho = 3.*(Hz**2.)/8./np.pi/G # SI
         return rho * 1.477543e37 # in msolar / megaparsec3
     
+    def get_sigma2_R(self,R,zs):
+        zs = np.atleast_1d(zs)
+        R = np.asarray(R)
+        if R.ndim==1: R = R[None,:,None]
+        kmin = self.p['sigma2_kmin']
+        kmax = self.p['sigma2_kmax']
+        numks = self.p['sigma2_numks']
+        self.ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
+        if self.accuracy=='high':
+            self.sPzk = self.P_lin_slow(self.ks_sigma2,zs,kmax=kmax)
+        elif self.accuracy=='medium':
+            self.sPzk = self.P_lin(self.ks_sigma2,zs)
+        elif self.accuracy=='low':
+            self.sPzk = self.P_lin_approx(self.ks_sigma2,zs)
+        ks = self.ks_sigma2[None,None,:]
+        W2 = Wkr(ks,R,self.p['Wkr_taylor_switch'])**2.
+        Ps = self.sPzk[:,None,:]
+        integrand = Ps*W2*ks**2./2./np.pi**2.
+        sigma2 = simps(integrand,ks,axis=-1)
+        return sigma2
+    
+    def get_sigma8(self,zs,camb=False):
+        if camb: return self.results.get_sigma8()
+        else: return np.sqrt(self.get_sigma2_R(8./self.params['H0']*100.,zs))
+        
     def _init_D_growth(self):
         # From Moritz Munchmeyer?
         
@@ -127,14 +171,41 @@ class Cosmology(object):
         deltakz = self.results.get_redshift_evolution(ks, zs, ['delta_cdm']) #index: k,z,0
         D_camb = deltakz[0,:,0]/deltakz[0,0,0]
         self._da_interp = interp1d(atab, D_camb, kind='linear')
-        #_da_interp_type = "camb"
 
+    def D_growth_approx(self,a):
+        # Solution to Heath et al 1977
+        # (inspired by
+        # Klypin, Trujillo, Primack - Bolshoi paper 1 - Appendix A)
+        # normed so that D(a)=a in matter domination
+        # These assume LCDM; should work with non-flat models.
+        # Haven't checked if it works for mnu!= or w!=-1.
+        omm0 = self.omm0
+        oml0 = self.oml0
+        x = (oml0/omm0)**(1./3.) * a
+        Dovera = np.sqrt(1.+x**3.)*(hyp2f1(5/6.,3/2.,11/6.,-x**3.))
+        return Dovera*a
+
+    
     def D_growth(self, a,type="camb_anorm"):
-        if type=="camb_z0norm":
-            mul = 1 #normed so that D(a=1)=1
-        elif type=="camb_anorm":
-            mul = 0.76 #normed so that D(a)=a in matter domination
-        return self._da_interp(a)/self._da_interp(1.0)*0.76
+        if self.growth_exact:
+            val = self._da_interp(a)/self._da_interp(1.0)
+            if type=="camb_z0norm":
+                mul = 1 #normed so that D(a=1)=1
+            elif type=="camb_anorm":
+                mul = self.D_growth_approx(1)
+                # mul = 0.7779 for oml=0.7, omm=0.3
+                # This is different from the 0.76 often cited!
+            else:
+                raise ValueError
+        else:
+            val = self.D_growth_approx(a)
+            if type=="camb_z0norm":
+                mul = 1./self.D_growth_approx(1) #normed so that D(a=1)=1
+            elif type=="camb_anorm":
+                mul = 1.
+            else:
+                raise ValueError
+        return val*mul
 
     def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
         """
@@ -161,6 +232,8 @@ class Cosmology(object):
         return (self.as8**2.) *plin
  
     def P_lin_slow(self,ks,zs,kmax = 0.1):
+        zs = np.asarray(zs)
+        ks = np.asarray(ks)
         PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False, 
                                                      hubble_units=False, k_hunit=False, kmax=kmax,
                                                      zmax=zs.max()+1.)
@@ -172,11 +245,10 @@ class Cosmology(object):
         ks = np.asarray(ks)
         tk = self.Tk(ks,type=type)[None,:]
         a = 1/(1+zs)
-        Dzs = self.D_growth(a)[:,None]
-        print(Dzs)
+        Dzs = self.D_growth(a,type='camb_anorm')[:,None]
         kp = self.params['pivot_scalar']
         ns = self.params['ns']
-        omh2 = (self.params['omch2'] + self.params['ombh2'])*100**2. # neutrinos?
+        omh2 = (self.params['omch2'] + self.params['ombh2'])*100**2. + self.results.get_Omega('nu')*self.params['H0']**2.
         kfacts = (ks/kp)**(ns-1.)  * ks
         cspeed = 299792.458 # km/s
         pref = 8*np.pi**2*self.params['As']/25./omh2**2. * cspeed**4.
@@ -215,7 +287,7 @@ class Cosmology(object):
         self._k_silk = 1.6 * pow(w_b, 0.52) * pow(w_m, 0.73) * \
             (1.0 + pow(10.4*w_m, -0.95)) / self.h
 
-        Omega_m = self.om0
+        Omega_m = self.omm0
         fb = self.params['ombh2'] / (self.params['omch2']+self.params['ombh2']) # self.Omega_b / self.Omega_m
         fc = self.params['omch2'] / (self.params['omch2']+self.params['ombh2']) # self.params['ombh2'] #(self.Omega_m - self.Omega_b) / self.Omega_m
         alpha_gamma = 1.-0.328*np.log(431.*w_m)*w_b/w_m + \
@@ -312,7 +384,7 @@ class Cosmology(object):
             for i in range(integrand.shape[0]): integrand[i][zs<ezs[i]] = 0 # FIXME: vectorize this
             integral = np.trapz(integrand,zs,axis=-1)
             
-        return 1.5*self.om0*H0**2.*(1.+ezs)*chis/H * integral
+        return 1.5*self.omm0*H0**2.*(1.+ezs)*chis/H * integral
 
     def C_kg(self,ells,zs,ks,Pgm,gzs,gdndz=None,lzs=None,ldndz=None,lwindow=None):
         gzs = np.array(gzs).reshape(-1)
@@ -389,12 +461,51 @@ class Cosmology(object):
         fb = self.p['ombh2']/omtoth2
         return fc*Pgn + fb*Pge
 
+    def cmb_lensing_kk_exact(self,lmax,lens_potential_accuracy=4):
+        self.pars.set_for_lmax(lmax, lens_potential_accuracy=lens_potential_accuracy)
+        results = camb.get_results(self.pars)
+        cl = results.get_lens_potential_cls(lmax=lmax)[:,0]
+        ells = np.arange(cl.size)
+        return ells,cl*2.*np.pi/4.
+        
+    def cmb_lensing_limber(self,lmax,nonlinear=False):
+        results = self.results
+        nz = 100 #number of steps to use for the radial/redshift integration
+        kmax=10  #kmax to use
+        chistar = results.conformal_time(0)- results.tau_maxvis
+        chis = np.linspace(0,chistar,nz)
+        zs=results.redshift_at_comoving_radial_distance(chis)
+        #Calculate array of delta_chi, and drop first and last points where things go singular
+        dchis = (chis[2:]-chis[:-2])/2
+        chis = chis[1:-1]
+        zs = zs[1:-1]
+
+        #Get the matter power spectrum interpolation object (based on RectBivariateSpline). 
+        #Here for lensing we want the power spectrum of the Weyl potential.
+        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
+                                                hubble_units=False, k_hunit=False, kmax=kmax,
+                                                var1=model.Transfer_Weyl,var2=model.Transfer_Weyl, zmax=zs[-1])
+
+        #Get lensing window function (flat universe)
+        win = ((chistar-chis)/(chis**2*chistar))**2
+        #Do integral over chi
+        ls = np.arange(2,lmax+1, dtype=np.float64)
+        cl_kappa=np.zeros(ls.shape)
+        w = np.ones(chis.shape) #this is just used to set to zero k values out of range of interpolation
+        for i, l in enumerate(ls):
+            k=(l+0.5)/chis
+            w[:]=1
+            w[k<1e-4]=0
+            w[k>=kmax]=0
+            cl_kappa[i] = np.dot(dchis, w*PK.P(zs, k, grid=False)*win/k**4)
+        cl_kappa*= (ls*(ls+1))**2
+        return ls,cl_kappa
 
 
 def a2z(a): return (1.0/a)-1.0
 
 def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
-    """
+    r"""
     Get C(ell) = \int dz (H(z)/c) W1(z) W2(z) Pzks(z,k=ell/chi) / chis**2.
     ells: (nells,) multipoles looped over
     zs: redshifts (npzs,) corresponding to Pzks
@@ -408,12 +519,11 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
 
     We interpolate P(z,k)
     """
-
     hzs = np.array(hzs).reshape(-1)
     Wz1s = np.array(Wz1s).reshape(-1)
     Wz2s = np.array(Wz2s).reshape(-1)
     chis = np.array(chis).reshape(-1)
-    
+
     prefactor = hzs * Wz1s * Wz2s   / chis**2.
     zevals = gzs
     if zs.size>1:            

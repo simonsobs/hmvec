@@ -79,6 +79,7 @@ default_params = {
     'ns': 0.9645,
     'As': 2.2e-9,
     'mnu': 0.0, # NOTE NO NEUTRINOS IN DEFAULT
+    'omk': 0.0,
     'pivot_scalar': 0.05,
     'w0': -1.0,
     'tau':0.06,
