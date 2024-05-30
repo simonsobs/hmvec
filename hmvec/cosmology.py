@@ -30,7 +30,7 @@ def Wkr(k,R,taylor_switch=default_params['Wkr_taylor_switch']):
 
 class Cosmology(object):
 
-    def __init__(self,params=None,halofit=None,engine='camb',growth_exact=False,accuracy='medium'):
+    def __init__(self,params=None,halofit=None,engine='camb',accuracy='medium'):
         assert engine in ['camb','class']
         if engine=='class': raise NotImplementedError
         self.accuracy = accuracy
@@ -40,7 +40,7 @@ class Cosmology(object):
             if param not in self.p.keys(): self.p[param] = default_params[param]
         
         # Cosmology
-        self._init_cosmology(self.p,halofit,growth_exact=growth_exact)
+        self._init_cosmology(self.p,halofit)
 
 
     def sigma_crit(self,zlens,zsource):
@@ -72,7 +72,14 @@ class Cosmology(object):
         # H(z) in 1/Mpc
         return self.results.h_of_z(z)
 
-    def _init_cosmology(self,params,halofit,growth_exact=False):
+    
+    def bias_fnl(self,bg,fnl,z,ks,deltac=1.42):
+        beta = 2. * deltac * (bg-1.)
+        a = 1./(1+z)
+        alpha = (2. * ks**2. * self.Tk(ks,type ='eisenhu_osc')) / (3.* self.omm0 * self.results.h_of_z(0)**2.) * self.D_growth(a,type="camb_anorm",growth_exact=False)
+        return bg+fnl*(beta/alpha)
+
+    def _init_cosmology(self,params,halofit):
         try:
             theta = params['theta100']/100.
             H0 = None
@@ -100,8 +107,6 @@ class Cosmology(object):
                                     AccuracyBoost=2,pivot_scalar=params['pivot_scalar'])
         self.pars.WantTransfer = True
         self.results = camb.get_background(self.pars)
-        if growth_exact: self._init_D_growth()
-        self.growth_exact = growth_exact
         self.params = params
         self.h = self.params['H0']/100.
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
@@ -110,6 +115,7 @@ class Cosmology(object):
         self.oml0 = 1-self.omm0-self.omk0
         try: self.as8 = self.params['as8']        
         except: self.as8 = 1
+        self.D_growth_CAMB_today = self.D_growth_CAMB(1.0)
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
         PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
@@ -157,20 +163,10 @@ class Cosmology(object):
         if camb: return self.results.get_sigma8()
         else: return np.sqrt(self.get_sigma2_R(8./self.params['H0']*100.,zs))
         
-    def _init_D_growth(self):
-        # From Moritz Munchmeyer?
-        
-        _amin = 0.001    # minimum scale factor
-        _amax = 1.0      # maximum scale factor
-        _na = 512        # number of points in interpolation arrays
-        atab = np.linspace(_amin,
-                           _amax,
-                           _na)
-        ks = np.logspace(np.log10(1e-5),np.log10(1.),num=100) 
-        zs = a2z(atab)
-        deltakz = self.results.get_redshift_evolution(ks, zs, ['delta_cdm']) #index: k,z,0
-        D_camb = deltakz[0,:,0]/deltakz[0,0,0]
-        self._da_interp = interp1d(atab, D_camb, kind='linear')
+    def D_growth_CAMB(self,a):
+        deltakz = self.results.get_redshift_evolution(1e-5, a2z(a), ['delta_cdm']) #index: z,0
+        D_camb = deltakz[:,0]
+        return D_camb
 
     def D_growth_approx(self,a):
         # Solution to Heath et al 1977
@@ -183,12 +179,16 @@ class Cosmology(object):
         oml0 = self.oml0
         x = (oml0/omm0)**(1./3.) * a
         Dovera = np.sqrt(1.+x**3.)*(hyp2f1(5/6.,3/2.,11/6.,-x**3.))
+        # An approximation to this integral
+        # oma = 1./(1+x**3)
+        # oml = 1-oma
+        # Dovera = (5./2*oma)/(oma**(4./7)-oml+(1+oma/2.)*(1+oml/70.))        
         return Dovera*a
 
     
-    def D_growth(self, a,type="camb_anorm"):
-        if self.growth_exact:
-            val = self._da_interp(a)/self._da_interp(1.0)
+    def D_growth(self, a,type="camb_anorm",growth_exact=False):
+        if growth_exact:
+            val = self.D_growth_CAMB(a)/self.D_growth_CAMB_today
             if type=="camb_z0norm":
                 mul = 1 #normed so that D(a=1)=1
             elif type=="camb_anorm":
