@@ -449,19 +449,89 @@ class Cosmology(object):
 
         return limber_integral(ells,zs,ks,Ppp,zs,1,1,hzs,chis)
 
+    def total_matter_power_spectrum(self, Pnn, Pne, Pee):
+        """
+        Calculates the total matter auto-power spectrum.
+
+        Parameters
+        ==========
+
+        - Pnn (array): The auto-power spectrum of cold dark matter (e.g. NFW).
+        - Pne (array): Cross-power spectrum of cold dark matter (e.g. NFW) and gas (e.g. free electron overdensity).
+        - Pee (array): The auto-power spectrum of gas (e.g. free electron overdensity).
+        
+        Returns
+        =======
+
+        - array: The total matter power spectrum.
+
+        """
+        omtoth2 = self.p['omch2'] + self.p['ombh2']
+        fc = self.p['omch2'] / omtoth2
+        fb = self.p['ombh2'] / omtoth2
+        return fc ** 2. * Pnn + 2. * fc * fb * Pne + fb * fb * Pee
+    
     def total_matter_power_spectrum(self,Pnn,Pne,Pee):
+        """
+        
+        """
+
         omtoth2 = self.p['omch2'] + self.p['ombh2']
         fc = self.p['omch2']/omtoth2
         fb = self.p['ombh2']/omtoth2
         return fc**2.*Pnn + 2.*fc*fb*Pne + fb*fb*Pee
 
+    def total_matter_galaxy_power_spectrum(self, Pgn, Pge):
+        """
+        Calculates the cross-spectrum between total matter and galaxies.
+
+        Arguments
+        =========
+
+        - Pgn (array): Cross-power spectrum of cold dark matter (e.g. NFW) and galaxies.
+        - Pge (array): Cross-power spectrum of galaxies and gas (e.g. free electron overdensity).
+
+        Returns
+        =======
+
+        - array: Cross-power spectrum of total matter and galaxies.
+        """
+        omtoth2 = self.p['omch2'] + self.p['ombh2']
+        fc = self.p['omch2'] / omtoth2
+        fb = self.p['ombh2'] / omtoth2
+        return fc * Pgn + fb * Pge
     def total_matter_galaxy_power_spectrum(self,Pgn,Pge):
+        """
+        
+        """
         omtoth2 = self.p['omch2'] + self.p['ombh2']
         fc = self.p['omch2']/omtoth2
         fb = self.p['ombh2']/omtoth2
         return fc*Pgn + fb*Pge
 
     def cmb_lensing_kk_exact(self,lmax,lens_potential_accuracy=4):
+        """
+        Calculate the lensing convergence power spectrum C_l^{\kappa\kappa} using the exact calculation in CAMB.
+
+        Arguments
+        =========
+
+        lmax: int
+            maximum ell value to calculate to
+
+        lens_potential_accuracy: int, optional
+            accuracy of lensing potential calculation
+
+        Returns
+        =======
+
+        ls: array
+            ell values
+
+        cl_kappa: array
+            C_l^{\kappa\kappa} values
+
+        """
         self.pars.set_for_lmax(lmax, lens_potential_accuracy=lens_potential_accuracy)
         results = camb.get_results(self.pars)
         cl = results.get_lens_potential_cls(lmax=lmax)[:,0]
@@ -469,6 +539,27 @@ class Cosmology(object):
         return ells,cl*2.*np.pi/4.
         
     def cmb_lensing_limber(self,lmax,nonlinear=False):
+        """
+        Calculate the lensing convergence power spectrum C_l^{\kappa\kappa} using Limber approximation, but using the Weyl potential power spectrum from CAMB. This code is adapted from the CAMB demo.
+
+        Arguments
+        =========
+
+        lmax: int
+            maximum ell value to calculate to
+
+        nonlinear: bool, optional
+            whether to use non-linear corrections
+
+        Returns
+        =======
+
+        ls: array
+            ell values
+
+        cl_kappa: array 
+            C_l^{\kappa\kappa} values
+        """
         results = self.results
         nz = 100 #number of steps to use for the radial/redshift integration
         kmax=10  #kmax to use
