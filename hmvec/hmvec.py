@@ -74,10 +74,10 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     
 class HaloModel(Cosmology):
     def __init__(self,zs,ks,ms=None,params=None,mass_function="sheth-torman",
-                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accuracy='medium'):
+                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accuracy='medium',engine='camb'):
         self.zs = np.asarray(zs)
         self.ks = ks
-        Cosmology.__init__(self,params,halofit,accuracy=accuracy)
+        Cosmology.__init__(self,params,halofit,accuracy=accuracy,engine=engine)
         
         self.mdef = mdef
         self.mode = mass_function
@@ -107,6 +107,7 @@ class HaloModel(Cosmology):
         x = self.omz(z) - 1.
         d = 18.*np.pi**2. + 82.*x - 39. * x**2.
         return d
+    
     def rvir(self,m,z):
         if self.mdef == 'vir':
             return R_from_M(m,self.rho_critical_z(z),delta=self.deltav(z))
@@ -621,7 +622,8 @@ class HaloModel(Cosmology):
 """
 Mass function
 """
-def R_from_M(M,rho,delta): return (3.*M/4./np.pi/delta/rho)**(1./3.) 
+def R_from_M(M,rho,delta):
+    return (3.*M/4./np.pi/delta/rho)**(1./3.) 
 
 """
 HOD functions from Matt Johnson and Moritz Munchmeyer (modified)

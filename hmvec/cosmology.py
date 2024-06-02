@@ -17,6 +17,9 @@ results. It could be a test-bed for converging towards that.
 
 """
 
+cspeed = 299792.458 # km/s
+
+
 def Wkr_taylor(kR):
     xx = kR*kR
     return 1 - .1*xx + .00357142857143*xx*xx
@@ -44,12 +47,24 @@ class Cosmology(object):
         self._init_cosmology(self.p,halofit)
 
 
+    def angular_diameter_distance(self,z1,z2=None):
+        if not(z2 is None):
+            if self.engine=='camb':
+                return self.results.angular_diameter_distance2(z1,z2)
+            elif self.engine=='class':
+                return self.classr.angular_distance_from_to(z1, z2)
+        else:
+            if self.engine=='camb':
+                return self.results.angular_diameter_distance(z1)
+            elif self.engine=='class':
+                return self.classr.angular_distance(z1)
+                
     def sigma_crit(self,zlens,zsource):
         Gval = 4.517e-48 # Newton G in Mpc,seconds,Msun units
         cval = 9.716e-15 # speed of light in Mpc,second units
         Dd = self.angular_diameter_distance(zlens)
         Ds = self.angular_diameter_distance(zsource)
-        Dds = np.asarray([self.results.angular_diameter_distance2(zl,zsource) for zl in zlens])
+        Dds = np.asarray([self.angular_diameter_distance(zl,zsource) for zl in zlens])
         return cval**2 * Ds / 4 / np.pi / Gval / Dd / Dds
         
 
@@ -60,21 +75,25 @@ class Cosmology(object):
         pass
 
     def comoving_radial_distance(self,z):
-        return self.results.comoving_radial_distance(z)
-
-    def angular_diameter_distance(self,z):
-        return self.results.angular_diameter_distance(z)
+        if self.engine=='camb':
+            return self.results.comoving_radial_distance(z)
+        elif self.engine=='class':
+            return np.vectorize(self.classr.comoving_distance)(z)
 
     def hubble_parameter(self,z):
         # H(z) in km/s/Mpc
-        return self.results.hubble_parameter(z)
+        if self.engine=='camb':
+            return self.results.hubble_parameter(z)
+        elif self.engine=='class':
+            H = np.vectorize(self.classr.Hubble)(z)
+            return H*cspeed
     
     def h_of_z(self,z):
         # H(z) in 1/Mpc
         if self.engine=='camb':
             H = self.results.h_of_z(z)
         elif self.engine=='class':
-            H = self.classr.Hubble(z)
+            H = np.vectorize(self.classr.Hubble)(z)
         return H
     
     def bias_fnl(self,bg,fnl,z,ks,deltac=1.42):
@@ -163,9 +182,9 @@ class Cosmology(object):
         
     def rho_matter_z(self,z):
         return self.rho_critical_z(0.) * self.omm0 \
-            * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3engine
+            * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3
 
-    def omz(self,z): 
+    def omz(self,z):
         return self.rho_matter_z(z)/self.rho_critical_z(z)
     
     def rho_critical_z(self,z):
@@ -195,8 +214,13 @@ class Cosmology(object):
         sigma2 = simps(integrand,ks,axis=-1)
         return sigma2
     
-    def get_sigma8(self,zs,camb=False):
-        if camb: return self.results.get_sigma8()
+    def get_sigma8(self,zs,exact=False):
+        zs = np.atleast_1d(zs)
+        if exact:
+            if self.engine=='camb':
+                return self.results.get_sigma8() # fix this
+            elif self.engine=='class':
+                return np.vectorize(lambda x : self.classr.sigma(8./self.h,x))(zs)
         else: return np.sqrt(self.get_sigma2_R(8./self.params['H0']*100.,zs))
         
     def D_growth_exact_arbitrary_norm(self,a):
@@ -204,11 +228,7 @@ class Cosmology(object):
             deltakz = self.results.get_redshift_evolution(1e-5, a2z(a), ['delta_cdm']) #index: z,0
             D = deltakz[:,0]
         elif self.engine=='class':
-            avals = a2z(a)
-            D = []
-            for a in avals:
-                D.append(self.classr.scale_independent_growth_factor(a))
-            D = np.asarray(D)
+            D = np.vectorize(self.classr.scale_independent_growth_factor)(a)
         return D
     
 
@@ -281,6 +301,13 @@ class Cosmology(object):
         plin = PK.P(zs, ks,grid=True)
         return (self.as8**2.) * plin
 
+    def get_Omega_nu(self):
+        # check this
+        if self.engine=='camb':
+            return self.results.get_Omega('nu')
+        elif self.engine=='class':
+            return self.classr.Omega_nu
+        
     def P_lin_approx(self,ks,zs,type='eisenhu_osc'):
         zs = np.asarray(zs)
         ks = np.asarray(ks)
@@ -289,9 +316,8 @@ class Cosmology(object):
         Dzs = self.D_growth(a,type='anorm')[:,None]
         kp = self.params['pivot_scalar']
         ns = self.params['ns']
-        omh2 = (self.params['omch2'] + self.params['ombh2'])*100**2. + self.results.get_Omega('nu')*self.params['H0']**2.
+        omh2 = (self.params['omch2'] + self.params['ombh2'])*100**2. + self.get_Omega_nu()*self.params['H0']**2.
         kfacts = (ks/kp)**(ns-1.)  * ks
-        cspeed = 299792.458 # km/s
         pref = 8*np.pi**2*self.params['As']/25./omh2**2. * cspeed**4.
         return pref * kfacts[None,:] * Dzs**2. * tk**2.
 
