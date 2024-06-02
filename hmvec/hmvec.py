@@ -74,10 +74,10 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     
 class HaloModel(Cosmology):
     def __init__(self,zs,ks,ms=None,params=None,mass_function="sheth-torman",
-                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accuracy='medium',growth_exact=False):
+                 halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accuracy='medium'):
         self.zs = np.asarray(zs)
         self.ks = ks
-        Cosmology.__init__(self,params,halofit,growth_exact=growth_exact,accuracy=accurace)
+        Cosmology.__init__(self,params,halofit,accuracy=accuracy)
         
         self.mdef = mdef
         self.mode = mass_function
@@ -93,8 +93,8 @@ class HaloModel(Cosmology):
         self.pk_profiles = {}
         if not(skip_nfw): self.add_nfw_profile("nfw",numeric=nfw_numeric)
 
-    def _init_cosmology(self,params,halofit,growth_exact=False):
-        Cosmology._init_cosmology(self,params,halofit,growth_exact=growth_exact)
+    def _init_cosmology(self,params,halofit):
+        Cosmology._init_cosmology(self,params,halofit)
         if self.accuracy=='low':
             self.Pzk = self.P_lin_approx(self.ks,self.zs)
         else:
