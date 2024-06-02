@@ -31,9 +31,10 @@ def Wkr(k,R,taylor_switch=default_params['Wkr_taylor_switch']):
 class Cosmology(object):
 
     def __init__(self,params=None,halofit=None,engine='camb',accuracy='medium'):
-        assert engine in ['camb','class']
-        if engine=='class': raise NotImplementedError
+        engine = engine.lower()
+        if not(engine in ['camb','class']): raise ValueError
         self.accuracy = accuracy
+        self.engine = engine
         
         self.p = dict(params) if params is not None else {}
         for param in default_params.keys():
@@ -70,16 +71,20 @@ class Cosmology(object):
     
     def h_of_z(self,z):
         # H(z) in 1/Mpc
-        return self.results.h_of_z(z)
-
+        if self.engine=='camb':
+            H = self.results.h_of_z(z)
+        elif self.engine=='class':
+            H = self.classr.Hubble(z)
+        return H
     
     def bias_fnl(self,bg,fnl,z,ks,deltac=1.42):
         beta = 2. * deltac * (bg-1.)
         a = 1./(1+z)
-        alpha = (2. * ks**2. * self.Tk(ks,type ='eisenhu_osc')) / (3.* self.omm0 * self.results.h_of_z(0)**2.) * self.D_growth(a,type="camb_anorm",growth_exact=False)
+        alpha = (2. * ks**2. * self.Tk(ks,type ='eisenhu_osc')) / (3.* self.omm0 * self.h_of_z(0)**2.) * self.D_growth(a,type="anorm",exact=False)
         return bg+fnl*(beta/alpha)
 
     def _init_cosmology(self,params,halofit):
+        
         try:
             theta = params['theta100']/100.
             H0 = None
@@ -87,6 +92,7 @@ class Cosmology(object):
         except:
             H0 = params['H0']
             theta = None
+            h = H0/100
         try:        
             omm = params['omm']        
             h = params['H0']/100.      
@@ -94,28 +100,58 @@ class Cosmology(object):
             print("WARNING: omm specified. Ignoring omch2.")       
         except:        
             pass
-        self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
-                                    cosmomc_theta=theta,ombh2=params['ombh2'],
-                                    omch2=params['omch2'], mnu=params['mnu'],
-                                    omk = params['omk'],
-                                    tau=params['tau'],nnu=params['nnu'],
-                                    num_massive_neutrinos=
-                                    params['num_massive_neutrinos'],
-                                    w=params['w0'],wa=params['wa'],
-                                    dark_energy_model='ppf',
-                                    halofit_version=self.p['default_halofit'] if halofit is None else halofit,
-                                    AccuracyBoost=2,pivot_scalar=params['pivot_scalar'])
-        self.pars.WantTransfer = True
-        self.results = camb.get_background(self.pars)
+
+        if self.engine=='camb':
+            if ('sigma8' in params.keys()) or ('S8' in params.keys()):
+                print("sigma8 or S8 not supported with CAMB. Use the CLASS engine.")
+            self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
+                                        cosmomc_theta=theta,ombh2=params['ombh2'],
+                                        omch2=params['omch2'], mnu=params['mnu'],
+                                        omk = params['omk'],
+                                        tau=params['tau'],nnu=params['nnu'],
+                                        num_massive_neutrinos=
+                                        params['num_massive_neutrinos'],
+                                        w=params['w0'],wa=params['wa'],
+                                        dark_energy_model='ppf',
+                                        halofit_version=self.p['default_halofit'] if halofit is None else halofit,
+                                        AccuracyBoost=2,pivot_scalar=params['pivot_scalar'])
+            self.pars.WantTransfer = True
+            self.results = camb.get_background(self.pars)
+        elif self.engine=='class':
+            from classy import Class
+            self.classr = Class()
+            passp = {}
+            if ('sigma8' in params.keys()):
+                passp['sigma8'] = params['sigma8']
+                if ('S8' in params.keys()) or ('As' in params.keys()): raise ValueError
+            elif ('S8' in params.keys()):
+                passp['S8'] = params['S8']
+                if ('sigma8' in params.keys()) or ('As' in params.keys()): raise ValueError
+            else:
+                passp['A_s'] = params['As']
+            if theta is None:
+                passp['h'] = h
+            else:
+                passp['theta_s_100'] = theta*100
+                print("WARNING: Definitions of theta in CAMB and CLASS are different. Assuming CLASS definition.")
+            for p in params.keys():
+                if p[:6]=='class_':
+                    passp[p[6:]] = params[p]
+            
+            passp['omega_cdm'] = params['omch2']
+            passp['omega_b'] = params['ombh2']
+            passp['Omega_k'] = params['omk']
+            passp['n_s'] = params['ns']
+            self.classr.set(passp)
+            self.classr.compute()
         self.params = params
-        self.h = self.params['H0']/100.
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
+        self.h = h
         self.omm0 = omh2 / (self.params['H0']/100.)**2.
         self.omk0 = self.params['omk']
         self.oml0 = 1-self.omm0-self.omk0
         try: self.as8 = self.params['as8']        
         except: self.as8 = 1
-        self.D_growth_CAMB_today = self.D_growth_CAMB(1.0)
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
         PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
@@ -127,7 +163,7 @@ class Cosmology(object):
         
     def rho_matter_z(self,z):
         return self.rho_critical_z(0.) * self.omm0 \
-            * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3
+            * (1+np.atleast_1d(z))**3. # in msolar / megaparsec3engine
 
     def omz(self,z): 
         return self.rho_matter_z(z)/self.rho_critical_z(z)
@@ -163,10 +199,18 @@ class Cosmology(object):
         if camb: return self.results.get_sigma8()
         else: return np.sqrt(self.get_sigma2_R(8./self.params['H0']*100.,zs))
         
-    def D_growth_CAMB(self,a):
-        deltakz = self.results.get_redshift_evolution(1e-5, a2z(a), ['delta_cdm']) #index: z,0
-        D_camb = deltakz[:,0]
-        return D_camb
+    def D_growth_exact_arbitrary_norm(self,a):
+        if self.engine=='camb':
+            deltakz = self.results.get_redshift_evolution(1e-5, a2z(a), ['delta_cdm']) #index: z,0
+            D = deltakz[:,0]
+        elif self.engine=='class':
+            avals = a2z(a)
+            D = []
+            for a in avals:
+                D.append(self.classr.scale_independent_growth_factor(a))
+            D = np.asarray(D)
+        return D
+    
 
     def D_growth_approx(self,a):
         # Solution to Heath et al 1977
@@ -175,6 +219,7 @@ class Cosmology(object):
         # normed so that D(a)=a in matter domination
         # These assume LCDM; should work with non-flat models.
         # Haven't checked if it works for mnu!= or w!=-1.
+        a = np.asarray(a)
         omm0 = self.omm0
         oml0 = self.oml0
         x = (oml0/omm0)**(1./3.) * a
@@ -186,25 +231,21 @@ class Cosmology(object):
         return Dovera*a
 
     
-    def D_growth(self, a,type="camb_anorm",growth_exact=False):
-        if growth_exact:
-            val = self.D_growth_CAMB(a)/self.D_growth_CAMB_today
-            if type=="camb_z0norm":
-                mul = 1 #normed so that D(a=1)=1
-            elif type=="camb_anorm":
-                mul = self.D_growth_approx(1)
-                # mul = 0.7779 for oml=0.7, omm=0.3
-                # This is different from the 0.76 often cited!
-            else:
-                raise ValueError
+    def D_growth(self, a,type="anorm",exact=False):
+        if exact:
+            Dfunc = self.D_growth_exact_arbitrary_norm
         else:
-            val = self.D_growth_approx(a)
-            if type=="camb_z0norm":
-                mul = 1./self.D_growth_approx(1) #normed so that D(a=1)=1
-            elif type=="camb_anorm":
-                mul = 1.
-            else:
-                raise ValueError
+            Dfunc = self.D_growth_approx
+        Dtoday = Dfunc(1)
+        val = Dfunc(a)/Dtoday
+        if type=="z0norm":
+            mul = 1 #normed so that D(a=1)=1
+        elif type=="anorm":
+            mul = self.D_growth_approx(1)
+            # mul = 0.7779 for oml=0.7, omm=0.3
+            # This is different from the 0.76 often cited!
+        else:
+            raise ValueError
         return val*mul
 
     def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
@@ -245,7 +286,7 @@ class Cosmology(object):
         ks = np.asarray(ks)
         tk = self.Tk(ks,type=type)[None,:]
         a = 1/(1+zs)
-        Dzs = self.D_growth(a,type='camb_anorm')[:,None]
+        Dzs = self.D_growth(a,type='anorm')[:,None]
         kp = self.params['pivot_scalar']
         ns = self.params['ns']
         omh2 = (self.params['omch2'] + self.params['ombh2'])*100**2. + self.results.get_Omega('nu')*self.params['H0']**2.
@@ -510,7 +551,7 @@ class Cosmology(object):
         return fc*Pgn + fb*Pge
 
     def cmb_lensing_kk_exact(self,lmax,lens_potential_accuracy=4):
-        """
+        r"""
         Calculate the lensing convergence power spectrum C_l^{\kappa\kappa} using the exact calculation in CAMB.
 
         Arguments
@@ -539,7 +580,7 @@ class Cosmology(object):
         return ells,cl*2.*np.pi/4.
         
     def cmb_lensing_limber(self,lmax,nonlinear=False):
-        """
+        r"""
         Calculate the lensing convergence power spectrum C_l^{\kappa\kappa} using Limber approximation, but using the Weyl potential power spectrum from CAMB. This code is adapted from the CAMB demo.
 
         Arguments
@@ -593,7 +634,7 @@ class Cosmology(object):
         return ls,cl_kappa
 
 
-def a2z(a): return (1.0/a)-1.0
+def a2z(a): return (1.0/np.atleast_1d(a))-1.0
 
 def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
     r"""

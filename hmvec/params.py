@@ -105,4 +105,9 @@ default_params = {
     'hod_bisection_search_max_log10mthresh': 14.,
     'hod_bisection_search_rtol': 1e-4,
     'hod_bisection_search_warn_iter': 20,
+
+    # CLASS
+    'class_output': ''
+    
+
 }
