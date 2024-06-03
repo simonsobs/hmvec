@@ -7,6 +7,7 @@ import scipy.interpolate as si
 import scipy.constants as constants
 from scipy.special import hyp2f1
 from scipy.integrate import simps
+from . import utils
 
 """
 This module will (eventually) abstract away the choice of boltzmann codes.
@@ -567,6 +568,7 @@ class Cosmology(object):
         fc = self.p['omch2'] / omtoth2
         fb = self.p['ombh2'] / omtoth2
         return fc * Pgn + fb * Pge
+    
     def total_matter_galaxy_power_spectrum(self,Pgn,Pge):
         """
         
@@ -604,7 +606,91 @@ class Cosmology(object):
         cl = results.get_lens_potential_cls(lmax=lmax)[:,0]
         ells = np.arange(cl.size)
         return ells,cl*2.*np.pi/4.
+
+    def get_class_result(self,key):
+        return self.classr.get_current_derived_parameters([key])[key]
+
+    def get_tau_star(self):
+        r"""
+        Get the conformal time at recombination.
+        """
+        if self.engine=='camb':
+            return self.results.tau_maxvis
+        elif self.engine=='class':
+            return self.get_class_result('tau_star')
+
+
+    def z_of_tau(self,tau):
+        r"""
+        Get the redshift at conformal time tau.
+        """
+        if self.engine=='camb':
+            return self.results.redshift_at_comoving_radial_distance(tau)
+        elif self.engine=='class':
+            return np.vectorize(self.classr.z_of_tau)(tau)
+            
         
+    def redshift_at_comoving_radial_distance(self,chi):
+        r"""
+        Get the redshift at comoving radial distance chi.
+
+        TODO: Check if r and chi are the same in CLASS, esp.
+        for non-flat cosmologies.
+        """
+        chi = np.asarray(chi)
+        if self.engine=='camb':
+            return self.results.redshift_at_comoving_radial_distance(chi)
+        elif self.engine=='class':
+            return self.classr.z_of_r(chi)
+
+    def conformal_time(self,z,zmintol=1e-5):
+        r"""
+        Get the conformal time at redshift z.
+
+        Arguments
+        =========
+
+        z: float
+            redshift. With the CLASS engine, if this is less than zmintol (default: 1e-5), it is assumed to be zero and the conformal age of the universe is returned.
+
+        Returns
+        =======
+
+        float: conformal time
+        """
+        if self.engine=='camb':
+            return self.results.conformal_time(z)
+        elif self.engine=='class':
+            # CLASS only has a z(tau) function so we have to invert it
+            # with a bisection search
+            taumin = 0.
+            taumax = self.get_class_result('conformal_age')
+            z = np.atleast_1d(z)
+            ret = z*0.
+            mask = z<zmintol
+            ret[mask] = taumax
+            if ret[~mask].size>0:            
+                print(z[~mask].shape)
+                ret[~mask] = utils.vectorized_bisection_search(z[~mask],self.z_of_tau,[taumin,taumax],'decreasing',verbose=False)
+            if ret.size==1: return float(ret[0])
+            else: return ret
+
+    def get_pk_interpolator(self,zs,kmax,var='weyl',nonlinear=False):
+        if engine=='camb':
+            if var=='weyl': 
+                cvar = model.Transfer_Weyl
+            else:
+                raise NotImplementedError
+            PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
+                                                hubble_units=False, k_hunit=False, kmax=kmax,
+                                                var1=cvar,var2=cvar, zmax=zs[-1])
+        elif engine=='class':
+            if var=='weyl':
+                pass
+            else:
+                raise NotImplementedError
+                #get_pk_and_k_and_z(self, nonlinear=True, only_clustering_species = False, h_units=False)
+
     def cmb_lensing_limber(self,lmax,nonlinear=False):
         r"""
         Calculate the lensing convergence power spectrum C_l^{\kappa\kappa} using Limber approximation, but using the Weyl potential power spectrum from CAMB. This code is adapted from the CAMB demo.
@@ -627,12 +713,11 @@ class Cosmology(object):
         cl_kappa: array 
             C_l^{\kappa\kappa} values
         """
-        results = self.results
         nz = 100 #number of steps to use for the radial/redshift integration
         kmax=10  #kmax to use
-        chistar = results.conformal_time(0)- results.tau_maxvis
+        chistar = self.conformal_time(0)- self.get_tau_star()
         chis = np.linspace(0,chistar,nz)
-        zs=results.redshift_at_comoving_radial_distance(chis)
+        zs=self.redshift_at_comoving_radial_distance(chis)
         #Calculate array of delta_chi, and drop first and last points where things go singular
         dchis = (chis[2:]-chis[:-2])/2
         chis = chis[1:-1]
@@ -655,7 +740,9 @@ class Cosmology(object):
             w[:]=1
             w[k<1e-4]=0
             w[k>=kmax]=0
-            cl_kappa[i] = np.dot(dchis, w*PK.P(zs, k, grid=False)*win/k**4)
+            P = PK.P(zs, k, grid=False)
+            print(P.shape)
+            cl_kappa[i] = np.dot(dchis, w*P*win/k**4)
         cl_kappa*= (ls*(ls+1))**2
         return ls,cl_kappa
 
