@@ -8,6 +8,7 @@ import scipy.constants as constants
 from scipy.special import hyp2f1
 from scipy.integrate import simps
 from . import utils
+import warnings
 
 """
 This module attempts to abstract away the choice between
@@ -144,10 +145,12 @@ class Cosmology(object):
             passp = {}
             if ('sigma8' in params.keys()):
                 passp['sigma8'] = params['sigma8']
-                if ('S8' in params.keys()) or ('As' in params.keys()): raise ValueError
+                if ('S8' in params.keys()) or ('As' in params.keys()): 
+                    warnings.warn("Using sigma8 from params and ignoring S8 and As.")                    
             elif ('S8' in params.keys()):
                 passp['S8'] = params['S8']
-                if ('sigma8' in params.keys()) or ('As' in params.keys()): raise ValueError
+                if ('sigma8' in params.keys()) or ('As' in params.keys()): 
+                    warnings.warn("Using S8 from params and ignoring As.")
             else:
                 passp['A_s'] = params['As']
             if theta is None:
