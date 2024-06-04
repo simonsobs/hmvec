@@ -162,6 +162,7 @@ class Cosmology(object):
             passp['omega_b'] = params['ombh2']
             passp['Omega_k'] = params['omk']
             passp['n_s'] = params['ns']
+            self.classp = dict(passp)
             self.classr.set(passp)
             self.classr.compute()
         self.params = params
@@ -691,10 +692,17 @@ class Cosmology(object):
                                                 hubble_units=False, k_hunit=False, kmax=kmax,
                                                 var1=cvar,var2=cvar, zmax=zs[-1])
         elif self.engine=='class':
+            self.classp['output']='mPk, dTk'
+            self.classp['z_pk'] = ','.join([str(z) for z in zs])
+            self.classp['P_k_max_h/Mpc'] = kmax / self.h
+            print(self.classp)
+            self.classr.set(self.classp)
+            self.classr.compute()
+            
             if var=='weyl':
                 pk,ks,zs = self.classr.get_Weyl_pk_and_k_and_z(nonlinear=nonlinear, h_units=False)
                 #pk  is k,z ordering and zs are in reverse order!!
-                PK = utils.get_matter_power_interpolator_generic(ks, zs[::-1], pk.swapaxes(0,1), 
+                PK = utils.get_matter_power_interpolator_generic(ks, zs[::-1], pk.swapaxes(0,1)[::-1,:], 
                                                                  return_z_k=return_z_k,
                                                                  log_interp=log_interp,
                                                                  extrap_kmax=extrap_kmax, silent=True)
