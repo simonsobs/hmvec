@@ -630,7 +630,7 @@ class Cosmology(object):
             return np.vectorize(self.classr.z_of_tau)(tau)
             
         
-    def redshift_at_comoving_radial_distance(self,chi):
+    def redshift_at_comoving_radial_distance(self,chi,zmax=1e4):
         r"""
         Get the redshift at comoving radial distance chi.
 
@@ -641,7 +641,13 @@ class Cosmology(object):
         if self.engine=='camb':
             return self.results.redshift_at_comoving_radial_distance(chi)
         elif self.engine=='class':
-            return self.classr.z_of_r(chi)
+            # CLASS only has a chi(z) function so we have to invert it
+            # with a bisection search
+            zmin = 0.
+            chi = np.atleast_1d(chi)
+            ret = utils.vectorized_bisection_search(chi,self.comoving_radial_distance,[zmin,zmax],'increasing',verbose=False)
+            if ret.size==1: return float(ret[0])
+            else: return ret
 
     def conformal_time(self,z,zmintol=1e-5):
         r"""
@@ -675,8 +681,8 @@ class Cosmology(object):
             if ret.size==1: return float(ret[0])
             else: return ret
 
-    def get_pk_interpolator(self,zs,kmax,var='weyl',nonlinear=False):
-        if engine=='camb':
+    def get_pk_interpolator(self,zs,kmax,var='weyl',nonlinear=False,return_z_k=False, k_per_logint=None, log_interp=True, extrap_kmax=None):
+        if self.engine=='camb':
             if var=='weyl': 
                 cvar = model.Transfer_Weyl
             else:
@@ -684,12 +690,20 @@ class Cosmology(object):
             PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
                                                 hubble_units=False, k_hunit=False, kmax=kmax,
                                                 var1=cvar,var2=cvar, zmax=zs[-1])
-        elif engine=='class':
+        elif self.engine=='class':
             if var=='weyl':
-                pass
+                pk,ks,zs = self.classr.get_Weyl_pk_and_k_and_z(nonlinear=nonlinear, h_units=False)
+                #pk  is k,z ordering and zs are in reverse order!!
+                PK = utils.get_matter_power_interpolator_generic(ks, zs[::-1], pk.swapaxes(0,1), 
+                                                                 return_z_k=return_z_k,
+                                                                 log_interp=log_interp,
+                                                                 extrap_kmax=extrap_kmax, silent=True)
+    
             else:
-                raise NotImplementedError
                 #get_pk_and_k_and_z(self, nonlinear=True, only_clustering_species = False, h_units=False)
+                raise NotImplementedError
+        return PK
+                
 
     def cmb_lensing_limber(self,lmax,nonlinear=False):
         r"""
@@ -725,9 +739,7 @@ class Cosmology(object):
 
         #Get the matter power spectrum interpolation object (based on RectBivariateSpline). 
         #Here for lensing we want the power spectrum of the Weyl potential.
-        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
-                                                hubble_units=False, k_hunit=False, kmax=kmax,
-                                                var1=model.Transfer_Weyl,var2=model.Transfer_Weyl, zmax=zs[-1])
+        PK = self.get_pk_interpolator(zs,kmax,var='weyl',nonlinear=nonlinear)
 
         #Get lensing window function (flat universe)
         win = ((chistar-chis)/(chis**2*chistar))**2
@@ -741,7 +753,6 @@ class Cosmology(object):
             w[k<1e-4]=0
             w[k>=kmax]=0
             P = PK.P(zs, k, grid=False)
-            print(P.shape)
             cl_kappa[i] = np.dot(dchis, w*P*win/k**4)
         cl_kappa*= (ls*(ls+1))**2
         return ls,cl_kappa

@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.interpolate import RectBivariateSpline, interp1d
+import logging
 
 
 def interp(x,y,bounds_error=False,fill_value=0.,**kwargs):
@@ -49,7 +50,7 @@ def test_bisection_search():
     d = vectorized_bisection_search(xs,x_of_y,(1,40),'increasing',rtol=1e-4,verbose=True)
     assert np.all(np.isclose(d,eys,rtol=1e-3))
 
-def get_matter_power_interpolator_generic(nonlinear=True, var1=None, var2=None, hubble_units=True, k_hunit=True,
+def get_matter_power_interpolator_generic(ks, zs, pk, 
                                       return_z_k=False, log_interp=True, extrap_kmax=None, silent=False):
         r"""
 
@@ -86,7 +87,7 @@ def get_matter_power_interpolator_generic(nonlinear=True, var1=None, var2=None, 
                             (useful for tails of integrals)
         :param silent: Set True to silence warnings
         :return: An object PK based on :class:`~scipy:scipy.interpolate.RectBivariateSpline`,
-                 that can be called with PK.P(z,kh) or PK(z,log(kh)) to get log matter power values.
+                 that can be called with PK.P(z,k) or PK(z,log(k)) to get log matter power values.
                  If return_z_k=True, instead return interpolator, z, k where z, k are the grid used.
         """
 
@@ -94,13 +95,13 @@ def get_matter_power_interpolator_generic(nonlinear=True, var1=None, var2=None, 
             islog: bool
             logsign: int
 
-            def P(self, z, kh, grid=None):
+            def P(self, z, k, grid=None):
                 if grid is None:
-                    grid = not np.isscalar(z) and not np.isscalar(kh)
+                    grid = not np.isscalar(z) and not np.isscalar(k)
                 if self.islog:
-                    return self.logsign * np.exp(self(z, np.log(kh), grid=grid))
+                    return self.logsign * np.exp(self(z, np.log(k), grid=grid))
                 else:
-                    return self(z, np.log(kh), grid=grid)
+                    return self(z, np.log(k), grid=grid)
 
         class PKInterpolatorSingleZ(interp1d):
             islog: bool
@@ -121,18 +122,20 @@ def get_matter_power_interpolator_generic(nonlinear=True, var1=None, var2=None, 
                 # NB returns dimensionality as the 2D one: 1 dimension if z single
                 return (lambda x: x[0] if np.isscalar(args[0]) else x)(super().__call__(*(args[1:])))
 
-            def P(self, z, kh, **_kwargs):
+            def P(self, z, k, **_kwargs):
                 # grid kwarg is ignored
                 if self.islog:
-                    return self.logsign * np.exp(self(z, np.log(kh)))
+                    return self.logsign * np.exp(self(z, np.log(k)))
                 else:
-                    return self(z, np.log(kh))
+                    return self(z, np.log(k))
 
-        assert self.Params.WantTransfer
-        khs, zs, pk = self.get_linear_matter_power_spectrum(var1, var2, hubble_units, nonlinear=nonlinear)
-        kh_max = khs[-1]
-        if not k_hunit:
-            khs *= self.Params.H0 / 100
+        #khs, zs, pk = self.get_linear_matter_power_spectrum(var1, var2, hubble_units, nonlinear=nonlinear)
+        # print(ks.shape)
+        # print(zs.shape)
+        # print(pk.shape)
+        # import sys
+        # sys.exit()
+        k_max = ks[-1]
         sign = 1
         if log_interp and np.any(pk <= 0):
             if np.all(pk < 0):
@@ -140,40 +143,40 @@ def get_matter_power_interpolator_generic(nonlinear=True, var1=None, var2=None, 
             else:
                 log_interp = False
         p_or_log_p = np.log(sign * pk) if log_interp else pk
-        logkh = np.log(khs)
+        logk = np.log(ks)
         deg_z = min(len(zs) - 1, 3)
-        kmax = khs[-1]
+        kmax = ks[-1]
         PKInterpolator = PKInterpolator if deg_z else PKInterpolatorSingleZ
         if extrap_kmax and extrap_kmax > kmax:
             # extrapolate to ultimate power law
             # TODO: use more physical extrapolation function for linear case
-            if not silent and (kh_max < 3 and extrap_kmax > 2 and nonlinear or kh_max < 0.4):
+            if not silent and (k_max < 3 and extrap_kmax > 2 and nonlinear or k_max < 0.4):
                 logging.warning("Extrapolating to higher k with matter transfer functions "
-                                "only to k=%.3g Mpc^{-1} may be inaccurate.\n " % (kh_max * self.Params.H0 / 100))
+                                "only to k=%.3g Mpc^{-1} may be inaccurate.\n " % (k_max ))
             if not log_interp:
-                raise CAMBValueError(
+                raise ValueError(
                     "Cannot use extrap_kmax with log_inter=False (e.g. PK crossing zero for %s, %s.)" % (var1, var2))
 
             logextrap = np.log(extrap_kmax)
             log_p_new = np.empty((pk.shape[0], pk.shape[1] + 2))
             log_p_new[:, :-2] = p_or_log_p
-            delta = logextrap - logkh[-1]
+            delta = logextrap - logk[-1]
 
-            dlog = (log_p_new[:, -3] - log_p_new[:, -4]) / (logkh[-1] - logkh[-2])
+            dlog = (log_p_new[:, -3] - log_p_new[:, -4]) / (logk[-1] - logk[-2])
             log_p_new[:, -1] = log_p_new[:, -3] + dlog * delta
             log_p_new[:, -2] = log_p_new[:, -3] + dlog * delta * 0.9
-            logkh = np.hstack((logkh, logextrap - delta * 0.1, logextrap))
+            logk = np.hstack((logk, logextrap - delta * 0.1, logextrap))
             p_or_log_p = log_p_new
 
-        deg_k = min(len(logkh) - 1, 3)
-        res = PKInterpolator(zs, logkh, p_or_log_p, kx=deg_z, ky=deg_k)
-        res.kmin = np.min(khs)
+        deg_k = min(len(logk) - 1, 3)
+        res = PKInterpolator(zs, logk, p_or_log_p, kx=deg_z, ky=deg_k)
+        res.kmin = np.min(ks)
         res.kmax = kmax
         res.islog = log_interp
         res.logsign = sign
         res.zmin = np.min(zs)
         res.zmax = np.max(zs)
         if return_z_k:
-            return res, zs, khs
+            return res, zs, ks
         else:
             return res
