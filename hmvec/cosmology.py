@@ -41,6 +41,7 @@ class Cosmology(object):
         if not(engine in ['camb','class']): raise ValueError
         self.accuracy = accuracy
         self.engine = engine
+        if self.accuracy=='low' and (('S8' in params.keys()) or ('sigma8' in params.keys())): raise ValueError("Can't use S8 or sigma8 with low accuracy.")
         
         self.p = dict(params) if params is not None else {}
         for param in default_params.keys():
@@ -55,12 +56,12 @@ class Cosmology(object):
             if self.engine=='camb':
                 return self._camb_results.angular_diameter_distance2(z1,z2)
             elif self.engine=='class':
-                return self._class_results.angular_distance_from_to(z1, z2)
+                return self._class_results.angular_distance_from_to(z1, z2) # TODO: vectorize over z1
         else:
             if self.engine=='camb':
                 return self._camb_results.angular_diameter_distance(z1)
             elif self.engine=='class':
-                return self._class_results.angular_distance(z1)
+                return np.vectorize(self._class_results.angular_distance)(z1)
                 
     def sigma_crit(self,zlens,zsource):
         Gval = 4.517e-48 # Newton G in Mpc,seconds,Msun units
@@ -179,7 +180,7 @@ class Cosmology(object):
         except: self.as8 = 1
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
-        PK = self.get_pk_interpolator(zs.max()+1,kmax=ks.max(),var='total',nonlinear=nonlinear)
+        PK = self.get_pk_interpolator(zs,kmax=ks.max(),var='total',nonlinear=nonlinear)
         return (self.as8**2.) * PK.P(zs, ks, grid=True)
 
         
@@ -271,6 +272,18 @@ class Cosmology(object):
             raise ValueError
         return val*mul
 
+    def get_bao_rs_dV(self,zs):
+        zs = np.asarray(zs)
+        if self.engine=='camb':
+            retval = self._camb_results.get_BAO(zs,self._camb_pars)[:,0]
+        elif self.engine=='class':
+            Hzs = self.hubble_parameter(zs)/cspeed
+            D_As = self.angular_diameter_distance(zs)
+            D_Vs = ((1+zs)**2 * D_As**2 * zs/Hzs)**(1/3.)
+            retval = self._class_results.rs_drag()/D_Vs
+        return retval
+    
+
     def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
         """
         This function will provide the linear matter power spectrum used in calculation
@@ -287,7 +300,7 @@ class Cosmology(object):
         ks = np.asarray(ks)
         tk = self.Tk(ks,'eisenhu_osc') 
         assert knorm<kmax
-        PK = self.get_pk_interpolator(zs.max()+1,kmax=kmax,var='total',nonlinear=False)
+        PK = self.get_pk_interpolator(zs,kmax=kmax,var='total',nonlinear=False)
         pnorm = PK.P(zs, knorm,grid=True)
         tnorm = self.Tk(knorm,'eisenhu_osc') * knorm**(self.params['ns'])
         plin = (pnorm/tnorm) * tk**2. * ks**(self.params['ns'])
@@ -296,7 +309,7 @@ class Cosmology(object):
     def P_lin_slow(self,ks,zs,kmax = 0.1):
         zs = np.asarray(zs)
         ks = np.asarray(ks)
-        PK = self.get_pk_interpolator(zs.max()+1,kmax=kmax,var='total',nonlinear=False)
+        PK = self.get_pk_interpolator(zs,kmax=kmax,var='total',nonlinear=False)
         plin = PK.P(zs, ks,grid=True)
         return (self.as8**2.) * plin
 
