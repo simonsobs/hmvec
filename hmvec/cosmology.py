@@ -10,9 +10,10 @@ from scipy.integrate import simps
 from . import utils
 
 """
-This module will (eventually) abstract away the choice of boltzmann codes.
-However, it does it stupidly by simply providing a common
-stunted interface. It makes no guarantee that the same set
+This module attempts to abstract away the choice between
+CAMB and CLASS.
+It does this simply by providing a common interface.
+It makes no guarantee that the same set
 of parameters passed to the two engines will produce the same
 results. It could be a test-bed for converging towards that. 
 
@@ -51,14 +52,14 @@ class Cosmology(object):
     def angular_diameter_distance(self,z1,z2=None):
         if not(z2 is None):
             if self.engine=='camb':
-                return self.results.angular_diameter_distance2(z1,z2)
+                return self._camb_results.angular_diameter_distance2(z1,z2)
             elif self.engine=='class':
-                return self.classr.angular_distance_from_to(z1, z2)
+                return self._class_results.angular_distance_from_to(z1, z2)
         else:
             if self.engine=='camb':
-                return self.results.angular_diameter_distance(z1)
+                return self._camb_results.angular_diameter_distance(z1)
             elif self.engine=='class':
-                return self.classr.angular_distance(z1)
+                return self._class_results.angular_distance(z1)
                 
     def sigma_crit(self,zlens,zsource):
         Gval = 4.517e-48 # Newton G in Mpc,seconds,Msun units
@@ -77,24 +78,24 @@ class Cosmology(object):
 
     def comoving_radial_distance(self,z):
         if self.engine=='camb':
-            return self.results.comoving_radial_distance(z)
+            return self._camb_results.comoving_radial_distance(z)
         elif self.engine=='class':
-            return np.vectorize(self.classr.comoving_distance)(z)
+            return np.vectorize(self._class_results.comoving_distance)(z)
 
     def hubble_parameter(self,z):
         # H(z) in km/s/Mpc
         if self.engine=='camb':
-            return self.results.hubble_parameter(z)
+            return self._camb_results.hubble_parameter(z)
         elif self.engine=='class':
-            H = np.vectorize(self.classr.Hubble)(z)
+            H = np.vectorize(self._class_results.Hubble)(z)
             return H*cspeed
     
     def h_of_z(self,z):
         # H(z) in 1/Mpc
         if self.engine=='camb':
-            H = self.results.h_of_z(z)
+            H = self._camb_results.h_of_z(z)
         elif self.engine=='class':
-            H = np.vectorize(self.classr.Hubble)(z)
+            H = np.vectorize(self._class_results.Hubble)(z)
         return H
     
     def bias_fnl(self,bg,fnl,z,ks,deltac=1.42):
@@ -124,7 +125,7 @@ class Cosmology(object):
         if self.engine=='camb':
             if ('sigma8' in params.keys()) or ('S8' in params.keys()):
                 print("sigma8 or S8 not supported with CAMB. Use the CLASS engine.")
-            self.pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
+            self._camb_pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
                                         cosmomc_theta=theta,ombh2=params['ombh2'],
                                         omch2=params['omch2'], mnu=params['mnu'],
                                         omk = params['omk'],
@@ -135,11 +136,11 @@ class Cosmology(object):
                                         dark_energy_model='ppf',
                                         halofit_version=self.p['default_halofit'] if halofit is None else halofit,
                                         AccuracyBoost=2,pivot_scalar=params['pivot_scalar'])
-            self.pars.WantTransfer = True
-            self.results = camb.get_background(self.pars)
+            self._camb_pars.WantTransfer = True
+            self._camb_results = camb.get_background(self._camb_pars)
         elif self.engine=='class':
             from classy import Class
-            self.classr = Class()
+            self._class_results = Class()
             passp = {}
             if ('sigma8' in params.keys()):
                 passp['sigma8'] = params['sigma8']
@@ -162,9 +163,9 @@ class Cosmology(object):
             passp['omega_b'] = params['ombh2']
             passp['Omega_k'] = params['omk']
             passp['n_s'] = params['ns']
-            self.classp = dict(passp)
-            self.classr.set(passp)
-            self.classr.compute()
+            self._class_pars = dict(passp)
+            self._class_results.set(passp)
+            self._class_results.compute()
         self.params = params
         omh2 = self.params['omch2']+self.params['ombh2'] # FIXME: neutrinos
         self.h = h
@@ -175,10 +176,7 @@ class Cosmology(object):
         except: self.as8 = 1
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
-        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
-                                                hubble_units=False,
-                                                k_hunit=False, kmax=ks.max(),
-                                                zmax=zs.max()+1.)
+        PK = self.get_pk_interpolator(zs.max()+1,kmax=ks.max(),var='total',nonlinear=nonlinear)
         return (self.as8**2.) * PK.P(zs, ks, grid=True)
 
         
@@ -220,17 +218,17 @@ class Cosmology(object):
         zs = np.atleast_1d(zs)
         if exact:
             if self.engine=='camb':
-                return self.results.get_sigma8() # fix this
+                return self._camb_results.get_sigma8() # fix this
             elif self.engine=='class':
-                return np.vectorize(lambda x : self.classr.sigma(8./self.h,x))(zs)
+                return np.vectorize(lambda x : self._class_results.sigma(8./self.h,x))(zs)
         else: return np.sqrt(self.get_sigma2_R(8./self.params['H0']*100.,zs))
         
     def D_growth_exact_arbitrary_norm(self,a):
         if self.engine=='camb':
-            deltakz = self.results.get_redshift_evolution(1e-5, a2z(a), ['delta_cdm']) #index: z,0
+            deltakz = self._camb_results.get_redshift_evolution(1e-5, a2z(a), ['delta_cdm']) #index: z,0
             D = deltakz[:,0]
         elif self.engine=='class':
-            D = np.vectorize(self.classr.scale_independent_growth_factor)(a)
+            D = np.vectorize(self._class_results.scale_independent_growth_factor)(a)
         return D
     
 
@@ -286,9 +284,7 @@ class Cosmology(object):
         ks = np.asarray(ks)
         tk = self.Tk(ks,'eisenhu_osc') 
         assert knorm<kmax
-        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False, 
-                                                     hubble_units=False, k_hunit=False, kmax=kmax,
-                                                     zmax=zs.max()+1.)
+        PK = self.get_pk_interpolator(zs.max()+1,kmax=kmax,var='total',nonlinear=False)
         pnorm = PK.P(zs, knorm,grid=True)
         tnorm = self.Tk(knorm,'eisenhu_osc') * knorm**(self.params['ns'])
         plin = (pnorm/tnorm) * tk**2. * ks**(self.params['ns'])
@@ -297,18 +293,16 @@ class Cosmology(object):
     def P_lin_slow(self,ks,zs,kmax = 0.1):
         zs = np.asarray(zs)
         ks = np.asarray(ks)
-        PK = camb.get_matter_power_interpolator(self.pars, nonlinear=False, 
-                                                     hubble_units=False, k_hunit=False, kmax=kmax,
-                                                     zmax=zs.max()+1.)
+        PK = self.get_pk_interpolator(zs.max()+1,kmax=kmax,var='total',nonlinear=False)
         plin = PK.P(zs, ks,grid=True)
         return (self.as8**2.) * plin
 
     def get_Omega_nu(self):
         # check this
         if self.engine=='camb':
-            return self.results.get_Omega('nu')
+            return self._camb_results.get_Omega('nu')
         elif self.engine=='class':
-            return self.classr.Omega_nu
+            return self._class_results.Omega_nu
         
     def P_lin_approx(self,ks,zs,type='eisenhu_osc'):
         zs = np.asarray(zs)
@@ -602,23 +596,24 @@ class Cosmology(object):
             C_l^{\kappa\kappa} values
 
         """
-        self.pars.set_for_lmax(lmax, lens_potential_accuracy=lens_potential_accuracy)
-        results = camb.get_results(self.pars)
+        if self.engine=='class': raise NotImplementedError
+        self._camb_pars.set_for_lmax(lmax, lens_potential_accuracy=lens_potential_accuracy)
+        results = camb.get_results(self._camb_pars)
         cl = results.get_lens_potential_cls(lmax=lmax)[:,0]
         ells = np.arange(cl.size)
         return ells,cl*2.*np.pi/4.
 
-    def get_class_result(self,key):
-        return self.classr.get_current_derived_parameters([key])[key]
+    def _get_class_result(self,key):
+        return self._class_results.get_current_derived_parameters([key])[key]
 
     def get_tau_star(self):
         r"""
         Get the conformal time at recombination.
         """
         if self.engine=='camb':
-            return self.results.tau_maxvis
+            return self._camb_results.tau_maxvis
         elif self.engine=='class':
-            return self.get_class_result('tau_star')
+            return self._get_class_result('tau_star')
 
 
     def z_of_tau(self,tau):
@@ -626,9 +621,9 @@ class Cosmology(object):
         Get the redshift at conformal time tau.
         """
         if self.engine=='camb':
-            return self.results.redshift_at_comoving_radial_distance(tau)
+            return self._camb_results.redshift_at_comoving_radial_distance(tau)
         elif self.engine=='class':
-            return np.vectorize(self.classr.z_of_tau)(tau)
+            return np.vectorize(self._class_results.z_of_tau)(tau)
             
         
     def redshift_at_comoving_radial_distance(self,chi,zmax=1e4):
@@ -640,7 +635,7 @@ class Cosmology(object):
         """
         chi = np.asarray(chi)
         if self.engine=='camb':
-            return self.results.redshift_at_comoving_radial_distance(chi)
+            return self._camb_results.redshift_at_comoving_radial_distance(chi)
         elif self.engine=='class':
             # CLASS only has a chi(z) function so we have to invert it
             # with a bisection search
@@ -666,12 +661,12 @@ class Cosmology(object):
         float: conformal time
         """
         if self.engine=='camb':
-            return self.results.conformal_time(z)
+            return self._camb_results.conformal_time(z)
         elif self.engine=='class':
             # CLASS only has a z(tau) function so we have to invert it
             # with a bisection search
             taumin = 0.
-            taumax = self.get_class_result('conformal_age')
+            taumax = self._get_class_result('conformal_age')
             z = np.atleast_1d(z)
             ret = z*0.
             mask = z<zmintol
@@ -683,33 +678,43 @@ class Cosmology(object):
             else: return ret
 
     def get_pk_interpolator(self,zs,kmax,var='weyl',nonlinear=False,return_z_k=False, k_per_logint=None, log_interp=True, extrap_kmax=None):
+        var = var.lower()
         if self.engine=='camb':
             if var=='weyl': 
                 cvar = model.Transfer_Weyl
+            elif var=='total': 
+                cvar = 'delta_tot'
+            elif var=='cb':
+                cvar = 'delta_nonu'
             else:
-                raise NotImplementedError
-            PK = camb.get_matter_power_interpolator(self.pars, nonlinear=nonlinear, 
+                raise ValueError
+            PK = camb.get_matter_power_interpolator(self._camb_pars, nonlinear=nonlinear, 
                                                 hubble_units=False, k_hunit=False, kmax=kmax,
                                                 var1=cvar,var2=cvar, zmax=zs[-1])
         elif self.engine=='class':
-            self.classp['output']='mPk, dTk'
-            self.classp['z_pk'] = ','.join([str(z) for z in zs])
-            self.classp['P_k_max_h/Mpc'] = kmax / self.h
-            print(self.classp)
-            self.classr.set(self.classp)
-            self.classr.compute()
+            self._class_pars['output']='mPk, dTk'
+            self._class_pars['z_pk'] = ','.join([str(z) for z in zs])
+            self._class_pars['P_k_max_h/Mpc'] = kmax / self.h
+            self._class_results.set(self._class_pars)
+            self._class_results.compute()
             
             if var=='weyl':
-                pk,ks,zs = self.classr.get_Weyl_pk_and_k_and_z(nonlinear=nonlinear, h_units=False)
-                #pk  is k,z ordering and zs are in reverse order!!
-                PK = utils.get_matter_power_interpolator_generic(ks, zs[::-1], pk.swapaxes(0,1)[::-1,:], 
-                                                                 return_z_k=return_z_k,
-                                                                 log_interp=log_interp,
-                                                                 extrap_kmax=extrap_kmax, silent=True)
-    
+                pk,ks,zs = self._class_results.get_Weyl_pk_and_k_and_z(nonlinear=nonlinear, h_units=False)
             else:
-                #get_pk_and_k_and_z(self, nonlinear=True, only_clustering_species = False, h_units=False)
-                raise NotImplementedError
+                if var=='total':
+                    onlyc = False
+                elif var=='cb':
+                    onlyc = True
+                else:
+                    raise ValueError
+                pk,ks,zs = self._class_results.get_pk_and_k_and_z(nonlinear=nonlinear, only_clustering_species = onlyc, h_units=False)
+            #pk  is k,z ordering and zs are in reverse order!!
+            PK = utils.get_matter_power_interpolator_generic(ks, zs[::-1], 
+                                                             pk.swapaxes(0,1)[::-1,:], 
+                                                             return_z_k=return_z_k,
+                                                             log_interp=log_interp,
+                                                             extrap_kmax=extrap_kmax, silent=True)
+    
         return PK
                 
 

@@ -599,7 +599,7 @@ class HaloModel(Cosmology):
         sigmac = self.sigma_crit(zlens,zsource)
         rhomz = self.rho_matter_z(zlens)
         chis = self.comoving_radial_distance(zlens)
-        DAz = self.results.angular_diameter_distance(zlens)
+        DAz = self.angular_diameter_distance(zlens)
         ells = self.ks*chis
         sel = np.logical_and(ells>lmin,ells<lmax)
         ells = ells[sel]
