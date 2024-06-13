@@ -36,7 +36,7 @@ def Wkr(k,R,taylor_switch=default_params['Wkr_taylor_switch']):
 
 class Cosmology(object):
 
-    def __init__(self,params=None,halofit=None,engine='camb',accuracy='medium'):
+    def __init__(self,params={},halofit=None,engine='camb',accuracy='medium'):
         engine = engine.lower()
         if not(engine in ['camb','class']): raise ValueError
         self.accuracy = accuracy

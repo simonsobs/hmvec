@@ -73,7 +73,7 @@ def duffy_concentration(m,z,A=None,alpha=None,beta=None,h=None):
     return A*((h*m/2.e12)**alpha)*(1+z)**beta
     
 class HaloModel(Cosmology):
-    def __init__(self,zs,ks,ms=None,params=None,mass_function="sheth-torman",
+    def __init__(self,zs,ks,ms=None,params={},mass_function="sheth-torman",
                  halofit=None,mdef='vir',nfw_numeric=False,skip_nfw=False,accuracy='medium',engine='camb'):
         self.zs = np.asarray(zs)
         self.ks = ks
