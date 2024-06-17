@@ -232,7 +232,7 @@ class Cosmology(object):
             deltakz = self._camb_results.get_redshift_evolution(1e-5, a2z(a), ['delta_cdm']) #index: z,0
             D = deltakz[:,0]
         elif self.engine=='class':
-            D = np.vectorize(self._class_results.scale_independent_growth_factor)(a)
+            D = np.vectorize(self._class_results.scale_independent_growth_factor)(a2z(a))
         return D
     
 
