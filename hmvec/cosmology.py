@@ -37,7 +37,7 @@ def Wkr(k,R,taylor_switch=default_params['Wkr_taylor_switch']):
 
 class Cosmology(object):
 
-    def __init__(self,params=None,halofit=None,engine='camb',accuracy='medium'):
+    def __init__(self,params={},halofit=None,engine='camb',accuracy='medium'):
         engine = engine.lower()
         if not(engine in ['camb','class']): raise ValueError
         self.accuracy = accuracy
@@ -249,7 +249,7 @@ class Cosmology(object):
             deltakz = self._camb_results.get_redshift_evolution(1e-5, a2z(a), ['delta_cdm']) #index: z,0
             D = deltakz[:,0]
         elif self.engine=='class':
-            D = np.vectorize(self._class_results.scale_independent_growth_factor)(a)
+            D = np.vectorize(self._class_results.scale_independent_growth_factor)(a2z(a))
         return D
     
 
