@@ -1,4 +1,5 @@
 import numpy as np
+import os,sys
 from scipy.interpolate import interp2d,interp1d
 from .params import default_params
 import camb
@@ -50,6 +51,20 @@ class Cosmology(object):
         # Cosmology
         self._init_cosmology(self.p,halofit)
 
+    def get_cmb_cls(self,lmax=3000,lens_potential_accuracy=4,nonlinear=True):
+        if self.engine=='camb':
+            if nonlinear:
+                self._camb_pars.NonLinear = model.NonLinear_both
+            else:
+                self._camb_pars.NonLinear = model.NonLinear_none
+            if not(nonlinear): lens_potential_accuracy = 0
+            self._camb_pars.set_for_lmax(lmax=(lmax+500), lens_potential_accuracy=lens_potential_accuracy)
+            self._camb_results.calc_power_spectra(self._camb_pars)
+            powers = self.results.get_cmb_power_spectra(self._camb_pars, CMB_unit='muK',raw_cl=True)
+        elif self.engine=='class':
+            #continue
+            #self.class_results
+            pass
 
     def angular_diameter_distance(self,z1,z2=None):
         if not(z2 is None):
@@ -127,6 +142,7 @@ class Cosmology(object):
         if self.engine=='camb':
             if ('sigma8' in params.keys()) or ('S8' in params.keys()):
                 print("sigma8 or S8 not supported with CAMB. Use the CLASS engine.")
+            YHe = params['YHe'] if 'YHe' in params.keys() else None
             self._camb_pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
                                         cosmomc_theta=theta,ombh2=params['ombh2'],
                                         omch2=params['omch2'], mnu=params['mnu'],
@@ -137,7 +153,7 @@ class Cosmology(object):
                                         w=params['w0'],wa=params['wa'],
                                         dark_energy_model='ppf',
                                         halofit_version=self.p['default_halofit'] if halofit is None else halofit,
-                                        AccuracyBoost=2,pivot_scalar=params['pivot_scalar'])
+                                        AccuracyBoost=2,pivot_scalar=params['pivot_scalar'],YHe=YHe)
             self._camb_pars.WantTransfer = True
             self._camb_results = camb.get_background(self._camb_pars)
         elif self.engine=='class':
@@ -167,6 +183,7 @@ class Cosmology(object):
             passp['omega_b'] = params['ombh2']
             passp['Omega_k'] = params['omk']
             passp['n_s'] = params['ns']
+            if 'YHe' in params.keys(): passp['YHe'] = params['YHe']
             self._class_pars = dict(passp)
             self._class_results.set(passp)
             self._class_results.compute()
@@ -695,6 +712,7 @@ class Cosmology(object):
 
     def get_pk_interpolator(self,zs,kmax,var='weyl',nonlinear=False,return_z_k=False, k_per_logint=None, log_interp=True, extrap_kmax=None):
         var = var.lower()
+        ozs = zs.copy()
         if self.engine=='camb':
             if var=='weyl': 
                 cvar = model.Transfer_Weyl
@@ -709,7 +727,8 @@ class Cosmology(object):
                                                 var1=cvar,var2=cvar, zmax=zs[-1])
         elif self.engine=='class':
             self._class_pars['output']='mPk, dTk'
-            self._class_pars['z_pk'] = ','.join([str(z) for z in zs])
+            if zs.size>100: zs = np.geomspace(zs.min(),zs.max(),100) # FIXME: CLASS z limit
+            self._class_pars['z_pk'] = ','.join([f'{z:.6f}' for z in zs]) # FIXME: z precision
             self._class_pars['P_k_max_h/Mpc'] = kmax / self.h
             self._class_results.set(self._class_pars)
             self._class_results.compute()
@@ -724,6 +743,9 @@ class Cosmology(object):
                 else:
                     raise ValueError
                 pk,ks,zs = self._class_results.get_pk_and_k_and_z(nonlinear=nonlinear, only_clustering_species = onlyc, h_units=False)
+                if zs.min()>ozs.min(): raise ValueError
+                if zs.max()<ozs.max(): raise ValueError
+                
             #pk  is k,z ordering and zs are in reverse order!!
             PK = utils.get_matter_power_interpolator_generic(ks, zs[::-1], 
                                                              pk.swapaxes(0,1)[::-1,:], 

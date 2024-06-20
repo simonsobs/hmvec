@@ -2,18 +2,17 @@ from hmvec import cosmology as hcosmo
 from orphics import io,cosmology
 import numpy as np
 
-
-fb = 0.15
-H0 = 70.0
-om = 1.0
-omb = fb*om
-omc = (1-fb)*om
-h0 = H0/100
-omch2 = omc*h0**2
-ombh2 = omb*h0**2
+def get_eds_model(fb=0.15,H0=68.0):
+    om = 1.0
+    omb = fb*om
+    omc = (1-fb)*om
+    h0 = H0/100
+    omch2 = omc*h0**2
+    ombh2 = omb*h0**2
+    return {'omch2':omch2,'ombh2':ombh2,'H0':H0,'mnu':0.,'YHe':0.25}
 
 models = []
-#models.append(['EdS',{'omch2':omch2,'ombh2':ombh2,'H0':H0,'mnu':0.}]) # CLASS can't do this without specifying YHe
+models.append(['EdS',get_eds_model()]) # CLASS can't do this without specifying YHe
 models.append(['LCDM',{'H0':75.0,'mnu':0.}])
 models.append(['wCDM Phantom',{'w0':-1.2,'mnu':0.}])
 models.append(['nuCDM',{'mnu':0.5}])
