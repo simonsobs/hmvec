@@ -231,7 +231,7 @@ class HaloModel(Cosmology):
         So rgs = R200/2 is the equivalent of rss in the NFW profile
         """
         omb = self.p['ombh2'] / self.h**2.
-        omm = self.om0
+        omm = self.omm0
         rhofunc = lambda x: rho_gas_generic_x(x,m200critz[...,None],self.zs[:,None,None],omb,omm,rhocritz[...,None,None],
                                     gamma=pparams['battaglia_gas_gamma'],
                                     rho0_A0=pparams['rho0_A0'],
@@ -294,7 +294,7 @@ class HaloModel(Cosmology):
         So rgs = R200/2 is the equivalent of rss in the NFW profile
         """
         omb = self.p['ombh2'] / self.h**2.
-        omm = self.om0
+        omm = self.omm0
         presFunc = lambda x: P_e_generic_x(x,m200critz[...,None],r200critz[...,None],self.zs[:,None,None],omb,omm,rhocritz[...,None,None],
                                     alpha=pparams['battaglia_pres_alpha'],
                                     gamma=pparams['battaglia_pres_gamma'],

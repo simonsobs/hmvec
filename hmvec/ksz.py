@@ -103,7 +103,7 @@ class kSZ(HaloModel):
                  skip_hod=False,hod_name="g",hod_corr="max",hod_param_override=None,
                  mthreshs_override=None,
                  verbose=False,
-                 b1=None,b2=None,sigz=None):
+                 b1=None,b2=None,sigz=None,engine='class'):
 
         if ms is None: ms = np.geomspace(defaults['min_mass'],defaults['max_mass'],defaults['num_mass'])
         volumes_gpc3 = np.atleast_1d(volumes_gpc3)
@@ -114,7 +114,8 @@ class kSZ(HaloModel):
         self.mu = np.linspace(-1.,1.,num_mu_bins)
         if verbose: print('Defining HaloModel')
         HaloModel.__init__(self,zs,ks,ms=ms,params=params,mass_function=mass_function,
-                 halofit=halofit,mdef=mdef,nfw_numeric=nfw_numeric,skip_nfw=skip_nfw)
+                           halofit=halofit,mdef=mdef,nfw_numeric=nfw_numeric,skip_nfw=skip_nfw,
+                           engine=engine)
         if verbose: print('Defining HaloModel: finished')
         self.kS = self.ks
         if not(skip_electron_profile):
@@ -139,8 +140,9 @@ class kSZ(HaloModel):
         self.d2vs = []
         
         self.sigma_z_func = lambda z : sigz * (1.+z)
-        zhs,hs = np.loadtxt("fiducial_cosmology_Hs.txt",unpack=True)
-        self.Hphotoz = interp1d(zhs,hs)
+        #zhs,hs = np.loadtxt("fiducial_cosmology_Hs.txt",unpack=True)
+        #self.Hphotoz = interp1d(zhs,hs)
+        self.Hphotozs = self.h_of_z(zs) # 1/Mpc units
 
         # Define log-spaced array of k values
         self.kLs = np.geomspace(get_kmin(np.max(volumes_gpc3)),kL_max,num_kL_bins)
@@ -168,12 +170,14 @@ class kSZ(HaloModel):
             
         # get P_linear and f(z)
         # on grid in z and k
-        p = self._get_matter_power(self.zs,self.kLs,nonlinear=False)
-        growth = self.results.get_redshift_evolution(
-            self.kLs, 
-            self.zs, 
-            ['growth']
-        )[:,:,0]
+        #p = self._get_matter_power(self.zs,self.kLs,nonlinear=False)
+        p = self.P_lin_slow(self.kLs,self.zs)
+        growth = self.get_growth_rate_f(self.zs)[None,...]
+        # growth = self.results.get_redshift_evolution(
+        #     self.kLs, 
+        #     self.zs, 
+        #     ['growth']
+        # )[:,:,0]
 
         self.kstars = []
         self.chistars = []
@@ -189,12 +193,12 @@ class kSZ(HaloModel):
             self.fs.append(growth[:,zindex].copy())
             z = self.zs[zindex]
             a = 1./(1.+z)
-            H = self.results.h_of_z(z)
+            H = self.h_of_z(z)
             self.kstars.append(self.ksz_radial_function(zindex))
             self.d2vs.append(  self.fs[zindex]*a*H / self.kLs )
             self.adotf.append(self.fs[zindex]*a*H)
 
-            self.chistars.append( self.results.comoving_radial_distance(z) )
+            self.chistars.append( self.comoving_radial_distance(z) )
 
             # Compute P_gg + N_gg and P_gv for fiducial and "true" parameters, as functions of k_L
             bg = self.hods['g']['bg'][zindex]
@@ -267,12 +271,12 @@ class kSZ(HaloModel):
     
 
     def ksz_radial_function(self,zindex, gasfrac = 0.9,xe=1, tau=0, params=None):
-        return ksz_radial_function(self.zs[zindex],self.pars.ombh2, self.pars.YHe, gasfrac = gasfrac,xe=xe, tau=tau, params=params)
+        return ksz_radial_function(self.zs[zindex],self.ombh2, self.YHe, gasfrac = gasfrac,xe=xe, tau=tau, params=params)
 
     def Wphoto(self,zindex):
         krs = self.krs
         z = self.zs[zindex]
-        H = self.Hphotoz(z)
+        H = self.Hphotozs[zindex]
         return np.exp(-self.sigma_z_func(z)**2.*krs**2./2./H**2.) # (mus,kLs)
     
 
@@ -375,7 +379,7 @@ def get_ksz_template_signal_snapshot(ells,volume_gpc3,z,ngal_mpc3,bg,fparams=Non
     psPge = pksz.sPges[0] if params is not None else fsPge
     
     # Get comoving distance to redshift z
-    chistar = pksz.results.comoving_radial_distance(z)
+    chistar = pksz.comoving_radial_distance(z)
 
     # Get interpolating function for P_ge^fid * P_ge^true / P_gg^{tot,fid}
     iPk = utils.interp(fksz.kS,_sanitize(fsPge * psPge / fsPgg))
@@ -606,10 +610,10 @@ def get_ksz_auto_signal_mafry(ells,volume_gpc3,zs,ngal_mpc3,bg,params=None,
         
         # Set chi_min based on k=30Mpc^-1, and chi_max from max redshift
         chi_min = ell/30.
-        chi_max = pksz.results.comoving_radial_distance(zs[-1])
+        chi_max = pksz.comoving_radial_distance(zs[-1])
         chi_int = np.geomspace(chi_min, chi_max, 100)
         k_int = ell/chi_int
-        z_int = pksz.results.redshift_at_comoving_radial_distance(chi_int)
+        z_int = pksz.redshift_at_comoving_radial_distance(chi_int)
         
         # Get integrand evaluated at z,k corresponding to Limber integral
         integrand = np.zeros(k_int.shape[0])
@@ -820,10 +824,10 @@ def get_ksz_auto_squeezed(ells,volume_gpc3,zs,ngals_mpc3,bgs,params=None,
         
         # Set chi_min based on k=30Mpc^-1, and chi_max from max redshift
         chi_min = ell/30.
-        chi_max = pksz.results.comoving_radial_distance(zs[-1])
+        chi_max = pksz.comoving_radial_distance(zs[-1])
         chi_int = np.geomspace(chi_min, chi_max, 100)
         k_int = ell/chi_int
-        z_int = pksz.results.redshift_at_comoving_radial_distance(chi_int)
+        z_int = pksz.redshift_at_comoving_radial_distance(chi_int)
         
         # Get integrand evaluated at z,k corresponding to Limber integral
         integrand = np.zeros(k_int.shape[0])

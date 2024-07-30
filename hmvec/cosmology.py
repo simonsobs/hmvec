@@ -212,6 +212,12 @@ class Cosmology(object):
         self.oml0 = 1-self.omm0-self.omk0
         try: self.as8 = self.params['as8']        
         except: self.as8 = 1
+
+        self.ombh2 = self.params['ombh2']
+        if self.engine=='class':
+            self.YHe = self._get_class_result('YHe')
+        elif self.engine=='camb':
+            self.YHe = self._camb_pars.YHe
         
     def _get_matter_power(self,zs,ks,nonlinear=False):
         PK = self.get_pk_interpolator(zs,kmax=ks.max(),var='total',nonlinear=nonlinear)
@@ -251,7 +257,7 @@ class Cosmology(object):
         W2 = Wkr(ks,R,self.p['Wkr_taylor_switch'])**2. if Ws is None else Ws**2.
         Ps = self.sPzk[:,None,:]
         integrand = Ps*W2*ks**2./2./np.pi**2.
-        sigma2 = simps(integrand,ks,axis=-1)
+        sigma2 = simps(integrand,x=ks,axis=-1)
         if ret_pk:
             return sigma2, ks, Ps
         else:
@@ -329,9 +335,16 @@ class Cosmology(object):
             D_Vs = ((1+zs)**2 * D_As**2 * zs/Hzs)**(1/3.)
             retval = self._class_results.rs_drag()/D_Vs
         return retval
+
+    def get_growth_rate_f(self,zs):
+        zs = np.atleast_1d(zs)
+        if self.engine=='camb':
+            raise NotImplementedError
+        elif self.engine=='class':
+            return np.vectorize(self._class_results.scale_independent_growth_factor_f)(zs)
     
 
-    def P_lin(self,ks,zs,knorm = 1e-4,kmax = 0.1):
+    def P_lin(self,ks,zs,knorm = 1e-4,kmax = None):
         """
         This function will provide the linear matter power spectrum used in calculation
         of sigma2. It is written as
@@ -346,16 +359,18 @@ class Cosmology(object):
         zs = np.asarray(zs)
         ks = np.asarray(ks)
         tk = self.Tk(ks,'eisenhu_osc') 
-        assert knorm<kmax
+        if kmax is None: kmax = ks.max()
+        if knorm>=kmax: raise ValueError
         PK = self.get_pk_interpolator(zs,kmax=kmax,var='total',nonlinear=False)
         pnorm = PK.P(zs, knorm,grid=True)
         tnorm = self.Tk(knorm,'eisenhu_osc') * knorm**(self.params['ns'])
         plin = (pnorm/tnorm) * tk**2. * ks**(self.params['ns'])
         return (self.as8**2.) *plin
  
-    def P_lin_slow(self,ks,zs,kmax = 0.1):
+    def P_lin_slow(self,ks,zs,kmax = None):
         zs = np.asarray(zs)
         ks = np.asarray(ks)
+        if kmax is None: kmax = ks.max()
         PK = self.get_pk_interpolator(zs,kmax=kmax,var='total',nonlinear=False)
         plin = PK.P(zs, ks,grid=True)
         return (self.as8**2.) * plin
