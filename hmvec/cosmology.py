@@ -7,7 +7,10 @@ from camb import model
 import scipy.interpolate as si
 import scipy.constants as constants
 from scipy.special import hyp2f1
-from scipy.integrate import simps
+try:
+    from scipy.integrate import simps
+except:
+    from scipy.integrate import simpson as simps
 from . import utils
 import warnings
 
@@ -34,6 +37,16 @@ def Wkr(k,R,taylor_switch=default_params['Wkr_taylor_switch']):
     ans[kR<taylor_switch] = Wkr_taylor(kR[kR<taylor_switch]) 
     return ans
 
+def get_eds_model(fb=0.15,H0=68.0,YHe=0.25):
+    # Get an Einstein-de Sitter (Lambda=0) model
+    # from baryon fraction and Hubble constant
+    om = 1.0
+    omb = fb*om
+    omc = (1-fb)*om
+    h0 = H0/100
+    omch2 = omc*h0**2
+    ombh2 = omb*h0**2
+    return {'omch2':omch2,'ombh2':ombh2,'H0':H0,'mnu':0.,'YHe':YHe}
 
 class Cosmology(object):
 
@@ -139,10 +152,13 @@ class Cosmology(object):
         except:        
             pass
 
+        YHe = params['YHe'] if 'YHe' in params.keys() else None
+        TCMB = params['TCMB'] if 'TCMB' in params.keys() else None
+        if TCMB is None:
+            TCMB = params['T_cmb'] if 'T_cmb' in params.keys() else None
         if self.engine=='camb':
             if ('sigma8' in params.keys()) or ('S8' in params.keys()):
                 print("sigma8 or S8 not supported with CAMB. Use the CLASS engine.")
-            YHe = params['YHe'] if 'YHe' in params.keys() else None
             self._camb_pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
                                         cosmomc_theta=theta,ombh2=params['ombh2'],
                                         omch2=params['omch2'], mnu=params['mnu'],
@@ -183,7 +199,8 @@ class Cosmology(object):
             passp['omega_b'] = params['ombh2']
             passp['Omega_k'] = params['omk']
             passp['n_s'] = params['ns']
-            if 'YHe' in params.keys(): passp['YHe'] = params['YHe']
+            if not(YHe is None): passp['YHe'] = YHe
+            if not(TCMB is None): passp['T_cmb'] = TCMB
             self._class_pars = dict(passp)
             self._class_results.set(passp)
             self._class_results.compute()
@@ -214,35 +231,48 @@ class Cosmology(object):
         rho = 3.*(Hz**2.)/8./np.pi/G # SI
         return rho * 1.477543e37 # in msolar / megaparsec3
     
-    def get_sigma2_R(self,R,zs):
+    def get_sigma2_R(self,R,zs,
+                     kmin=None,kmax=None,numks=None,
+                     Ws=None,ret_pk=False):
         zs = np.atleast_1d(zs)
         R = np.asarray(R)
         if R.ndim==1: R = R[None,:,None]
-        kmin = self.p['sigma2_kmin']
-        kmax = self.p['sigma2_kmax']
-        numks = self.p['sigma2_numks']
-        self.ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
+        kmin = self.p['sigma2_kmin'] if kmin is None else kmin
+        kmax = self.p['sigma2_kmax'] if kmax is None else kmax
+        numks = self.p['sigma2_numks'] if numks is None else numks
+        ks_sigma2 = np.geomspace(kmin,kmax,numks) # ks for sigma2 integral
         if self.accuracy=='high':
-            self.sPzk = self.P_lin_slow(self.ks_sigma2,zs,kmax=kmax)
+            self.sPzk = self.P_lin_slow(ks_sigma2,zs,kmax=kmax)
         elif self.accuracy=='medium':
-            self.sPzk = self.P_lin(self.ks_sigma2,zs)
+            self.sPzk = self.P_lin(ks_sigma2,zs)
         elif self.accuracy=='low':
-            self.sPzk = self.P_lin_approx(self.ks_sigma2,zs)
-        ks = self.ks_sigma2[None,None,:]
-        W2 = Wkr(ks,R,self.p['Wkr_taylor_switch'])**2.
+            self.sPzk = self.P_lin_approx(ks_sigma2,zs)
+        ks = ks_sigma2[None,None,:]
+        W2 = Wkr(ks,R,self.p['Wkr_taylor_switch'])**2. if Ws is None else Ws**2.
         Ps = self.sPzk[:,None,:]
         integrand = Ps*W2*ks**2./2./np.pi**2.
         sigma2 = simps(integrand,ks,axis=-1)
-        return sigma2
+        if ret_pk:
+            return sigma2, ks, Ps
+        else:
+            return sigma2
     
-    def get_sigma8(self,zs,exact=False):
+    def get_sigma8(self,zs,exact=False,kmin=1e-4,kmax=None,Ws=None,numks=1000,ret_pk=False):
         zs = np.atleast_1d(zs)
         if exact:
             if self.engine=='camb':
                 return self._camb_results.get_sigma8() # fix this
             elif self.engine=='class':
+                if kmax is None: kmax = self.p['sigma2_kmax']
+                self._set_class_power(zs,kmax=kmax)
                 return np.vectorize(lambda x : self._class_results.sigma(8./self.h,x))(zs)
-        else: return np.sqrt(self.get_sigma2_R(8./self.params['H0']*100.,zs))
+        else:
+            r = self.get_sigma2_R(8./self.params['H0']*100.,zs,
+                                               kmin=kmin,kmax=kmax,Ws=Ws,numks=numks,ret_pk=ret_pk)
+            if ret_pk:
+                return np.sqrt(r[0]), r[1], r[2]
+            else:
+                return np.sqrt(r)
         
     def D_growth_exact_arbitrary_norm(self,a):
         if self.engine=='camb':
@@ -338,7 +368,7 @@ class Cosmology(object):
             return self._class_results.Omega_nu
         
     def P_lin_approx(self,ks,zs,type='eisenhu_osc'):
-        zs = np.asarray(zs)
+        zs = np.atleast_1d(zs)
         ks = np.asarray(ks)
         tk = self.Tk(ks,type=type)[None,:]
         a = 1/(1+zs)
@@ -348,7 +378,7 @@ class Cosmology(object):
         omh2 = (self.params['omch2'] + self.params['ombh2'])*100**2. + self.get_Omega_nu()*self.params['H0']**2.
         kfacts = (ks/kp)**(ns-1.)  * ks
         pref = 8*np.pi**2*self.params['As']/25./omh2**2. * cspeed**4.
-        return pref * kfacts[None,:] * Dzs**2. * tk**2.
+        return  pref * kfacts[None,:] * Dzs**2. * tk**2.
 
     def Tk(self,ks,type ='eisenhu_osc'):
         """
@@ -710,6 +740,14 @@ class Cosmology(object):
             if ret.size==1: return float(ret[0])
             else: return ret
 
+    def _set_class_power(self,zs,kmax):
+        self._class_pars['output']='mPk, dTk'
+        if zs.size>100: zs = np.geomspace(zs.min(),zs.max(),100) # FIXME: CLASS z limit
+        self._class_pars['z_pk'] = ','.join([f'{z:.6f}' for z in zs]) # FIXME: z precision
+        self._class_pars['P_k_max_h/Mpc'] = kmax / self.h
+        self._class_results.set(self._class_pars)
+        self._class_results.compute()
+        
     def get_pk_interpolator(self,zs,kmax,var='weyl',nonlinear=False,return_z_k=False, k_per_logint=None, log_interp=True, extrap_kmax=None):
         var = var.lower()
         ozs = zs.copy()
@@ -726,13 +764,7 @@ class Cosmology(object):
                                                 hubble_units=False, k_hunit=False, kmax=kmax,
                                                 var1=cvar,var2=cvar, zmax=zs[-1])
         elif self.engine=='class':
-            self._class_pars['output']='mPk, dTk'
-            if zs.size>100: zs = np.geomspace(zs.min(),zs.max(),100) # FIXME: CLASS z limit
-            self._class_pars['z_pk'] = ','.join([f'{z:.6f}' for z in zs]) # FIXME: z precision
-            self._class_pars['P_k_max_h/Mpc'] = kmax / self.h
-            self._class_results.set(self._class_pars)
-            self._class_results.compute()
-            
+            self._set_class_power(zs,kmax)
             if var=='weyl':
                 pk,ks,zs = self._class_results.get_Weyl_pk_and_k_and_z(nonlinear=nonlinear, h_units=False)
             else:
