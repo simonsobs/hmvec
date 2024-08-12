@@ -227,9 +227,9 @@ class Cosmology(object):
                 return np.vectorize(lambda x : self._class_results.sigma(8./self.h,x))(zs)
         else: return np.sqrt(self.get_sigma2_R(8./self.params['H0']*100.,zs))
         
-    def D_growth_exact_arbitrary_norm(self,a):
+    def D_growth_exact_arbitrary_norm(self,a,k_camb=1e-5):
         if self.engine=='camb':
-            deltakz = self._camb_results.get_redshift_evolution(1e-5, a2z(a), ['delta_cdm']) #index: z,0
+            deltakz = self._camb_results.get_redshift_evolution(k_camb, a2z(a), ['delta_cdm']) #index: z,0
             D = deltakz[:,0]
         elif self.engine=='class':
             D = np.vectorize(self._class_results.scale_independent_growth_factor)(a2z(a))
@@ -247,6 +247,7 @@ class Cosmology(object):
         omm0 = self.omm0
         oml0 = self.oml0
         x = (oml0/omm0)**(1./3.) * a
+        # Exact analytic integral
         Dovera = np.sqrt(1.+x**3.)*(hyp2f1(5/6.,3/2.,11/6.,-x**3.))
         # An approximation to this integral
         # oma = 1./(1+x**3)
@@ -255,9 +256,9 @@ class Cosmology(object):
         return Dovera*a
 
     
-    def D_growth(self, a,type="anorm",exact=False):
+    def D_growth(self, a,type="anorm",exact=False,k_camb=1e-5):
         if exact:
-            Dfunc = self.D_growth_exact_arbitrary_norm
+            Dfunc = lambda a: self.D_growth_exact_arbitrary_norm(a,k_camb=k_camb)
         else:
             Dfunc = self.D_growth_approx
         Dtoday = Dfunc(1)

@@ -26,20 +26,22 @@ zs = np.geomspace(0.1,1000,100)
 avals = 1./(1+zs)
 Dmd = avals
 
-for engine in ['camb','class']:
-    pl = io.Plotter('rCL',xlabel='$z$',ylabel=r'$\Delta D(z) / D(z)$',xyscale='loglin')
+pl = io.Plotter('rCL',xlabel='$z$',ylabel=r'$\Delta D(z) / D(z)$',xyscale='loglin')
 
-    for model in models:
+for engine in ['camb','class']:
+
+    for i,model in enumerate(models):
         params = model[1]
         h = hcosmo.Cosmology(params,accuracy='low',engine=engine)
         label = model[0]
         dapprox = h.D_growth(avals,exact=False)
         dexact = h.D_growth(avals,exact=True)
         ddiff = (dapprox-dexact)/dexact
-        pl.add(zs,ddiff,label=label)
+        pl.add(zs,ddiff,label=label if engine=='camb' else None,ls={'camb':'-','class':'--'}[engine],color=[f'C{x}' for x in range(len(models))][i])
         print(label)
-    pl.hline(y=0)
-    pl._ax.set_ylim(-0.2,0.2)
-    pl.done(f'growth_{engine}.png')
+pl.hline(y=0)
+pl.legend('outside')
+pl._ax.set_ylim(-0.25,0.6)
+pl.done(f'growth.png')
 
               
