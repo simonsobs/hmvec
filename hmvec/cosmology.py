@@ -73,11 +73,12 @@ class Cosmology(object):
             if not(nonlinear): lens_potential_accuracy = 0
             self._camb_pars.set_for_lmax(lmax=(lmax+500), lens_potential_accuracy=lens_potential_accuracy)
             self._camb_results.calc_power_spectra(self._camb_pars)
-            powers = self.results.get_cmb_power_spectra(self._camb_pars, CMB_unit='muK',raw_cl=True)
+            powers = self._camb_results.get_cmb_power_spectra(self._camb_pars, CMB_unit='muK',raw_cl=True)
         elif self.engine=='class':
             #continue
             #self.class_results
             pass
+        return powers
 
     def angular_diameter_distance(self,z1,z2=None):
         if not(z2 is None):
@@ -153,13 +154,15 @@ class Cosmology(object):
             pass
 
         YHe = params['YHe'] if 'YHe' in params.keys() else None
+        rTensors = params['r'] if 'r' in params.keys() else None
         TCMB = params['TCMB'] if 'TCMB' in params.keys() else None
         if TCMB is None:
             TCMB = params['T_cmb'] if 'T_cmb' in params.keys() else None
         if self.engine=='camb':
             if ('sigma8' in params.keys()) or ('S8' in params.keys()):
                 print("sigma8 or S8 not supported with CAMB. Use the CLASS engine.")
-            self._camb_pars = camb.set_params(ns=params['ns'],As=params['As'],H0=H0,
+            self._camb_pars = camb.set_params(ns=params['ns'],As=params['As'],
+                                              r=rTensors,H0=H0,
                                         cosmomc_theta=theta,ombh2=params['ombh2'],
                                         omch2=params['omch2'], mnu=params['mnu'],
                                         omk = params['omk'],
@@ -171,6 +174,8 @@ class Cosmology(object):
                                         halofit_version=self.p['default_halofit'] if halofit is None else halofit,
                                         AccuracyBoost=2,pivot_scalar=params['pivot_scalar'],YHe=YHe)
             self._camb_pars.WantTransfer = True
+            if rTensors is not None:
+                self._camb_pars.WantTensors = True
             self._camb_results = camb.get_background(self._camb_pars)
         elif self.engine=='class':
             from classy import Class

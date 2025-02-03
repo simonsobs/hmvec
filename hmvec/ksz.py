@@ -17,6 +17,7 @@ from . import utils
 import numpy as np
 from scipy.interpolate import interp1d, interp2d
 from scipy.integrate import quad, dblquad
+from .cosmology import Cosmology
 
 defaults = {'min_mass':1e6, 'max_mass':1e16, 'num_mass':1000}
 constants = {
@@ -30,8 +31,14 @@ constants = {
 def Ngg(ngalMpc3): 
     return (1./ngalMpc3)
 
-def pgv(kls,):
-    pass
+
+def get_survey_volume(zmin,zmax,fsky):
+    c = Cosmology(engine='camb',accuracy='low')
+    chimin = c.comoving_radial_distance(zmin)
+    chimax = c.comoving_radial_distance(zmax)
+    return fsky * (4./3.) * np.pi * (chimax**3. - chimin**3.) / 1e9
+
+
 
 def pge_err_core(pgv_int,kstar,chistar,volume_gpc3,kss,ks_bin_edges,pggtot,Cls):
 
