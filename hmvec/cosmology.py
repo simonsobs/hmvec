@@ -154,7 +154,7 @@ class Cosmology(object):
             pass
 
         YHe = params['YHe'] if 'YHe' in params.keys() else None
-        rTensors = params['r'] if 'r' in params.keys() else None
+        rTensors = params['r'] if 'r' in params.keys() else 0.
         TCMB = params['TCMB'] if 'TCMB' in params.keys() else None
         if TCMB is None:
             TCMB = params['T_cmb'] if 'T_cmb' in params.keys() else None

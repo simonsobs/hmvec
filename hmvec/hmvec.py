@@ -396,6 +396,7 @@ class HaloModel(Cosmology):
         
         self.hods[name] = {}
         if ngal is not None:
+            ngal = np.asarray(ngal)
             try: assert ngal.size == self.zs.size
             except:
                 raise ValueError("ngal has to be a vector of size self.zs")
