@@ -332,7 +332,7 @@ class Cosmology(object):
         return val*mul
 
     def get_bao_rs_dV(self,zs):
-        zs = np.asarray(zs)
+        zs = np.atleast_1d(zs)
         if self.engine=='camb':
             retval = self._camb_results.get_BAO(zs,self._camb_pars)[:,0]
         elif self.engine=='class':
