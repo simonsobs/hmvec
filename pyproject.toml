@@ -2,6 +2,9 @@
 name = "hmvec"
 version = "0.1"
 
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"

@@ -1,6 +1,6 @@
 import numpy as np
 import os,sys
-from scipy.interpolate import interp2d,interp1d
+from scipy.interpolate import RectBivariateSpline, interp1d
 from .params import default_params
 import camb
 from camb import model
@@ -886,20 +886,23 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
 
     prefactor = hzs * Wz1s * Wz2s   / chis**2.
     zevals = gzs
-    if zs.size>1:            
-         f = interp2d(ks,zs,Pzks,bounds_error=True)     
-    else:      
-         f = interp1d(ks,Pzks[0],bounds_error=True)
+    if zs.size > 1:
+        # RectBivariateSpline expects (x, y, z) where z has shape (len(x), len(y))
+        # interp2d expected z with shape (len(y), len(x)), so we transpose
+        f = RectBivariateSpline(ks, zs, Pzks.T, kx=3, ky=3)
+    else:
+        f = interp1d(ks, Pzks[0], bounds_error=True)
     Cells = np.zeros(ells.shape)
-    for i,ell in enumerate(ells):
-        kevals = (ell+0.5)/chis
-        if zs.size>1:
-            # hack suggested in https://stackoverflow.com/questions/47087109/evaluate-the-output-from-scipy-2d-interpolation-along-a-curve
-            # to get around scipy.interpolate limitations
-            interpolated = si.dfitpack.bispeu(f.tck[0], f.tck[1], f.tck[2], f.tck[3], f.tck[4], kevals, zevals)[0]
+    for i, ell in enumerate(ells):
+        kevals = (ell + 0.5) / chis
+        if zs.size > 1:
+            # ev() evaluates at pairs of points (kevals[i], zevals[i])
+            interpolated = f.ev(kevals, zevals)
         else:
             interpolated = f(kevals)
-        if zevals.size==1: Cells[i] = interpolated * prefactor
-        else: Cells[i] = np.trapz(interpolated*prefactor,zevals)
+        if zevals.size == 1:
+            Cells[i] = np.sum(interpolated * prefactor)
+        else:
+            Cells[i] = np.trapz(interpolated * prefactor, zevals)
     return Cells
     
