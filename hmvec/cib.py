@@ -1,9 +1,9 @@
 import numpy as np
 # from matplotlib import pyplot as plt
 # from matplotlib import colors as c
-
+import os
 import astropy.constants as const
-from astropy import units as u
+# from astropy import units as u
 from scipy.optimize import fsolve
 
 def blackbody(v, T):
@@ -16,7 +16,6 @@ def blackbody(v, T):
 
 def boltzmann(x, T):
     # Defining physical constants
-    c = const.c.cgs.value
     h = const.h.cgs.value
     k_B = const.k_B.cgs.value
     
@@ -78,14 +77,31 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
             freq_array = np.ones(z.shape) * nu_sample
     else:
         raise ValueError('Need a valid reference frame to view the SEDs in.')
-    temp_array = T_o * (1+z)**alpha
+
     
-    #Get nu_o and proportionality constant A
-    nu_o_guess = np.ones(temp_array.shape, dtype=np.float64) * 5.0e12   #initial guess
-    A_guess = np.ones(temp_array.shape, dtype=np.float64) * 1.0e32      #initial guess
-    sol = fsolve(sysEquations, np.concatenate((nu_o_guess, A_guess)), args=(temp_array, beta, gamma))
-    nu_o_array = sol[:temp_array.size]
-    A_array = sol[temp_array.size:]
+    #Prepare for SED Parameter Determination
+    table = np.load( os.path.dirname(os.path.abspath(__file__)) + '/data/cib_lookup_table.npz' )
+    z_max = np.max( table['z'] )
+    temp_array = T_o * (1+z)**alpha
+    nu_o_array = np.empty(temp_array.shape)
+    A_array = np.empty(temp_array.shape)
+
+    #Calculate nu_o and proportionality constant A
+    if len( z[ z>z_max ] ): 
+        temp_array_highz = T_o * (1+z[z>z_max])**alpha
+
+        nu_o_guess = np.ones(temp_array_highz.shape, dtype=np.float64) * 5.0e12   #initial guess
+        A_guess = np.ones(temp_array_highz.shape, dtype=np.float64) * 1.0e32      #initial guess
+        sol = fsolve(sysEquations, np.concatenate((nu_o_guess, A_guess)), args=(temp_array_highz, beta, gamma))
+
+        nu_o_array[ z>z_max ] = sol[:temp_array_highz.size]
+        A_array[ z>z_max ] = sol[temp_array_highz.size:]
+    
+    #Use Lookup Table
+    if len( z[ z<=z_max ] ): 
+        nu_o_array[ z<=z_max ] = np.interp( z[z<=z_max], table['z'], table['nu_o'].flatten() )
+        A_array[ z<=z_max ] =  np.interp( z[z<=z_max], table['z'], table['A'].flatten() )
+
 
     #Range of Frequencies
     if bandpassflag:      
@@ -223,22 +239,50 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
 
     return sed
 
-def capitalPhi(z, delta):
-    """ Redshift dependent global normalization """
-    return (1+z)**delta
+
+
+def capitalPhi(z, delta, plateauFlag= False):
+    """
+    Redshift-dependent global luminosity normalization. Two models are implemented: where the luminosity monotonically increases with redshift and where the luminosity plateaus at a specific redshift.
+
+    Parameters
+    ----------
+    z : array
+        Array of all of the relevant redshifts.
+    delta : float
+        Power law exponent.
+    plateauFlag : boolean
+        Whether or not the model in which the luminosity-dependence plateaus above a max redshift should be utilized. If not, then the monotonically increasing model is used instead.
+
+    Returns
+    -------
+    array
+        Array of the contribution of redshift on luminosity.
+    """
+
+    z_p = 2
+
+    if plateauFlag:
+        return np.where( z > z_p, (1+2)**delta, (1+z)**delta )
+    else:
+        return (1+z)**delta
+
+
 
 def capitalSigma(M, logM_eff, sigma2):
     """Halo mass dependance of galaxy luminosity 
     
     Data Dictionary
-    logM_eff : log10(mass peak of specific IR emissivity) in solar masses
-    sigma2   : (standard deviation)^2 of the Gaussian
+        logM_eff : log10(mass peak of specific IR emissivity) in solar masses
+        sigma2   : (standard deviation)^2 of the Gaussian
     """
 
     return M/np.sqrt(2*np.pi*sigma2) * np.exp(- (np.log10(M)-logM_eff)**2 / (2*sigma2))
 
-def luminosity(z, M, Nks, nu, params, nuframe='obs'):  
-    """Luminosity of CIB galaxies. It depends only on mass and redshift, but is broadcasted onto a grid of [z, M, k/r]. The fit parameters are in the "params" dictionary.
+
+
+def luminosity(z, M, Nks, nu, params, nuframe='obs', halocat= True, plateauFlag= False):  
+    """Luminosity of CIB galaxies. It depends only on mass and redshift. The fit parameters are in the "params" dictionary. The luminosity is either broadcasted onto a grid of [z, M, k/r] or is returned soley for the redshifts and masses provided (the diagonal of the [z, M] grid).
 
     Arguments:
         M [1darray]: galaxy's masses
@@ -246,6 +290,8 @@ def luminosity(z, M, Nks, nu, params, nuframe='obs'):
         Nks [int]: number of k's
         nu [1darray]: either single frequency or the endpoints of a bandpass
         nuframe [str:'obs'|'rest']: frame that the nu is given in
+        halocat [bool]: If True, returns the luminosity for each redshift-halo mass pair provided (so len(z) = len(M)). If False, returns the lumnosity on the full 3D grid. 
+        plateauFlag [bool]: If True, uses "plateau" model for z-dependence. If False, uses "monotonic" model instead (see capitalPhi() for more info).
     
     Model parameters:
         alpha [float]: fit parameter - alpha 
@@ -259,6 +305,8 @@ def luminosity(z, M, Nks, nu, params, nuframe='obs'):
 
     Returns:
         [3darray, float] : luminosity[z, M, k/r]
+        --- or ---
+        [1darray, float] : luminosity as a function of a series of (z, M) pairs
     """     
     #Unpack Parameters
     a = params['alpha']
@@ -271,15 +319,28 @@ def luminosity(z, M, Nks, nu, params, nuframe='obs'):
     L_o =params['L_o']
 
     #Calculate the z and M Dependence
-    Lz = capitalPhi(z, d) * capitalTheta(nu, nuframe, z, a, b, g, Td_o)
     Lm = capitalSigma(M, logM_eff, var)
+    Lz = capitalPhi(z, d, plateauFlag) * capitalTheta(nu, nuframe, z, a, b, g, Td_o)
+    # if halocat:
+    #     Lz = capitalPhi(z[:1], d) * capitalTheta(nu, nuframe, z[:1], a, b, g, Td_o)
+    # else:
+    #     Lz = capitalPhi(z, d) * capitalTheta(nu, nuframe, z, a, b, g, Td_o)
     
     #Put Luminosity on Grid
-    Lk = np.ones(Nks)
-    Lzz, Lmm, _ = np.meshgrid(Lz,Lm,Lk, indexing='ij')
-    L = Lzz * Lmm
+    if not halocat:
+        Lk = np.ones(Nks)
+        Lzz, Lmm, _ = np.meshgrid(Lz,Lm,Lk, indexing='ij')
+        L = Lzz * Lmm
+
+    #Calculate Luminosities for a Halo Catalogue
+    elif halocat:
+        assert len(z) == len(M), f"There are {len(z)} redshifts but only {len(M)} masses! Since you've indicated that this is a halo catalogue, you must have an unambiguous number of halos."
+
+        L = Lz * Lm
 
     return L_o * L
+
+
 
 if __name__ == "__main__":
     #Testing
@@ -287,15 +348,15 @@ if __name__ == "__main__":
     # nurange = 3.0e8 / lamdarange
     # nurange = np.array([545.])*1e9
     
-    #Setup Grid
-    Nz = 100                                 # num of redshifts
-    Nm = 500                                 # num of masses
-    Nk = 1000                                # num of wavenumbers
-    redshifts = np.linspace(0.01, 6, Nz)             
-    masses = np.geomspace(1.0e10, 1.0e16, Nm)          
-    ks = np.geomspace(1.0e-3, 100.0, Nk)              # wavenumbers
+    # #Setup Grid
+    # Nz = 100                                 # num of redshifts
+    # Nm = 500                                 # num of masses
+    # Nk = 1000                                # num of wavenumbers
+    # redshifts = np.linspace(0.01, 6, Nz)             
+    # masses = np.geomspace(1.0e10, 1.0e16, Nm)          
+    # ks = np.geomspace(1.0e-3, 100.0, Nk)              # wavenumbers
     
-    cib_params = {}
+    # cib_params = {}
     cib_params['alpha'] = 0.36
     cib_params['beta'] = 1.75
     cib_params['gamma'] = 1.7
@@ -303,12 +364,23 @@ if __name__ == "__main__":
     cib_params['Td_o'] = 24.4
     cib_params['logM_eff'] = 12.6
     cib_params['var'] = 0.5
-    cib_params['L_o'] = 6.4e-8
-    
-    # redshifts = np.array([2.0])
-    # sed = capitalTheta(nurange, 'obs', redshifts, alpha=0.36, beta=1.75, gamma=1.7, T_o=24.4, plot=True)
-    # print(sed)
+    # cib_params['L_o'] = 6.4e-8      # Jy * Mpc^2 / M_sun / Hz
+    cib_params['L_o'] = 1.59e-15       # L_sol / M_sol / Hz
 
-    L = luminosity(redshifts, masses, Nk, [545e9], cib_params)
-    np.save('lum545', L)
     
+    # # redshifts = np.array([2.0])
+    # # sed = capitalTheta(nurange, 'obs', redshifts, alpha=0.36, beta=1.75, gamma=1.7, T_o=24.4, plot=True)
+    # # print(sed)
+
+    # L = luminosity(redshifts, masses, Nk, [545e9], cib_params)
+    # np.save('lum545', L)
+    
+    #Plank13 Params
+    z = np.linspace(0,10, 1e4)
+    temp_array = T_o * (1+z)**alpha
+
+    nu_o_guess = np.ones(temp_array.shape, dtype=np.float64) * 5.0e12   #initial guess
+    A_guess = np.ones(temp_array.shape, dtype=np.float64) * 1.0e32      #initial guess
+    sol = fsolve(sysEquations, np.concatenate((nu_o_guess, A_guess)), args=(temp_array, beta, gamma))
+    nu_o_array = sol[:temp_array.size]
+    A_array = sol[temp_array.size:]
