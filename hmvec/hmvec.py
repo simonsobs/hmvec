@@ -16,7 +16,7 @@ from .params import default_params, battaglia_defaults
 from .fft import generic_profile_fft
 import scipy
 
-from scipy.integrate import simps
+from scipy.integrate import simpson as simps
 from scipy.integrate import quad
 import time
 """
@@ -617,7 +617,7 @@ class HaloModel(Cosmology):
 
     def get_fcen(self, nu):
         '''Function of M and z, but defined over whole z,M,k grid'''
-        return cib.luminosity(self.zs, self.ms, len(self.ks), nu, self.cib_params) / (4.0*np.pi)
+        return cib.luminosity(self.zs, self.ms, len(self.ks), nu, self.cib_params, halocat= False) / (4.0*np.pi)
 
     def get_fsat(self, freq, cibinteg='trap', satmf='Tinker'):
         '''Function of M and z, but defined over whole z,M,k grid'''

@@ -80,7 +80,8 @@ def capitalTheta(nu_sample, nuframe, z, alpha, beta, gamma, T_o, plot=False):
 
     
     #Prepare for SED Parameter Determination
-    table = np.load( os.path.dirname(os.path.abspath(__file__)) + '/data/cib_lookup_table.npz' )
+    table = np.load( os.path.dirname(os.path.abspath(__file__)) + '/../data/cib_lookup_table.npz' )
+    # table = np.load( '../data/cib_lookup_table.npz' )
     z_max = np.max( table['z'] )
     temp_array = T_o * (1+z)**alpha
     nu_o_array = np.empty(temp_array.shape)
